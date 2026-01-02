@@ -216,7 +216,7 @@ const SignUp = () => {
               {errors.agreed && <p className="text-sm text-destructive">{errors.agreed}</p>}
             </div>
 
-            <Button type="submit" variant="glow" size="lg" className="w-full" disabled={loading}>
+            <Button type="submit" variant="hero" size="lg" className="w-full" disabled={loading}>
               {loading ? "Creating account..." : "Start Free Trial"}
             </Button>
           </form>

@@ -145,7 +145,7 @@ const SignIn = () => {
               {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
             </div>
 
-            <Button type="submit" variant="glow" size="lg" className="w-full" disabled={loading}>
+            <Button type="submit" variant="hero" size="lg" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>

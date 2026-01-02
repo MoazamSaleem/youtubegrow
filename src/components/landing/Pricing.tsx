@@ -1,204 +1,308 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { motion, useInView, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Button } from "@/components/ui/button";
 import { Check, X, Sparkles, Crown, Zap, Star, ArrowRight } from "lucide-react";
 
+gsap.registerPlugin(ScrollTrigger);
+
 const Pricing = () => {
   const [isYearly, setIsYearly] = useState(false);
+  const [hoveredPlan, setHoveredPlan] = useState<string | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
-  const isInView = useInView(sectionRef, { once: true, margin: "-100px" });
+  const cardsRef = useRef<HTMLDivElement>(null);
 
   const plans = [
     {
       name: "Free",
-      description: "Perfect for beginners",
+      description: "1 month trial",
       monthlyPrice: 0,
       yearlyPrice: 0,
       icon: Star,
       color: "from-slate-500 to-slate-400",
       features: [
-        { text: "1 channel", included: true },
+        { text: "Link 1 channel", included: true },
         { text: "Basic analytics", included: true },
         { text: "20 keywords/day", included: true },
-        { text: "2 topic ideas/day", included: true },
+        { text: "2 topics/day", included: true },
         { text: "AI analysis", included: false },
-        { text: "Script writer", included: false },
+        { text: "Competitor analysis", included: false },
+      ],
+      cta: "Start Free",
+      variant: "outline" as const,
+      popular: false,
+    },
+    {
+      name: "Basic",
+      description: "For growing creators",
+      monthlyPrice: 7,
+      yearlyPrice: 70,
+      icon: Zap,
+      color: "from-blue-500 to-cyan-500",
+      features: [
+        { text: "Link 1 channel", included: true },
+        { text: "Full analytics", included: true },
+        { text: "50 keywords/day", included: true },
+        { text: "5 topics/day", included: true },
+        { text: "Weekly AI analysis", included: true },
+        { text: "Growth milestones", included: true },
       ],
       cta: "Get Started",
+      variant: "default" as const,
       popular: false,
     },
     {
       name: "Pro",
-      description: "Most popular choice",
+      description: "Most popular",
       monthlyPrice: 15,
-      yearlyPrice: 144,
+      yearlyPrice: 120,
       icon: Crown,
-      color: "from-primary to-accent",
+      color: "from-purple-500 to-pink-500",
       features: [
         { text: "Up to 3 channels", included: true },
         { text: "Advanced analytics", included: true },
-        { text: "Unlimited keywords", included: true },
-        { text: "20 topic ideas/day", included: true },
-        { text: "Weekly AI analysis", included: true },
-        { text: "AI Script writer", included: true },
+        { text: "150 keywords/day", included: true },
+        { text: "10 topics/day", included: true },
+        { text: "AI Script Writer", included: true },
+        { text: "5 thumbnails/day", included: true },
       ],
       cta: "Get Pro",
+      variant: "hero" as const,
       popular: true,
     },
     {
-      name: "Scale",
+      name: "Advanced",
       description: "For serious creators",
-      monthlyPrice: 39,
-      yearlyPrice: 390,
+      monthlyPrice: 25,
+      yearlyPrice: 230,
       icon: Sparkles,
-      color: "from-warning to-orange-400",
+      color: "from-amber-500 to-orange-500",
       features: [
-        { text: "Unlimited channels", included: true },
-        { text: "Full analytics suite", included: true },
-        { text: "Unlimited everything", included: true },
-        { text: "Priority AI access", included: true },
-        { text: "Dedicated strategist", included: true },
-        { text: "White-glove support", included: true },
+        { text: "Up to 10 channels", included: true },
+        { text: "Unlimited keywords", included: true },
+        { text: "Unlimited AI analysis", included: true },
+        { text: "AI Script Writer", included: true },
+        { text: "Unlimited thumbnails", included: true },
+        { text: "YouTube Strategist AI", included: true },
       ],
-      cta: "Go Scale",
+      cta: "Go Advanced",
+      variant: "premium" as const,
       popular: false,
     },
   ];
 
-  return (
-    <section ref={sectionRef} id="pricing" className="section-padding relative overflow-hidden">
-      <div className="absolute inset-0 hero-bg opacity-40" />
+  const calculateDiscount = (monthly: number, yearly: number) => {
+    if (monthly === 0) return 0;
+    return Math.round(((monthly * 12 - yearly) / (monthly * 12)) * 100);
+  };
 
-      <div className="container-tight relative z-10">
-        {/* Header */}
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      const cards = cardsRef.current?.querySelectorAll(".pricing-card");
+      if (cards) {
+        gsap.fromTo(
+          cards,
+          { opacity: 0, y: 80, rotationY: 15 },
+          {
+            opacity: 1,
+            y: 0,
+            rotationY: 0,
+            duration: 0.8,
+            stagger: 0.15,
+            ease: "power3.out",
+            scrollTrigger: {
+              trigger: cardsRef.current,
+              start: "top 80%",
+              toggleActions: "play none none reverse",
+            },
+          }
+        );
+      }
+    }, sectionRef);
+
+    return () => ctx.revert();
+  }, []);
+
+  return (
+    <section ref={sectionRef} id="pricing" className="py-24 lg:py-32 relative overflow-hidden">
+      {/* Background */}
+      <div className="absolute inset-0 gradient-mesh opacity-30" />
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/5 rounded-full blur-3xl" />
+
+      <div className="container mx-auto px-4 relative z-10">
+        {/* Section Header */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5 }}
-          className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 lg:mb-16 px-4"
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6 }}
+          className="text-center max-w-2xl mx-auto mb-12"
         >
           <motion.span
             initial={{ opacity: 0, scale: 0.9 }}
-            animate={isInView ? { opacity: 1, scale: 1 } : {}}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs sm:text-sm font-medium mb-4 sm:mb-6"
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            className="inline-block px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6"
           >
-            <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
-            Simple Pricing
+            Pricing
           </motion.span>
-          <h2 className="font-display text-2xl sm:text-4xl md:text-5xl font-bold mb-3 sm:mb-4">
-            Invest in Your
-            <span className="gradient-text"> Channel's Future</span>
+          <h2 className="font-display text-3xl sm:text-4xl md:text-5xl font-medium mb-4">
+            Simple, <span className="gradient-text font-semibold">Transparent</span> Pricing
           </h2>
-          <p className="text-sm sm:text-base lg:text-lg text-muted-foreground mb-6 sm:mb-8">
-            Choose the plan that matches your ambition. Upgrade anytime as you grow.
+          <p className="text-muted-foreground text-lg mb-8">
+            Choose the plan that fits your growth goals
           </p>
 
-          {/* Toggle */}
-          <div className="inline-flex items-center gap-1 p-1 sm:p-1.5 glass rounded-full">
+          {/* Billing Toggle */}
+          <motion.div
+            whileHover={{ scale: 1.02 }}
+            className="inline-flex items-center gap-1 p-1.5 glass rounded-full"
+          >
             <button
               onClick={() => setIsYearly(false)}
-              className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all ${
-                !isYearly ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:text-foreground"
+              className={`px-5 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
+                !isYearly
+                  ? "bg-primary text-primary-foreground shadow-lg"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               Monthly
             </button>
             <button
               onClick={() => setIsYearly(true)}
-              className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all ${
-                isYearly ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:text-foreground"
+              className={`px-5 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
+                isYearly
+                  ? "bg-primary text-primary-foreground shadow-lg"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               Yearly
-              <span className="ml-1.5 text-success">-20%</span>
+              <span className="ml-2 text-xs text-success font-semibold">-23%</span>
             </button>
-          </div>
+          </motion.div>
         </motion.div>
 
-        {/* Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 max-w-5xl mx-auto px-2 sm:px-0">
-          {plans.map((plan, i) => (
+        {/* Pricing Cards */}
+        <div
+          ref={cardsRef}
+          className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 max-w-7xl mx-auto perspective-1000"
+        >
+          {plans.map((plan) => (
             <motion.div
               key={plan.name}
-              initial={{ opacity: 0, y: 20 }}
-              animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.4, delay: i * 0.1 }}
-              whileHover={{ y: -6 }}
-              className={`relative ${plan.popular ? "md:-mt-4 md:mb-4" : ""}`}
+              onMouseEnter={() => setHoveredPlan(plan.name)}
+              onMouseLeave={() => setHoveredPlan(null)}
+              whileHover={{ y: -12, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              className={`pricing-card relative ${plan.popular ? "lg:-mt-4 lg:mb-4" : ""}`}
             >
-              {plan.popular && (
-                <div className="absolute -top-3 sm:-top-4 left-1/2 -translate-x-1/2 px-3 sm:px-4 py-1 sm:py-1.5 bg-gradient-to-r from-primary to-accent rounded-full text-[10px] sm:text-xs font-bold text-primary-foreground shadow-lg z-10 whitespace-nowrap">
-                  MOST POPULAR
-                </div>
-              )}
+              {/* Popular Badge */}
+              <AnimatePresence>
+                {plan.popular && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-primary to-accent rounded-full text-xs font-semibold text-primary-foreground z-10 shadow-lg"
+                  >
+                    Most Popular
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               <div
-                className={`glass rounded-xl sm:rounded-2xl p-5 sm:p-6 h-full flex flex-col ${
-                  plan.popular ? "border-primary/40 shadow-lg shadow-primary/10" : ""
+                className={`glass rounded-2xl p-6 h-full flex flex-col transition-all duration-500 relative overflow-hidden ${
+                  plan.popular
+                    ? "border-primary/50 shadow-xl shadow-primary/10"
+                    : "hover:border-primary/30"
                 }`}
               >
-                {/* Glow Effect */}
-                {plan.popular && (
-                  <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-gradient-to-br from-primary/5 to-accent/5" />
-                )}
+                {/* Hover Gradient Background */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: hoveredPlan === plan.name ? 1 : 0 }}
+                  className={`absolute inset-0 bg-gradient-to-br ${plan.color} opacity-10`}
+                />
 
-                <div className="relative z-10 flex flex-col h-full">
-                  {/* Header */}
-                  <div className="flex items-center gap-3 mb-3 sm:mb-4">
-                    <div className={`p-2 sm:p-2.5 rounded-lg sm:rounded-xl bg-gradient-to-br ${plan.color}`}>
-                      <plan.icon className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
+                <div className="relative z-10">
+                  {/* Plan Header */}
+                  <div className="mb-5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <motion.div
+                        whileHover={{ rotate: 360 }}
+                        transition={{ duration: 0.5 }}
+                        className={`p-2 rounded-xl bg-gradient-to-br ${plan.color}`}
+                      >
+                        <plan.icon className="h-5 w-5 text-white" />
+                      </motion.div>
+                      <h3 className="font-display text-xl font-medium">{plan.name}</h3>
                     </div>
-                    <div>
-                      <h3 className="font-display text-lg sm:text-xl font-bold">{plan.name}</h3>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground">{plan.description}</p>
-                    </div>
+                    <p className="text-sm text-muted-foreground">{plan.description}</p>
                   </div>
 
                   {/* Price */}
-                  <div className="mb-4 sm:mb-6">
+                  <div className="mb-6">
                     <AnimatePresence mode="wait">
                       <motion.div
                         key={isYearly ? "yearly" : "monthly"}
-                        initial={{ opacity: 0, y: -5 }}
+                        initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 5 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        transition={{ duration: 0.2 }}
                         className="flex items-baseline gap-1"
                       >
-                        <span className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold">
-                          ${isYearly ? Math.round(plan.yearlyPrice / 12) : plan.monthlyPrice}
+                        <span className="font-display text-4xl font-semibold">
+                          ${isYearly ? plan.yearlyPrice : plan.monthlyPrice}
                         </span>
-                        <span className="text-muted-foreground text-sm">/mo</span>
+                        <span className="text-muted-foreground text-sm">
+                          /{isYearly ? "year" : "month"}
+                        </span>
                       </motion.div>
                     </AnimatePresence>
                     {isYearly && plan.monthlyPrice > 0 && (
-                      <p className="text-xs sm:text-sm text-success mt-1">Billed ${plan.yearlyPrice}/year</p>
+                      <motion.p
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-sm text-success font-medium mt-1"
+                      >
+                        Save {calculateDiscount(plan.monthlyPrice, plan.yearlyPrice)}%
+                      </motion.p>
                     )}
                   </div>
 
                   {/* Features */}
-                  <ul className="space-y-2 sm:space-y-3 mb-5 sm:mb-6 flex-1">
-                    {plan.features.map((f, j) => (
-                      <li key={j} className="flex items-center gap-2 text-xs sm:text-sm">
-                        {f.included ? (
-                          <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-success shrink-0" />
+                  <ul className="space-y-3 mb-6 flex-1">
+                    {plan.features.map((feature, featureIndex) => (
+                      <motion.li
+                        key={featureIndex}
+                        initial={{ opacity: 0, x: -10 }}
+                        whileInView={{ opacity: 1, x: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ delay: featureIndex * 0.05 }}
+                        className="flex items-start gap-2"
+                      >
+                        {feature.included ? (
+                          <Check className="h-5 w-5 text-success shrink-0 mt-0.5" />
                         ) : (
-                          <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground/40 shrink-0" />
+                          <X className="h-5 w-5 text-muted-foreground/40 shrink-0 mt-0.5" />
                         )}
-                        <span className={f.included ? "" : "text-muted-foreground/50"}>{f.text}</span>
-                      </li>
+                        <span
+                          className={`text-sm ${
+                            feature.included ? "text-foreground" : "text-muted-foreground/50"
+                          }`}
+                        >
+                          {feature.text}
+                        </span>
+                      </motion.li>
                     ))}
                   </ul>
 
                   {/* CTA */}
-                  <Button
-                    variant={plan.popular ? "glow" : "outline"}
-                    className="w-full h-10 sm:h-11 text-sm group"
-                    asChild
-                  >
+                  <Button variant={plan.variant} className="w-full group" asChild>
                     <Link to="/signup">
                       {plan.cta}
-                      <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                     </Link>
                   </Button>
                 </div>

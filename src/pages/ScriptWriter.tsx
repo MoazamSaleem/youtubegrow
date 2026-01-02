@@ -238,7 +238,7 @@ Tips: ${script.tips.join(", ")}
               <p className="text-muted-foreground mb-8">
                 Generate professional video scripts with AI. Available on Pro and Advanced plans.
               </p>
-              <Button variant="glow" onClick={() => navigate("/dashboard/billing")}>
+              <Button variant="hero" onClick={() => navigate("/dashboard/billing")}>
                 <Sparkles className="h-4 w-4 mr-2" />
                 Upgrade Now
               </Button>

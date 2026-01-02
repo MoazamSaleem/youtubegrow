@@ -1,128 +1,201 @@
-import { useRef } from "react";
-import { motion, useInView } from "framer-motion";
+import { useEffect, useRef } from "react";
+import { motion, Variants } from "framer-motion";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   BarChart3,
   Brain,
   Search,
   Lightbulb,
   Users,
-  FileText,
   Sparkles,
+  FileText,
+  Image,
   Target,
 } from "lucide-react";
 
+gsap.registerPlugin(ScrollTrigger);
+
 const Features = () => {
   const sectionRef = useRef<HTMLElement>(null);
-  const isInView = useInView(sectionRef, { once: true, margin: "-100px" });
+  const gridRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
 
   const features = [
     {
       icon: BarChart3,
       title: "Real-Time Analytics",
-      description: "Track every metric that matters with live dashboards.",
-      color: "from-blue-500 to-cyan-500",
+      description: "Track views, retention, watch time, and revenue with live updates.",
+      color: "from-blue-500/20 to-cyan-500/20",
     },
     {
       icon: Brain,
       title: "AI Channel Analysis",
-      description: "Get personalized growth strategies powered by AI.",
-      color: "from-violet-500 to-purple-500",
+      description: "Deep analysis with actionable, authentic strategies for growth.",
+      color: "from-purple-500/20 to-pink-500/20",
     },
     {
       icon: Search,
       title: "Keyword Research",
-      description: "Discover trending keywords in your niche.",
-      color: "from-orange-500 to-amber-500",
+      description: "Discover high-ranking keywords tailored to your niche.",
+      color: "from-amber-500/20 to-orange-500/20",
     },
     {
       icon: Lightbulb,
-      title: "Topic Generator",
-      description: "Never run out of video ideas with AI suggestions.",
-      color: "from-yellow-500 to-orange-500",
+      title: "Topic Suggestions",
+      description: "AI-curated ideas based on your channel's niche and trends.",
+      color: "from-yellow-500/20 to-amber-500/20",
     },
     {
       icon: Users,
-      title: "Competitor Insights",
-      description: "Analyze top performers and learn their strategies.",
-      color: "from-green-500 to-emerald-500",
-    },
-    {
-      icon: FileText,
-      title: "Script Writer",
-      description: "Generate engaging scripts optimized for retention.",
-      color: "from-pink-500 to-rose-500",
-    },
-    {
-      icon: Sparkles,
-      title: "Growth Strategist",
-      description: "Your AI coach for channel optimization.",
-      color: "from-primary to-accent",
+      title: "Competitor Analysis",
+      description: "Study competitor strategies and discover what works.",
+      color: "from-green-500/20 to-emerald-500/20",
     },
     {
       icon: Target,
-      title: "Smart Thumbnails",
-      description: "AI-powered thumbnail suggestions that convert.",
-      color: "from-indigo-500 to-blue-500",
+      title: "Growth Roadmap",
+      description: "Milestone-based growth tasks with goal celebrations.",
+      color: "from-red-500/20 to-rose-500/20",
+    },
+    {
+      icon: FileText,
+      title: "AI Script Writer",
+      description: "Generate engaging video scripts powered by advanced AI.",
+      color: "from-indigo-500/20 to-violet-500/20",
+    },
+    {
+      icon: Image,
+      title: "Thumbnail Generator",
+      description: "Create eye-catching thumbnails with AI assistance.",
+      color: "from-teal-500/20 to-cyan-500/20",
+    },
+    {
+      icon: Sparkles,
+      title: "YouTube Strategist",
+      description: "Personal AI strategist for channel growth optimization.",
+      color: "from-fuchsia-500/20 to-purple-500/20",
     },
   ];
 
-  return (
-    <section ref={sectionRef} id="features" className="section-padding relative overflow-hidden">
-      {/* Background */}
-      <div className="absolute inset-0 hero-bg opacity-50" />
-      <div className="absolute inset-0 dot-pattern opacity-30" />
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      // Header parallax
+      gsap.fromTo(
+        headerRef.current,
+        { y: 0 },
+        {
+          y: -30,
+          scrollTrigger: {
+            trigger: sectionRef.current,
+            start: "top bottom",
+            end: "top top",
+            scrub: 1,
+          },
+        }
+      );
 
-      <div className="container-tight relative z-10">
-        {/* Header */}
+      // Cards staggered reveal with 3D tilt effect
+      const cards = gridRef.current?.children;
+      if (cards) {
+        gsap.fromTo(
+          cards,
+          { opacity: 0, y: 60, rotationX: 10 },
+          {
+            opacity: 1,
+            y: 0,
+            rotationX: 0,
+            duration: 0.8,
+            stagger: { amount: 0.6, from: "start" },
+            ease: "power3.out",
+            scrollTrigger: {
+              trigger: gridRef.current,
+              start: "top 85%",
+              toggleActions: "play none none reverse",
+            },
+          }
+        );
+      }
+    }, sectionRef);
+
+    return () => ctx.revert();
+  }, []);
+
+  const headerVariants: Variants = {
+    hidden: { opacity: 0, y: 40 },
+    visible: { opacity: 1, y: 0 },
+  };
+
+  return (
+    <section ref={sectionRef} id="features" className="py-24 lg:py-32 relative overflow-hidden">
+      {/* Background */}
+      <div className="absolute inset-0 gradient-mesh opacity-30" />
+      
+      {/* Decorative blobs */}
+      <div className="absolute top-20 right-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
+      <div className="absolute bottom-20 left-0 w-80 h-80 bg-accent/5 rounded-full blur-3xl" />
+
+      <div className="container mx-auto px-4 relative z-10">
+        {/* Section Header */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5 }}
-          className="text-center max-w-2xl mx-auto mb-12 sm:mb-16 lg:mb-20 px-4"
+          ref={headerRef}
+          variants={headerVariants}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.7 }}
+          className="text-center max-w-2xl mx-auto mb-16"
         >
           <motion.span
             initial={{ opacity: 0, scale: 0.9 }}
-            animate={isInView ? { opacity: 1, scale: 1 } : {}}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs sm:text-sm font-medium mb-4 sm:mb-6"
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="inline-block px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6"
           >
-            <Target className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
-            Powerful Features
+            Features
           </motion.span>
-          <h2 className="font-display text-2xl sm:text-4xl md:text-5xl font-bold mb-3 sm:mb-4">
-            Everything to
-            <span className="gradient-text"> Dominate YouTube</span>
+          <h2 className="font-display text-3xl sm:text-4xl md:text-5xl font-medium mb-4">
+            Everything You Need to
+            <br />
+            <span className="gradient-text font-semibold">Grow Your Channel</span>
           </h2>
-          <p className="text-sm sm:text-base lg:text-lg text-muted-foreground">
-            A complete suite of AI tools designed to help you grow faster and create better content.
+          <p className="text-muted-foreground text-lg">
+            Powerful AI tools and analytics designed to accelerate your growth
           </p>
         </motion.div>
 
         {/* Features Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
-          {features.map((feature, i) => (
+        <div ref={gridRef} className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {features.map((feature, index) => (
             <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.4, delay: i * 0.05 }}
-              whileHover={{ y: -4 }}
-              className="group"
+              key={index}
+              whileHover={{ y: -8, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              className="group relative"
             >
-              <div className="glass rounded-xl sm:rounded-2xl p-4 sm:p-5 lg:p-6 h-full transition-all duration-300 hover:border-primary/30 border-gradient">
-                {/* Icon */}
-                <div
-                  className={`inline-flex p-2.5 sm:p-3 rounded-xl bg-gradient-to-br ${feature.color} mb-3 sm:mb-4 group-hover:scale-105 transition-transform`}
-                >
-                  <feature.icon className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-                </div>
+              <div className="glass rounded-2xl p-6 h-full transition-all duration-500 hover:shadow-2xl hover:shadow-primary/10 hover:border-primary/40 relative overflow-hidden">
+                {/* Gradient Background on Hover */}
+                <div className={`absolute inset-0 bg-gradient-to-br ${feature.color} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+                
+                <div className="relative z-10">
+                  {/* Icon */}
+                  <motion.div
+                    whileHover={{ rotate: [0, -10, 10, 0], scale: 1.1 }}
+                    transition={{ duration: 0.5 }}
+                    className="inline-flex p-3 rounded-2xl bg-gradient-to-br from-primary/10 to-accent/10 mb-4 group-hover:from-primary/20 group-hover:to-accent/20 transition-all"
+                  >
+                    <feature.icon className="h-6 w-6 text-primary" />
+                  </motion.div>
 
-                {/* Content */}
-                <h3 className="font-display text-base sm:text-lg font-semibold mb-1.5 sm:mb-2 group-hover:text-primary transition-colors">
-                  {feature.title}
-                </h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {feature.description}
-                </p>
+                  {/* Content */}
+                  <h3 className="font-display text-xl font-medium mb-2 text-foreground group-hover:text-primary transition-colors">
+                    {feature.title}
+                  </h3>
+                  <p className="text-muted-foreground text-sm leading-relaxed group-hover:text-foreground/80 transition-colors">
+                    {feature.description}
+                  </p>
+                </div>
               </div>
             </motion.div>
           ))}
