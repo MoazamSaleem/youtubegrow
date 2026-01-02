@@ -195,7 +195,7 @@ const KeywordsResearch = () => {
                 />
               </div>
               <Button
-                variant="hero"
+                variant="glow"
                 size="lg"
                 onClick={handleSearch}
                 disabled={isSearching || !searchQuery.trim()}

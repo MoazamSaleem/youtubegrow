@@ -1,103 +1,111 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Sparkles, Twitter, Instagram, Linkedin, Youtube, ArrowUpRight } from "lucide-react";
+import { Zap, Twitter, Instagram, Linkedin, Youtube, ArrowUpRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const Footer = () => {
   const links = {
-    product: [
+    Product: [
       { name: "Features", href: "#features" },
       { name: "Pricing", href: "#pricing" },
-      { name: "How it Works", href: "#how-it-works" },
+      { name: "Changelog", href: "#" },
       { name: "API", href: "#" },
     ],
-    company: [
+    Company: [
       { name: "About", href: "#" },
       { name: "Blog", href: "#" },
       { name: "Careers", href: "#" },
       { name: "Contact", href: "#" },
     ],
-    legal: [
+    Legal: [
       { name: "Privacy", href: "#" },
       { name: "Terms", href: "#" },
-      { name: "Cookie Policy", href: "#" },
+      { name: "Cookies", href: "#" },
     ],
   };
 
   const socials = [
-    { icon: Twitter, href: "#", label: "Twitter" },
-    { icon: Instagram, href: "#", label: "Instagram" },
-    { icon: Linkedin, href: "#", label: "LinkedIn" },
-    { icon: Youtube, href: "#", label: "YouTube" },
+    { icon: Twitter, href: "#" },
+    { icon: Instagram, href: "#" },
+    { icon: Linkedin, href: "#" },
+    { icon: Youtube, href: "#" },
   ];
 
   return (
-    <footer className="border-t border-border bg-secondary/30 relative overflow-hidden">
-      {/* Background decoration */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 rounded-full blur-3xl" />
+    <footer className="border-t border-border relative overflow-hidden">
+      <div className="absolute inset-0 aurora-bg opacity-20" />
       
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.6 }}
-        className="container mx-auto px-4 py-12 lg:py-16 relative z-10"
-      >
+      {/* CTA Section */}
+      <div className="container mx-auto px-4 py-20 relative z-10">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="glass rounded-3xl p-8 md:p-12 text-center max-w-4xl mx-auto border-glow"
+        >
+          <h2 className="font-display text-3xl md:text-4xl font-bold mb-4">
+            Ready to <span className="gradient-text">Explode Your Growth?</span>
+          </h2>
+          <p className="text-muted-foreground mb-8 max-w-xl mx-auto">
+            Join thousands of creators who are already scaling their channels with TubeGrow.
+          </p>
+          <Button variant="glow" size="lg" asChild>
+            <Link to="/signup">
+              Start Free Trial
+              <ArrowUpRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </motion.div>
+      </div>
+
+      {/* Main Footer */}
+      <div className="container mx-auto px-4 pb-12 relative z-10">
         <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-8 mb-12">
           {/* Brand */}
-          <div className="sm:col-span-2">
-            <Link to="/" className="flex items-center gap-2 mb-4 group">
-              <motion.div
-                whileHover={{ rotate: 360 }}
-                transition={{ duration: 0.5 }}
-                className="relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent"
-              >
-                <Sparkles className="h-5 w-5 text-primary-foreground" />
-              </motion.div>
-              <span className="font-display font-semibold text-xl">
+          <div className="lg:col-span-2">
+            <Link to="/" className="flex items-center gap-2 mb-4">
+              <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-accent">
+                <Zap className="h-5 w-5 text-white" />
+              </div>
+              <span className="font-display font-bold text-xl">
                 Tube<span className="gradient-text">Grow</span>
               </span>
             </Link>
-            <p className="text-muted-foreground text-sm max-w-xs mb-6 leading-relaxed">
-              AI-powered YouTube growth platform helping creators scale their audience faster.
+            <p className="text-muted-foreground text-sm max-w-xs mb-6">
+              AI-powered YouTube growth platform helping creators scale to millions.
             </p>
-            <div className="flex items-center gap-2">
-              {socials.map((social, index) => (
+            <div className="flex gap-2">
+              {socials.map((s, i) => (
                 <motion.a
-                  key={index}
-                  href={social.href}
-                  aria-label={social.label}
-                  whileHover={{ scale: 1.1, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="p-2.5 rounded-full glass hover:bg-primary hover:text-primary-foreground transition-all"
+                  key={i}
+                  href={s.href}
+                  whileHover={{ y: -3 }}
+                  className="w-10 h-10 rounded-xl glass flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-colors"
                 >
-                  <social.icon className="h-4 w-4" />
+                  <s.icon className="h-4 w-4" />
                 </motion.a>
               ))}
             </div>
           </div>
 
           {/* Links */}
-          {Object.entries({ Product: links.product, Company: links.company, Legal: links.legal }).map(
-            ([title, items]) => (
-              <div key={title}>
-                <h4 className="font-display font-medium mb-4 text-foreground">{title}</h4>
-                <ul className="space-y-3">
-                  {items.map((link) => (
-                    <li key={link.name}>
-                      <motion.a
-                        href={link.href}
-                        whileHover={{ x: 3 }}
-                        className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 group"
-                      >
-                        {link.name}
-                        <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </motion.a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )
-          )}
+          {Object.entries(links).map(([title, items]) => (
+            <div key={title}>
+              <h4 className="font-display font-semibold mb-4">{title}</h4>
+              <ul className="space-y-3">
+                {items.map((link) => (
+                  <li key={link.name}>
+                    <a
+                      href={link.href}
+                      className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {link.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
         {/* Bottom */}
@@ -109,7 +117,7 @@ const Footer = () => {
             Made with ❤️ for YouTube creators
           </p>
         </div>
-      </motion.div>
+      </div>
     </footer>
   );
 };

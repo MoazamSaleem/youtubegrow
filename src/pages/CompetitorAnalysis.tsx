@@ -226,7 +226,7 @@ const CompetitorAnalysisPage = () => {
               <p className="text-muted-foreground mb-8">
                 Study competitor strategies and discover opportunities. Available on paid plans.
               </p>
-              <Button variant="hero" onClick={() => navigate("/dashboard/billing")}>
+              <Button variant="glow" onClick={() => navigate("/dashboard/billing")}>
                 <Sparkles className="h-4 w-4 mr-2" />
                 Upgrade Now
               </Button>

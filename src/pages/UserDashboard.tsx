@@ -131,7 +131,7 @@ const UserDashboard = () => {
               <p className="text-sm text-muted-foreground mb-4">
                 You can link up to {limits.maxChannels} channel{limits.maxChannels > 1 ? "s" : ""} with your {currentPlan} plan.
               </p>
-              <Button variant="hero" size="lg">
+              <Button variant="glow" size="lg">
                 <Youtube className="h-5 w-5 mr-2" />
                 Connect YouTube
               </Button>
@@ -362,7 +362,7 @@ const UserDashboard = () => {
                   </p>
                 </div>
               </div>
-              <Button variant="hero" size="lg">
+              <Button variant="glow" size="lg">
                 <Sparkles className="h-5 w-5 mr-2" />
                 Analyze My Channel
               </Button>
