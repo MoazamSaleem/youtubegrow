@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
@@ -17,112 +18,72 @@ gsap.registerPlugin(ScrollTrigger);
 
 const Features = () => {
   const sectionRef = useRef<HTMLElement>(null);
-  const headerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   const features = [
     {
       icon: BarChart3,
       title: "Real-Time Analytics",
-      description:
-        "Track views, retention, watch time, and revenue with live updates. Filter by daily, weekly, or monthly data.",
-      gradient: "from-primary to-primary/50",
+      description: "Track views, retention, watch time, and revenue with live updates.",
     },
     {
       icon: Brain,
       title: "AI Channel Analysis",
-      description:
-        "Advanced AI powered deep analysis of your channel with actionable, authentic strategies for growth.",
-      gradient: "from-accent to-accent/50",
+      description: "Deep analysis with actionable, authentic strategies for growth.",
     },
     {
       icon: Search,
       title: "Keyword Research",
-      description:
-        "Discover high-ranking keywords tailored to your niche. Up to unlimited searches on Advanced plan.",
-      gradient: "from-warning to-warning/50",
+      description: "Discover high-ranking keywords tailored to your niche.",
     },
     {
       icon: Lightbulb,
-      title: "Daily Topic Suggestions",
-      description:
-        "Get AI-curated topic ideas based on your channel's niche and current trends.",
-      gradient: "from-primary to-accent",
+      title: "Topic Suggestions",
+      description: "AI-curated ideas based on your channel's niche and trends.",
     },
     {
       icon: Users,
       title: "Competitor Analysis",
-      description:
-        "Study competitor strategies, track their growth, and discover what works in your niche.",
-      gradient: "from-accent to-success",
+      description: "Study competitor strategies and discover what works.",
     },
     {
       icon: Target,
       title: "Growth Roadmap",
-      description:
-        "Follow milestone-based growth tasks with celebrations when you hit your goals.",
-      gradient: "from-warning to-destructive",
+      description: "Milestone-based growth tasks with goal celebrations.",
     },
     {
       icon: FileText,
       title: "AI Script Writer",
-      description:
-        "Generate engaging video scripts powered by advanced AI. Available on Pro and Advanced plans.",
-      gradient: "from-primary to-warning",
+      description: "Generate engaging video scripts powered by advanced AI.",
     },
     {
       icon: Image,
       title: "Thumbnail Generator",
-      description:
-        "Create eye-catching thumbnails with AI. Generate up to 5+ thumbnails daily.",
-      gradient: "from-accent to-primary",
+      description: "Create eye-catching thumbnails with AI assistance.",
     },
     {
       icon: Sparkles,
       title: "YouTube Strategist",
-      description:
-        "Personal AI strategist designed specifically for YouTube channel growth. Advanced plan exclusive.",
-      gradient: "from-warning to-accent",
+      description: "Personal AI strategist for channel growth optimization.",
     },
   ];
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // Header animation
-      gsap.fromTo(
-        headerRef.current,
-        { opacity: 0, y: 50 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 1,
-          ease: "power3.out",
-          scrollTrigger: {
-            trigger: headerRef.current,
-            start: "top 80%",
-            end: "top 50%",
-            toggleActions: "play none none reverse",
-          },
-        }
-      );
-
-      // Feature cards stagger animation
       const cards = gridRef.current?.children;
       if (cards) {
         gsap.fromTo(
           cards,
-          { opacity: 0, y: 60, scale: 0.95 },
+          { opacity: 0, y: 40 },
           {
             opacity: 1,
             y: 0,
-            scale: 1,
-            duration: 0.8,
-            stagger: 0.1,
-            ease: "power3.out",
+            duration: 0.6,
+            stagger: 0.08,
+            ease: "power2.out",
             scrollTrigger: {
               trigger: gridRef.current,
-              start: "top 75%",
-              end: "top 25%",
+              start: "top 80%",
               toggleActions: "play none none reverse",
             },
           }
@@ -133,41 +94,70 @@ const Features = () => {
     return () => ctx.revert();
   }, []);
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.1 },
+    },
+  };
+
+  const headerVariants = {
+    hidden: { opacity: 0, y: 30 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
+  };
+
   return (
-    <section ref={sectionRef} id="features" className="py-20 lg:py-32 relative">
+    <section ref={sectionRef} id="features" className="py-24 lg:py-32 relative overflow-hidden">
       {/* Background */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.05),transparent_70%)]" />
+      <div className="absolute inset-0 gradient-mesh opacity-30" />
 
       <div className="container mx-auto px-4 relative z-10">
         {/* Section Header */}
-        <div ref={headerRef} className="text-center max-w-2xl mx-auto mb-12 lg:mb-16">
-          <h2 className="font-display text-3xl sm:text-4xl md:text-5xl font-bold mb-4">
+        <motion.div
+          variants={containerVariants}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-100px" }}
+          className="text-center max-w-2xl mx-auto mb-16"
+        >
+          <motion.span
+            variants={headerVariants}
+            className="inline-block px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6"
+          >
+            Features
+          </motion.span>
+          <motion.h2
+            variants={headerVariants}
+            className="font-display text-3xl sm:text-4xl md:text-5xl font-medium mb-4"
+          >
             Everything You Need to
             <br />
-            <span className="gradient-text">Dominate YouTube</span>
-          </h2>
-          <p className="text-muted-foreground text-lg">
-            Powerful AI tools and analytics designed to accelerate your channel's growth
-          </p>
-        </div>
+            <span className="gradient-text font-semibold">Grow Your Channel</span>
+          </motion.h2>
+          <motion.p variants={headerVariants} className="text-muted-foreground text-lg">
+            Powerful AI tools and analytics designed to accelerate your growth
+          </motion.p>
+        </motion.div>
 
         {/* Features Grid */}
         <div
           ref={gridRef}
-          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6"
+          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5"
         >
           {features.map((feature, index) => (
-            <div key={index} className="group">
-              <div className="glass rounded-2xl p-6 h-full hover:bg-card/80 transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-1">
+            <div
+              key={index}
+              className="group relative"
+            >
+              <div className="glass rounded-2xl p-6 h-full transition-all duration-300 hover:shadow-xl hover:shadow-primary/5 hover:-translate-y-1 hover:border-primary/30">
                 {/* Icon */}
-                <div
-                  className={`inline-flex p-3 rounded-xl bg-gradient-to-br ${feature.gradient} mb-4 transition-transform group-hover:scale-110`}
-                >
-                  <feature.icon className="h-6 w-6 text-primary-foreground" />
+                <div className="inline-flex p-3 rounded-2xl bg-gradient-to-br from-primary/10 to-accent/10 mb-4 group-hover:from-primary/20 group-hover:to-accent/20 transition-all">
+                  <feature.icon className="h-6 w-6 text-primary" />
                 </div>
 
                 {/* Content */}
-                <h3 className="font-display text-xl font-semibold mb-2 text-foreground group-hover:text-primary transition-colors">
+                <h3 className="font-display text-xl font-medium mb-2 text-foreground group-hover:text-primary transition-colors">
                   {feature.title}
                 </h3>
                 <p className="text-muted-foreground text-sm leading-relaxed">
