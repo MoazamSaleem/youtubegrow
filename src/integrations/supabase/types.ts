@@ -14,16 +14,202 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      subscriptions: {
+        Row: {
+          billing_cycle: string
+          created_at: string
+          current_period_end: string
+          current_period_start: string
+          id: string
+          plan: Database["public"]["Enums"]["subscription_plan"]
+          status: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          trial_ends_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          billing_cycle?: string
+          created_at?: string
+          current_period_end?: string
+          current_period_start?: string
+          id?: string
+          plan?: Database["public"]["Enums"]["subscription_plan"]
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          trial_ends_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          billing_cycle?: string
+          created_at?: string
+          current_period_end?: string
+          current_period_start?: string
+          id?: string
+          plan?: Database["public"]["Enums"]["subscription_plan"]
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          trial_ends_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      usage_tracking: {
+        Row: {
+          channel_analyses: number | null
+          competitor_analyses: number | null
+          created_at: string
+          date: string
+          id: string
+          keywords_used: number | null
+          scripts_generated: number | null
+          thumbnails_generated: number | null
+          topics_generated: number | null
+          user_id: string
+        }
+        Insert: {
+          channel_analyses?: number | null
+          competitor_analyses?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          keywords_used?: number | null
+          scripts_generated?: number | null
+          thumbnails_generated?: number | null
+          topics_generated?: number | null
+          user_id: string
+        }
+        Update: {
+          channel_analyses?: number | null
+          competitor_analyses?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          keywords_used?: number | null
+          scripts_generated?: number | null
+          thumbnails_generated?: number | null
+          topics_generated?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      youtube_channels: {
+        Row: {
+          channel_id: string
+          channel_name: string | null
+          channel_url: string | null
+          created_at: string
+          id: string
+          is_primary: boolean | null
+          subscriber_count: number | null
+          thumbnail_url: string | null
+          updated_at: string
+          user_id: string
+          video_count: number | null
+          view_count: number | null
+        }
+        Insert: {
+          channel_id: string
+          channel_name?: string | null
+          channel_url?: string | null
+          created_at?: string
+          id?: string
+          is_primary?: boolean | null
+          subscriber_count?: number | null
+          thumbnail_url?: string | null
+          updated_at?: string
+          user_id: string
+          video_count?: number | null
+          view_count?: number | null
+        }
+        Update: {
+          channel_id?: string
+          channel_name?: string | null
+          channel_url?: string | null
+          created_at?: string
+          id?: string
+          is_primary?: boolean | null
+          subscriber_count?: number | null
+          thumbnail_url?: string | null
+          updated_at?: string
+          user_id?: string
+          video_count?: number | null
+          view_count?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "moderator" | "user"
+      subscription_plan: "free" | "basic" | "pro" | "advanced"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +336,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "moderator", "user"],
+      subscription_plan: ["free", "basic", "pro", "advanced"],
+    },
   },
 } as const
