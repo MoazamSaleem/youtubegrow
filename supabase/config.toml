@@ -1,1 +1,9 @@
 project_id = "jxhnuoclxreghspjrffk"
+
+[functions.generate-topics]
+enabled = true
+verify_jwt = false
+
+[functions.research-keywords]
+enabled = true
+verify_jwt = false
