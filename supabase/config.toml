@@ -7,3 +7,19 @@ verify_jwt = false
 [functions.research-keywords]
 enabled = true
 verify_jwt = false
+
+[functions.ai-chat]
+enabled = true
+verify_jwt = false
+
+[functions.generate-script]
+enabled = true
+verify_jwt = false
+
+[functions.analyze-competitor]
+enabled = true
+verify_jwt = false
+
+[functions.youtube-oauth]
+enabled = true
+verify_jwt = false
