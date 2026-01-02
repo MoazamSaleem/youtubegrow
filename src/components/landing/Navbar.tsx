@@ -1,11 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Menu, X, Youtube, Sparkles } from "lucide-react";
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 20);
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const navLinks = [
     { name: "Features", href: "#features" },
@@ -18,15 +28,17 @@ const Navbar = () => {
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.5 }}
-      className="fixed top-0 left-0 right-0 z-50 glass-strong"
+      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+        scrolled ? "glass-strong shadow-lg" : "bg-transparent"
+      }`}
     >
       <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-16 lg:h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group">
             <div className="relative">
-              <Youtube className="h-8 w-8 text-primary" />
-              <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
+              <Youtube className="h-8 w-8 text-primary transition-transform group-hover:scale-110" />
+              <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1 animate-pulse" />
             </div>
             <span className="font-display font-bold text-xl text-foreground">
               Tube<span className="gradient-text">Grow</span>
@@ -39,15 +51,17 @@ const Navbar = () => {
               <a
                 key={link.name}
                 href={link.href}
-                className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium"
+                className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium relative group"
               >
                 {link.name}
+                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all group-hover:w-full" />
               </a>
             ))}
           </div>
 
-          {/* Desktop Auth Buttons */}
+          {/* Desktop Auth Buttons & Theme Toggle */}
           <div className="hidden md:flex items-center gap-3">
+            <ThemeToggle />
             <Button variant="ghost" asChild>
               <Link to="/signin">Sign In</Link>
             </Button>
@@ -57,12 +71,15 @@ const Navbar = () => {
           </div>
 
           {/* Mobile Menu Toggle */}
-          <button
-            onClick={() => setIsOpen(!isOpen)}
-            className="md:hidden p-2 text-foreground"
-          >
-            {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
+          <div className="flex md:hidden items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={() => setIsOpen(!isOpen)}
+              className="p-2 text-foreground"
+            >
+              {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            </button>
+          </div>
         </div>
       </div>
 

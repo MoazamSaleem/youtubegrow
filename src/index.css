@@ -62,6 +62,59 @@
     --sidebar-border: 222 47% 16%;
     --sidebar-ring: 187 92% 50%;
   }
+
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 98%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 187 92% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 160 84% 39%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 11%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 187 92% 40%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(187 92% 40%) 0%, hsl(160 84% 39%) 100%);
+    --gradient-hero: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(220 14% 96%) 100%);
+    --gradient-card: linear-gradient(135deg, hsl(0 0% 100% / 0.8) 0%, hsl(220 14% 96% / 0.6) 100%);
+    --gradient-glow: radial-gradient(ellipse at center, hsl(187 92% 40% / 0.1) 0%, transparent 70%);
+
+    --shadow-glow: 0 0 60px hsl(187 92% 40% / 0.15);
+    --shadow-card: 0 4px 24px hsl(220 13% 91% / 0.5);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 187 92% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 187 92% 40%;
+  }
 }
 
 @layer base {
@@ -84,8 +137,16 @@
     @apply bg-card/60 backdrop-blur-xl border border-border/50;
   }
 
+  .light .glass {
+    @apply bg-card/80 backdrop-blur-xl border border-border/60 shadow-sm;
+  }
+
   .glass-strong {
     @apply bg-card/80 backdrop-blur-2xl border border-border/60;
+  }
+
+  .light .glass-strong {
+    @apply bg-card/95 backdrop-blur-2xl border border-border/70 shadow-md;
   }
 
   .gradient-text {
@@ -125,6 +186,30 @@
   .animate-gradient {
     background-size: 200% 200%;
     animation: gradient 8s ease infinite;
+  }
+
+  .gsap-fade-up {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+
+  .gsap-fade-in {
+    opacity: 0;
+  }
+
+  .gsap-scale-in {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+
+  .gsap-slide-right {
+    opacity: 0;
+    transform: translateX(-60px);
+  }
+
+  .gsap-slide-left {
+    opacity: 0;
+    transform: translateX(60px);
   }
 }
 
