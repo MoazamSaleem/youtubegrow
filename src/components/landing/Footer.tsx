@@ -1,8 +1,15 @@
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
-import { Sparkles, Twitter, Instagram, Linkedin, Youtube, ArrowUpRight } from "lucide-react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { Youtube, Sparkles, Twitter, Instagram, Linkedin } from "lucide-react";
+
+gsap.registerPlugin(ScrollTrigger);
 
 const Footer = () => {
+  const footerRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
   const links = {
     product: [
       { name: "Features", href: "#features" },
@@ -30,74 +37,112 @@ const Footer = () => {
     { icon: Youtube, href: "#", label: "YouTube" },
   ];
 
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        contentRef.current,
+        { opacity: 0, y: 30 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.8,
+          ease: "power3.out",
+          scrollTrigger: {
+            trigger: footerRef.current,
+            start: "top 90%",
+            toggleActions: "play none none reverse",
+          },
+        }
+      );
+    }, footerRef);
+
+    return () => ctx.revert();
+  }, []);
+
   return (
-    <footer className="border-t border-border bg-secondary/30 relative overflow-hidden">
-      {/* Background decoration */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 rounded-full blur-3xl" />
-      
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.6 }}
-        className="container mx-auto px-4 py-12 lg:py-16 relative z-10"
-      >
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-8 mb-12">
+    <footer
+      ref={footerRef}
+      className="border-t border-border bg-card/50"
+    >
+      <div ref={contentRef} className="container mx-auto px-4 py-10 lg:py-12">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-8 mb-10 lg:mb-12">
           {/* Brand */}
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 lg:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-4 group">
-              <motion.div
-                whileHover={{ rotate: 360 }}
-                transition={{ duration: 0.5 }}
-                className="relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent"
-              >
-                <Sparkles className="h-5 w-5 text-primary-foreground" />
-              </motion.div>
-              <span className="font-display font-semibold text-xl">
+              <div className="relative">
+                <Youtube className="h-8 w-8 text-primary transition-transform group-hover:scale-110" />
+                <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
+              </div>
+              <span className="font-display font-bold text-xl">
                 Tube<span className="gradient-text">Grow</span>
               </span>
             </Link>
-            <p className="text-muted-foreground text-sm max-w-xs mb-6 leading-relaxed">
-              AI-powered YouTube growth platform helping creators scale their audience faster.
+            <p className="text-muted-foreground text-sm max-w-xs mb-6">
+              AI-powered YouTube growth platform helping creators scale their
+              audience faster.
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {socials.map((social, index) => (
-                <motion.a
+                <a
                   key={index}
                   href={social.href}
                   aria-label={social.label}
-                  whileHover={{ scale: 1.1, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="p-2.5 rounded-full glass hover:bg-primary hover:text-primary-foreground transition-all"
+                  className="p-2 rounded-lg glass hover:bg-secondary hover:border-primary/30 transition-all"
                 >
-                  <social.icon className="h-4 w-4" />
-                </motion.a>
+                  <social.icon className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
+                </a>
               ))}
             </div>
           </div>
 
           {/* Links */}
-          {Object.entries({ Product: links.product, Company: links.company, Legal: links.legal }).map(
-            ([title, items]) => (
-              <div key={title}>
-                <h4 className="font-display font-medium mb-4 text-foreground">{title}</h4>
-                <ul className="space-y-3">
-                  {items.map((link) => (
-                    <li key={link.name}>
-                      <motion.a
-                        href={link.href}
-                        whileHover={{ x: 3 }}
-                        className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 group"
-                      >
-                        {link.name}
-                        <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </motion.a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )
-          )}
+          <div>
+            <h4 className="font-display font-semibold mb-4">Product</h4>
+            <ul className="space-y-3">
+              {links.product.map((link) => (
+                <li key={link.name}>
+                  <a
+                    href={link.href}
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {link.name}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-display font-semibold mb-4">Company</h4>
+            <ul className="space-y-3">
+              {links.company.map((link) => (
+                <li key={link.name}>
+                  <a
+                    href={link.href}
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {link.name}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-display font-semibold mb-4">Legal</h4>
+            <ul className="space-y-3">
+              {links.legal.map((link) => (
+                <li key={link.name}>
+                  <a
+                    href={link.href}
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {link.name}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
         {/* Bottom */}
@@ -109,7 +154,7 @@ const Footer = () => {
             Made with ❤️ for YouTube creators
           </p>
         </div>
-      </motion.div>
+      </div>
     </footer>
   );
 };

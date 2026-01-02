@@ -2,11 +2,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
-import { AnimatePresence } from "framer-motion";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/hooks/useTheme";
-import PageTransition from "@/components/PageTransition";
 import Index from "./pages/Index";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
@@ -22,29 +20,6 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const AnimatedRoutes = () => {
-  const location = useLocation();
-  
-  return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<PageTransition><Index /></PageTransition>} />
-        <Route path="/signin" element={<PageTransition><SignIn /></PageTransition>} />
-        <Route path="/signup" element={<PageTransition><SignUp /></PageTransition>} />
-        <Route path="/dashboard" element={<PageTransition><UserDashboard /></PageTransition>} />
-        <Route path="/dashboard/topics" element={<PageTransition><TopicIdeas /></PageTransition>} />
-        <Route path="/dashboard/keywords" element={<PageTransition><KeywordsResearch /></PageTransition>} />
-        <Route path="/dashboard/billing" element={<PageTransition><Billing /></PageTransition>} />
-        <Route path="/dashboard/chat" element={<PageTransition><AIChat /></PageTransition>} />
-        <Route path="/dashboard/scripts" element={<PageTransition><ScriptWriter /></PageTransition>} />
-        <Route path="/dashboard/competitors" element={<PageTransition><CompetitorAnalysis /></PageTransition>} />
-        <Route path="/admin" element={<PageTransition><AdminDashboard /></PageTransition>} />
-        <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />
-      </Routes>
-    </AnimatePresence>
-  );
-};
-
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -53,7 +28,21 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
-            <AnimatedRoutes />
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/signin" element={<SignIn />} />
+              <Route path="/signup" element={<SignUp />} />
+              <Route path="/dashboard" element={<UserDashboard />} />
+              <Route path="/dashboard/topics" element={<TopicIdeas />} />
+              <Route path="/dashboard/keywords" element={<KeywordsResearch />} />
+              <Route path="/dashboard/billing" element={<Billing />} />
+              <Route path="/dashboard/chat" element={<AIChat />} />
+              <Route path="/dashboard/scripts" element={<ScriptWriter />} />
+              <Route path="/dashboard/competitors" element={<CompetitorAnalysis />} />
+              <Route path="/admin" element={<AdminDashboard />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

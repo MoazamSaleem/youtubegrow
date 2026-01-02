@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Menu, X, Sparkles, ArrowRight } from "lucide-react";
+import { Menu, X, Youtube, Sparkles } from "lucide-react";
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -27,49 +27,46 @@ const Navbar = () => {
     <motion.nav
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
-      className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-5xl transition-all duration-500 ${
-        scrolled
-          ? "glass-strong rounded-full shadow-xl"
-          : "bg-transparent"
+      transition={{ duration: 0.5 }}
+      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+        scrolled ? "glass-strong shadow-lg" : "bg-transparent"
       }`}
     >
-      <div className="px-4 lg:px-6">
-        <div className="flex items-center justify-between h-14 lg:h-16">
+      <div className="container mx-auto px-4">
+        <div className="flex items-center justify-between h-16 lg:h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
+            <div className="relative">
+              <Youtube className="h-8 w-8 text-primary transition-transform group-hover:scale-110" />
+              <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1 animate-pulse" />
             </div>
-            <span className="font-display font-semibold text-xl text-foreground">
+            <span className="font-display font-bold text-xl text-foreground">
               Tube<span className="gradient-text">Grow</span>
             </span>
           </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center gap-1">
+          <div className="hidden md:flex items-center gap-8">
             {navLinks.map((link) => (
               <a
                 key={link.name}
                 href={link.href}
-                className="px-4 py-2 text-muted-foreground hover:text-foreground transition-colors text-sm font-medium rounded-full hover:bg-secondary"
+                className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium relative group"
               >
                 {link.name}
+                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all group-hover:w-full" />
               </a>
             ))}
           </div>
 
           {/* Desktop Auth Buttons & Theme Toggle */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-3">
             <ThemeToggle />
-            <Button variant="ghost" size="sm" asChild>
+            <Button variant="ghost" asChild>
               <Link to="/signin">Sign In</Link>
             </Button>
-            <Button variant="hero" size="sm" asChild>
-              <Link to="/signup" className="flex items-center gap-2">
-                Get Started
-                <ArrowRight className="h-4 w-4" />
-              </Link>
+            <Button variant="hero" asChild>
+              <Link to="/signup">Start Free Trial</Link>
             </Button>
           </div>
 
@@ -78,9 +75,9 @@ const Navbar = () => {
             <ThemeToggle />
             <button
               onClick={() => setIsOpen(!isOpen)}
-              className="p-2 text-foreground rounded-full hover:bg-secondary transition-colors"
+              className="p-2 text-foreground"
             >
-              {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
           </div>
         </div>
@@ -90,29 +87,28 @@ const Navbar = () => {
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, height: 0, y: -10 }}
-            animate={{ opacity: 1, height: "auto", y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -10 }}
-            transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-            className="md:hidden overflow-hidden rounded-b-3xl glass-strong border-t border-border/50 mt-2"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="md:hidden glass-strong border-t border-border"
           >
-            <div className="px-4 py-4 space-y-2">
+            <div className="container mx-auto px-4 py-4 space-y-4">
               {navLinks.map((link) => (
                 <a
                   key={link.name}
                   href={link.href}
                   onClick={() => setIsOpen(false)}
-                  className="block text-muted-foreground hover:text-foreground transition-colors py-3 px-4 rounded-xl hover:bg-secondary"
+                  className="block text-muted-foreground hover:text-foreground transition-colors py-2"
                 >
                   {link.name}
                 </a>
               ))}
-              <div className="pt-4 border-t border-border space-y-2">
+              <div className="pt-4 border-t border-border space-y-3">
                 <Button variant="outline" className="w-full" asChild>
                   <Link to="/signin">Sign In</Link>
                 </Button>
                 <Button variant="hero" className="w-full" asChild>
-                  <Link to="/signup">Get Started</Link>
+                  <Link to="/signup">Start Free Trial</Link>
                 </Button>
               </div>
             </div>
