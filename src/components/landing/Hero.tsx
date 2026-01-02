@@ -1,116 +1,131 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Play, Sparkles, Star } from "lucide-react";
-import gsap from "gsap";
+import { ArrowRight, Play, Star, CheckCircle2, TrendingUp, Users, Zap } from "lucide-react";
 
 const Hero = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const orbsRef = useRef<HTMLDivElement>(null);
   
   const { scrollYProgress } = useScroll({
     target: containerRef,
     offset: ["start start", "end start"],
   });
 
-  const y = useTransform(scrollYProgress, [0, 1], ["0%", "50%"]);
-  const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
-
-  useEffect(() => {
-    if (!orbsRef.current) return;
-    
-    const orbs = orbsRef.current.querySelectorAll(".orb");
-    orbs.forEach((orb, i) => {
-      gsap.to(orb, {
-        x: `random(-100, 100)`,
-        y: `random(-100, 100)`,
-        duration: `random(15, 25)`,
-        repeat: -1,
-        yoyo: true,
-        ease: "sine.inOut",
-        delay: i * 0.5,
-      });
-    });
-  }, []);
+  const y = useTransform(scrollYProgress, [0, 1], ["0%", "30%"]);
+  const opacity = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
 
   const stats = [
-    { value: "50K+", label: "Active Creators" },
-    { value: "2.5B", label: "Views Generated" },
-    { value: "4.9", label: "User Rating", icon: Star },
+    { value: "50K+", label: "Creators", icon: Users },
+    { value: "2.5B", label: "Views Generated", icon: TrendingUp },
+    { value: "4.9", label: "Rating", icon: Star },
+  ];
+
+  const features = [
+    "AI-powered analytics",
+    "Viral topic finder",
+    "Competitor tracking",
   ];
 
   return (
     <section
       ref={containerRef}
-      className="relative min-h-screen flex items-center justify-center overflow-hidden pt-20"
+      className="relative min-h-[100svh] flex items-center justify-center overflow-hidden pt-16 sm:pt-20"
     >
-      {/* Animated Background */}
-      <div className="absolute inset-0 aurora-bg" />
-      <div className="absolute inset-0 noise pointer-events-none" />
+      {/* Background */}
+      <div className="absolute inset-0 hero-bg" />
+      <div className="absolute inset-0 grid-pattern opacity-40" />
       
-      {/* Floating Orbs */}
-      <div ref={orbsRef} className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="orb absolute top-1/4 left-1/4 w-[500px] h-[500px] rounded-full bg-primary/20 blur-[120px]" />
-        <div className="orb absolute bottom-1/4 right-1/4 w-[400px] h-[400px] rounded-full bg-accent/20 blur-[100px]" />
-        <div className="orb absolute top-1/2 right-1/3 w-[300px] h-[300px] rounded-full bg-primary/15 blur-[80px]" />
+      {/* Floating Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <motion.div
+          animate={{ y: [-20, 20, -20] }}
+          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute top-1/4 left-[10%] w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-primary/40"
+        />
+        <motion.div
+          animate={{ y: [20, -20, 20] }}
+          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute top-1/3 right-[15%] w-2 h-2 sm:w-4 sm:h-4 rounded-full bg-accent/40"
+        />
+        <motion.div
+          animate={{ y: [-15, 15, -15] }}
+          transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute bottom-1/3 left-[20%] w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-primary/30"
+        />
       </div>
 
-      {/* Grid Pattern */}
-      <div className="absolute inset-0 bg-[linear-gradient(hsl(var(--border)/0.5)_1px,transparent_1px),linear-gradient(90deg,hsl(var(--border)/0.5)_1px,transparent_1px)] bg-[size:100px_100px] [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
-
-      <motion.div style={{ y, opacity }} className="container mx-auto px-4 relative z-10">
-        <div className="max-w-5xl mx-auto text-center">
+      <motion.div style={{ y, opacity }} className="container-tight relative z-10 py-8 sm:py-12 lg:py-20">
+        <div className="max-w-4xl mx-auto text-center">
           {/* Badge */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass border-primary/20 mb-8"
+            transition={{ duration: 0.5 }}
+            className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full glass border-primary/20 mb-6 sm:mb-8"
           >
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium">AI-Powered YouTube Growth Platform</span>
+            <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
+            <span className="text-xs sm:text-sm font-medium">AI-Powered YouTube Growth</span>
           </motion.div>
 
           {/* Headline */}
           <motion.h1
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.1 }}
-            className="font-display text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold leading-[0.95] mb-6 tracking-tight"
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="font-display text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-[1.1] mb-4 sm:mb-6 tracking-tight px-2"
           >
-            Scale Your
-            <br />
-            <span className="gradient-text text-glow">YouTube Empire</span>
+            Grow Your YouTube
+            <br className="hidden sm:block" />
+            <span className="sm:hidden"> </span>
+            <span className="gradient-text">10x Faster</span>
           </motion.h1>
 
           {/* Subheadline */}
           <motion.p
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed"
+            transition={{ duration: 0.5, delay: 0.2 }}
+            className="text-base sm:text-lg lg:text-xl text-muted-foreground max-w-2xl mx-auto mb-6 sm:mb-8 leading-relaxed px-4"
           >
-            Unlock AI-driven analytics, viral topic ideas, and growth strategies
-            that help creators 10x their channel performance.
+            AI analytics, viral topics, and growth strategies that help creators 
+            scale their channels smarter, not harder.
           </motion.p>
+
+          {/* Feature Pills */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.25 }}
+            className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-8 sm:mb-10 px-4"
+          >
+            {features.map((feature, i) => (
+              <div 
+                key={i}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary/50 text-xs sm:text-sm"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                {feature}
+              </div>
+            ))}
+          </motion.div>
 
           {/* CTAs */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.3 }}
-            className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16"
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 mb-10 sm:mb-16 px-4"
           >
-            <Button variant="glow" size="xl" asChild className="group min-w-[220px]">
+            <Button variant="glow" size="lg" asChild className="w-full sm:w-auto min-w-[200px] h-12 sm:h-13 text-base group">
               <Link to="/signup">
                 Start Free Trial
-                <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 ml-2 transition-transform group-hover:translate-x-1" />
               </Link>
             </Button>
-            <Button variant="glass" size="lg" className="group gap-2">
-              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/20 group-hover:bg-primary/30 transition-colors">
-                <Play className="h-4 w-4 text-primary fill-primary" />
+            <Button variant="outline" size="lg" className="w-full sm:w-auto h-12 sm:h-13 text-base gap-2">
+              <div className="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/10">
+                <Play className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-primary fill-primary ml-0.5" />
               </div>
               Watch Demo
             </Button>
@@ -120,44 +135,45 @@ const Hero = () => {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
-            className="flex flex-wrap items-center justify-center gap-8 sm:gap-16"
+            transition={{ duration: 0.5, delay: 0.4 }}
+            className="grid grid-cols-3 gap-4 sm:gap-8 max-w-md sm:max-w-lg mx-auto px-4"
           >
             {stats.map((stat, i) => (
               <div key={i} className="text-center">
-                <div className="flex items-center justify-center gap-1 mb-1">
-                  {stat.icon && <stat.icon className="h-5 w-5 text-warning fill-warning" />}
-                  <span className="font-display text-3xl sm:text-4xl font-bold">{stat.value}</span>
+                <div className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1">
+                  {stat.icon === Star && <stat.icon className="h-4 w-4 sm:h-5 sm:w-5 text-warning fill-warning" />}
+                  <span className="font-display text-xl sm:text-3xl font-bold">{stat.value}</span>
                 </div>
-                <span className="text-sm text-muted-foreground">{stat.label}</span>
+                <span className="text-[10px] sm:text-sm text-muted-foreground">{stat.label}</span>
               </div>
             ))}
           </motion.div>
         </div>
 
-        {/* Bento Preview */}
+        {/* Dashboard Preview */}
         <motion.div
-          initial={{ opacity: 0, y: 60 }}
+          initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.5 }}
-          className="mt-20 max-w-6xl mx-auto"
+          transition={{ duration: 0.6, delay: 0.5 }}
+          className="mt-12 sm:mt-16 lg:mt-20 max-w-5xl mx-auto px-2 sm:px-0"
         >
-          <div className="grid grid-cols-12 gap-4">
-            {/* Main Dashboard Card */}
-            <motion.div
-              whileHover={{ y: -5 }}
-              className="col-span-12 lg:col-span-8 glass rounded-3xl p-6 border-glow"
-            >
-              <div className="flex items-center gap-2 mb-6">
-                <div className="flex gap-1.5">
-                  <div className="w-3 h-3 rounded-full bg-destructive/70" />
-                  <div className="w-3 h-3 rounded-full bg-warning/70" />
-                  <div className="w-3 h-3 rounded-full bg-success/70" />
+          <div className="relative">
+            {/* Glow effect behind */}
+            <div className="absolute inset-0 bg-gradient-to-t from-primary/20 to-transparent blur-3xl -z-10" />
+            
+            <div className="glass rounded-xl sm:rounded-2xl lg:rounded-3xl p-3 sm:p-4 lg:p-6 border-primary/10">
+              {/* Window Controls */}
+              <div className="flex items-center gap-1.5 sm:gap-2 mb-3 sm:mb-4 lg:mb-6">
+                <div className="flex gap-1 sm:gap-1.5">
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-destructive/60" />
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-warning/60" />
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-success/60" />
                 </div>
-                <span className="text-xs text-muted-foreground ml-2">Analytics Dashboard</span>
+                <span className="text-[10px] sm:text-xs text-muted-foreground ml-2">Analytics Dashboard</span>
               </div>
               
-              <div className="grid grid-cols-4 gap-4 mb-6">
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-3 sm:mb-4 lg:mb-6">
                 {[
                   { label: "Views", value: "2.4M", change: "+23%" },
                   { label: "Subscribers", value: "45.2K", change: "+12%" },
@@ -166,75 +182,30 @@ const Hero = () => {
                 ].map((stat, i) => (
                   <motion.div
                     key={i}
-                    initial={{ opacity: 0, scale: 0.9 }}
+                    initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.7 + i * 0.1 }}
-                    className="bg-secondary/50 rounded-2xl p-4"
+                    transition={{ delay: 0.6 + i * 0.05 }}
+                    className="bg-secondary/40 rounded-lg sm:rounded-xl p-2.5 sm:p-3 lg:p-4"
                   >
-                    <p className="text-xs text-muted-foreground mb-1">{stat.label}</p>
-                    <p className="font-display text-xl font-bold">{stat.value}</p>
-                    <p className="text-xs text-success font-medium">{stat.change}</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5 sm:mb-1">{stat.label}</p>
+                    <p className="font-display text-sm sm:text-lg lg:text-xl font-bold">{stat.value}</p>
+                    <p className="text-[10px] sm:text-xs text-success font-medium">{stat.change}</p>
                   </motion.div>
                 ))}
               </div>
 
-              {/* Chart Placeholder */}
-              <div className="h-40 bg-secondary/30 rounded-2xl flex items-end p-4 gap-2">
-                {Array.from({ length: 24 }).map((_, i) => (
+              {/* Chart */}
+              <div className="h-24 sm:h-32 lg:h-40 bg-secondary/30 rounded-lg sm:rounded-xl flex items-end p-2 sm:p-3 lg:p-4 gap-1 sm:gap-1.5 lg:gap-2">
+                {Array.from({ length: 12 }).map((_, i) => (
                   <motion.div
                     key={i}
                     initial={{ height: 0 }}
-                    animate={{ height: `${20 + Math.random() * 70}%` }}
-                    transition={{ delay: 0.8 + i * 0.03, duration: 0.5 }}
-                    className="flex-1 bg-gradient-to-t from-primary/60 to-primary rounded-t"
+                    animate={{ height: `${25 + Math.random() * 65}%` }}
+                    transition={{ delay: 0.7 + i * 0.03, duration: 0.4 }}
+                    className="flex-1 bg-gradient-to-t from-primary/50 to-primary rounded-t sm:rounded-t-sm"
                   />
                 ))}
               </div>
-            </motion.div>
-
-            {/* Side Cards */}
-            <div className="col-span-12 lg:col-span-4 space-y-4">
-              <motion.div
-                whileHover={{ y: -3 }}
-                className="glass rounded-3xl p-5 border-glow"
-              >
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-                    <Sparkles className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <p className="font-semibold">AI Suggestions</p>
-                    <p className="text-xs text-muted-foreground">5 new ideas</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {["Viral topic detected", "Trending keyword alert", "Optimal upload time"].map((item, i) => (
-                    <div key={i} className="flex items-center gap-2 text-sm">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                      <span className="text-muted-foreground">{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-
-              <motion.div
-                whileHover={{ y: -3 }}
-                className="glass rounded-3xl p-5 border-glow"
-              >
-                <p className="text-xs text-muted-foreground mb-3">Growth Score</p>
-                <div className="flex items-end gap-2">
-                  <span className="font-display text-4xl font-bold gradient-text">92</span>
-                  <span className="text-success text-sm font-medium mb-1">+8 this week</span>
-                </div>
-                <div className="mt-4 h-2 bg-secondary rounded-full overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: "92%" }}
-                    transition={{ delay: 1, duration: 1 }}
-                    className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
-                  />
-                </div>
-              </motion.div>
             </div>
           </div>
         </motion.div>
