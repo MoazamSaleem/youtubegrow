@@ -230,7 +230,7 @@ const Billing = () => {
                   </ul>
 
                   <Button
-                    variant={isCurrentPlan ? "outline" : plan.popular ? "hero" : "default"}
+                    variant={isCurrentPlan ? "outline" : plan.popular ? "glow" : "default"}
                     className="w-full"
                     disabled={isCurrentPlan || upgradingPlan !== null}
                     onClick={() => handleUpgrade(plan.key)}

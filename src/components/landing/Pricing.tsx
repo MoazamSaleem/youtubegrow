@@ -1,21 +1,17 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { motion, useInView, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Check, X, Sparkles, Crown, Zap, Star, ArrowRight } from "lucide-react";
-
-gsap.registerPlugin(ScrollTrigger);
 
 const Pricing = () => {
   const [isYearly, setIsYearly] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
-  const cardsRef = useRef<HTMLDivElement>(null);
+  const isInView = useInView(sectionRef, { once: true, margin: "-100px" });
 
   const plans = [
     {
-      name: "Starter",
+      name: "Free",
       description: "Perfect for beginners",
       monthlyPrice: 0,
       yearlyPrice: 0,
@@ -29,7 +25,7 @@ const Pricing = () => {
         { text: "AI analysis", included: false },
         { text: "Script writer", included: false },
       ],
-      cta: "Start Free",
+      cta: "Get Started",
       popular: false,
     },
     {
@@ -70,151 +66,124 @@ const Pricing = () => {
     },
   ];
 
-  useEffect(() => {
-    const ctx = gsap.context(() => {
-      const cards = cardsRef.current?.querySelectorAll(".pricing-card");
-      if (cards) {
-        gsap.fromTo(
-          cards,
-          { opacity: 0, y: 60, rotateX: -15 },
-          {
-            opacity: 1,
-            y: 0,
-            rotateX: 0,
-            duration: 0.8,
-            stagger: 0.15,
-            ease: "power3.out",
-            scrollTrigger: {
-              trigger: cardsRef.current,
-              start: "top 80%",
-            },
-          }
-        );
-      }
-    }, sectionRef);
-
-    return () => ctx.revert();
-  }, []);
-
   return (
-    <section ref={sectionRef} id="pricing" className="py-32 relative overflow-hidden">
-      <div className="absolute inset-0 aurora-bg opacity-40" />
-      <div className="absolute inset-0 noise pointer-events-none" />
+    <section ref={sectionRef} id="pricing" className="section-padding relative overflow-hidden">
+      <div className="absolute inset-0 hero-bg opacity-40" />
 
-      <div className="container mx-auto px-4 relative z-10">
+      <div className="container-tight relative z-10">
         {/* Header */}
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="text-center max-w-3xl mx-auto mb-16"
+          initial={{ opacity: 0, y: 20 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.5 }}
+          className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 lg:mb-16 px-4"
         >
           <motion.span
             initial={{ opacity: 0, scale: 0.9 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={{ once: true }}
-            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-sm font-medium mb-6"
+            animate={isInView ? { opacity: 1, scale: 1 } : {}}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs sm:text-sm font-medium mb-4 sm:mb-6"
           >
-            <Zap className="h-4 w-4 text-primary" />
+            <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
             Simple Pricing
           </motion.span>
-          <h2 className="font-display text-4xl sm:text-5xl md:text-6xl font-bold mb-6">
+          <h2 className="font-display text-2xl sm:text-4xl md:text-5xl font-bold mb-3 sm:mb-4">
             Invest in Your
-            <br />
-            <span className="gradient-text">Channel's Future</span>
+            <span className="gradient-text"> Channel's Future</span>
           </h2>
-          <p className="text-lg text-muted-foreground mb-8">
+          <p className="text-sm sm:text-base lg:text-lg text-muted-foreground mb-6 sm:mb-8">
             Choose the plan that matches your ambition. Upgrade anytime as you grow.
           </p>
 
           {/* Toggle */}
-          <div className="inline-flex items-center gap-1 p-1.5 glass rounded-full">
+          <div className="inline-flex items-center gap-1 p-1 sm:p-1.5 glass rounded-full">
             <button
               onClick={() => setIsYearly(false)}
-              className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all ${
-                !isYearly ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground"
+              className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all ${
+                !isYearly ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               Monthly
             </button>
             <button
               onClick={() => setIsYearly(true)}
-              className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all ${
-                isYearly ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground"
+              className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all ${
+                isYearly ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               Yearly
-              <span className="ml-2 text-success">-20%</span>
+              <span className="ml-1.5 text-success">-20%</span>
             </button>
           </div>
         </motion.div>
 
         {/* Cards */}
-        <div ref={cardsRef} className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto perspective-1000">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 max-w-5xl mx-auto px-2 sm:px-0">
           {plans.map((plan, i) => (
             <motion.div
               key={plan.name}
-              whileHover={{ y: -12, scale: 1.03 }}
-              transition={{ type: "spring", stiffness: 400, damping: 25 }}
-              className={`pricing-card relative ${plan.popular ? "md:-mt-6 md:mb-6" : ""}`}
+              initial={{ opacity: 0, y: 20 }}
+              animate={isInView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.4, delay: i * 0.1 }}
+              whileHover={{ y: -6 }}
+              className={`relative ${plan.popular ? "md:-mt-4 md:mb-4" : ""}`}
             >
               {plan.popular && (
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-gradient-to-r from-primary to-accent rounded-full text-xs font-bold text-white shadow-lg z-10">
+                <div className="absolute -top-3 sm:-top-4 left-1/2 -translate-x-1/2 px-3 sm:px-4 py-1 sm:py-1.5 bg-gradient-to-r from-primary to-accent rounded-full text-[10px] sm:text-xs font-bold text-primary-foreground shadow-lg z-10 whitespace-nowrap">
                   MOST POPULAR
                 </div>
               )}
 
               <div
-                className={`glass rounded-3xl p-6 h-full flex flex-col relative overflow-hidden ${
-                  plan.popular ? "border-primary/50 shadow-xl shadow-primary/10" : ""
+                className={`glass rounded-xl sm:rounded-2xl p-5 sm:p-6 h-full flex flex-col ${
+                  plan.popular ? "border-primary/40 shadow-lg shadow-primary/10" : ""
                 }`}
               >
                 {/* Glow Effect */}
                 {plan.popular && (
-                  <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-accent/10" />
+                  <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-gradient-to-br from-primary/5 to-accent/5" />
                 )}
 
-                <div className="relative z-10">
+                <div className="relative z-10 flex flex-col h-full">
                   {/* Header */}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className={`p-2.5 rounded-xl bg-gradient-to-br ${plan.color}`}>
-                      <plan.icon className="h-5 w-5 text-white" />
+                  <div className="flex items-center gap-3 mb-3 sm:mb-4">
+                    <div className={`p-2 sm:p-2.5 rounded-lg sm:rounded-xl bg-gradient-to-br ${plan.color}`}>
+                      <plan.icon className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                     </div>
                     <div>
-                      <h3 className="font-display text-xl font-bold">{plan.name}</h3>
-                      <p className="text-xs text-muted-foreground">{plan.description}</p>
+                      <h3 className="font-display text-lg sm:text-xl font-bold">{plan.name}</h3>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">{plan.description}</p>
                     </div>
                   </div>
 
                   {/* Price */}
-                  <div className="mb-6">
+                  <div className="mb-4 sm:mb-6">
                     <AnimatePresence mode="wait">
                       <motion.div
                         key={isYearly ? "yearly" : "monthly"}
-                        initial={{ opacity: 0, y: -10 }}
+                        initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
+                        exit={{ opacity: 0, y: 5 }}
                         className="flex items-baseline gap-1"
                       >
-                        <span className="font-display text-5xl font-bold">
+                        <span className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold">
                           ${isYearly ? Math.round(plan.yearlyPrice / 12) : plan.monthlyPrice}
                         </span>
-                        <span className="text-muted-foreground">/mo</span>
+                        <span className="text-muted-foreground text-sm">/mo</span>
                       </motion.div>
                     </AnimatePresence>
                     {isYearly && plan.monthlyPrice > 0 && (
-                      <p className="text-sm text-success mt-1">Billed ${plan.yearlyPrice}/year</p>
+                      <p className="text-xs sm:text-sm text-success mt-1">Billed ${plan.yearlyPrice}/year</p>
                     )}
                   </div>
 
                   {/* Features */}
-                  <ul className="space-y-3 mb-6 flex-1">
+                  <ul className="space-y-2 sm:space-y-3 mb-5 sm:mb-6 flex-1">
                     {plan.features.map((f, j) => (
-                      <li key={j} className="flex items-center gap-2 text-sm">
+                      <li key={j} className="flex items-center gap-2 text-xs sm:text-sm">
                         {f.included ? (
-                          <Check className="h-4 w-4 text-success shrink-0" />
+                          <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-success shrink-0" />
                         ) : (
-                          <X className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+                          <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground/40 shrink-0" />
                         )}
                         <span className={f.included ? "" : "text-muted-foreground/50"}>{f.text}</span>
                       </li>
@@ -224,12 +193,12 @@ const Pricing = () => {
                   {/* CTA */}
                   <Button
                     variant={plan.popular ? "glow" : "outline"}
-                    className="w-full group"
+                    className="w-full h-10 sm:h-11 text-sm group"
                     asChild
                   >
                     <Link to="/signup">
                       {plan.cta}
-                      <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                      <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 ml-2 group-hover:translate-x-1 transition-transform" />
                     </Link>
                   </Button>
                 </div>
