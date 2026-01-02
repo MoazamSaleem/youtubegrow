@@ -1,84 +1,62 @@
-import { useEffect, useRef } from "react";
+import { useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { Link2, BarChart3, Brain, TrendingUp, ArrowRight } from "lucide-react";
+import { Link2, BarChart3, Brain, Rocket, Check } from "lucide-react";
 
 gsap.registerPlugin(ScrollTrigger);
 
 const HowItWorks = () => {
   const sectionRef = useRef<HTMLElement>(null);
   const stepsRef = useRef<HTMLDivElement>(null);
-  const lineRef = useRef<HTMLDivElement>(null);
 
   const steps = [
     {
-      step: "01",
+      num: "01",
       icon: Link2,
-      title: "Link Your Channel",
-      description: "Connect your YouTube channel in seconds with secure OAuth.",
-      color: "from-blue-500 to-cyan-500",
+      title: "Connect Your Channel",
+      description: "Link your YouTube channel securely with one-click OAuth integration.",
+      color: "from-blue-500 to-cyan-400",
     },
     {
-      step: "02",
+      num: "02",
       icon: BarChart3,
-      title: "Get Analytics",
-      description: "See real-time data on views, retention, and revenue.",
-      color: "from-purple-500 to-pink-500",
+      title: "Analyze Performance",
+      description: "Get instant access to real-time analytics and growth metrics.",
+      color: "from-purple-500 to-pink-400",
     },
     {
-      step: "03",
+      num: "03",
       icon: Brain,
-      title: "AI Analysis",
-      description: "Get actionable strategies from advanced AI analysis.",
-      color: "from-amber-500 to-orange-500",
+      title: "AI-Powered Insights",
+      description: "Receive personalized recommendations and content strategies.",
+      color: "from-amber-500 to-orange-400",
     },
     {
-      step: "04",
-      icon: TrendingUp,
-      title: "Watch Growth",
-      description: "Follow personalized tasks and celebrate milestones.",
-      color: "from-green-500 to-emerald-500",
+      num: "04",
+      icon: Rocket,
+      title: "Scale Your Growth",
+      description: "Implement strategies and watch your channel explode.",
+      color: "from-green-500 to-emerald-400",
     },
   ];
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // Animate connecting line
-      if (lineRef.current) {
+      const cards = stepsRef.current?.querySelectorAll(".step-card");
+      if (cards) {
         gsap.fromTo(
-          lineRef.current,
-          { scaleX: 0 },
-          {
-            scaleX: 1,
-            duration: 1.5,
-            ease: "power2.out",
-            scrollTrigger: {
-              trigger: stepsRef.current,
-              start: "top 70%",
-              toggleActions: "play none none reverse",
-            },
-          }
-        );
-      }
-
-      // Step cards animation
-      const stepCards = stepsRef.current?.querySelectorAll(".step-card");
-      if (stepCards) {
-        gsap.fromTo(
-          stepCards,
-          { opacity: 0, y: 60, scale: 0.9 },
+          cards,
+          { opacity: 0, x: -50 },
           {
             opacity: 1,
-            y: 0,
-            scale: 1,
-            duration: 0.7,
+            x: 0,
+            duration: 0.8,
             stagger: 0.2,
-            ease: "back.out(1.4)",
+            ease: "power3.out",
             scrollTrigger: {
               trigger: stepsRef.current,
               start: "top 75%",
-              toggleActions: "play none none reverse",
             },
           }
         );
@@ -89,88 +67,76 @@ const HowItWorks = () => {
   }, []);
 
   return (
-    <section
-      ref={sectionRef}
-      id="how-it-works"
-      className="py-24 lg:py-32 relative overflow-hidden"
-    >
+    <section ref={sectionRef} id="how-it-works" className="py-32 relative overflow-hidden">
       {/* Background */}
-      <div className="absolute inset-0 bg-secondary/40" />
-      <div className="absolute inset-0 gradient-mesh opacity-20" />
+      <div className="absolute inset-0 bg-secondary/30" />
+      <div className="absolute inset-0 aurora-bg opacity-30" />
 
       <div className="container mx-auto px-4 relative z-10">
-        {/* Section Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-          className="text-center max-w-2xl mx-auto mb-16"
-        >
-          <motion.span
-            initial={{ opacity: 0, scale: 0.9 }}
-            whileInView={{ opacity: 1, scale: 1 }}
+        <div className="grid lg:grid-cols-2 gap-16 items-center">
+          {/* Left: Content */}
+          <motion.div
+            initial={{ opacity: 0, x: -30 }}
+            whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
-            className="inline-block px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6"
+            transition={{ duration: 0.6 }}
           >
-            How It Works
-          </motion.span>
-          <h2 className="font-display text-3xl sm:text-4xl md:text-5xl font-medium mb-4">
-            Get Started in <span className="gradient-text font-semibold">Minutes</span>
-          </h2>
-          <p className="text-muted-foreground text-lg">
-            Simple steps to accelerate your YouTube growth
-          </p>
-        </motion.div>
+            <motion.span
+              initial={{ opacity: 0, scale: 0.9 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-sm font-medium mb-6"
+            >
+              <Check className="h-4 w-4 text-success" />
+              Simple Process
+            </motion.span>
+            <h2 className="font-display text-4xl sm:text-5xl font-bold mb-6">
+              Start Growing in
+              <br />
+              <span className="gradient-text">Under 5 Minutes</span>
+            </h2>
+            <p className="text-lg text-muted-foreground mb-8">
+              No complex setup, no learning curve. Connect your channel and start getting actionable insights immediately.
+            </p>
 
-        {/* Steps Container */}
-        <div ref={stepsRef} className="relative">
-          {/* Connecting Line - Desktop */}
-          <div
-            ref={lineRef}
-            className="hidden lg:block absolute top-16 left-[12%] right-[12%] h-0.5 bg-gradient-to-r from-primary via-accent to-primary origin-left"
-          />
+            {/* Benefits */}
+            <div className="space-y-4">
+              {["No credit card required", "Free 14-day trial", "Cancel anytime"].map((item, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full bg-success/20 flex items-center justify-center">
+                    <Check className="h-3 w-3 text-success" />
+                  </div>
+                  <span className="text-muted-foreground">{item}</span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
 
-          {/* Steps Grid */}
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {steps.map((item, index) => (
+          {/* Right: Steps */}
+          <div ref={stepsRef} className="space-y-4">
+            {steps.map((step, i) => (
               <motion.div
-                key={index}
-                whileHover={{ y: -10 }}
-                transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="step-card relative group"
+                key={i}
+                whileHover={{ x: 10, scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                className="step-card glass rounded-2xl p-5 flex items-start gap-5 group cursor-default"
               >
-                {/* Arrow connector - Desktop */}
-                {index < steps.length - 1 && (
-                  <div className="hidden lg:flex absolute -right-3 top-16 z-20">
-                    <ArrowRight className="h-5 w-5 text-primary" />
+                {/* Number & Icon */}
+                <div className="relative shrink-0">
+                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${step.color} flex items-center justify-center shadow-lg`}>
+                    <step.icon className="h-6 w-6 text-white" />
                   </div>
-                )}
+                  <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-background border-2 border-border flex items-center justify-center text-xs font-bold">
+                    {step.num}
+                  </span>
+                </div>
 
-                <div className="glass rounded-2xl p-6 text-center transition-all duration-500 hover:shadow-2xl hover:shadow-primary/10 hover:border-primary/40 h-full">
-                  {/* Icon Container */}
-                  <div className="relative inline-flex items-center justify-center mb-5">
-                    <motion.div
-                      whileHover={{ rotate: 360 }}
-                      transition={{ duration: 0.6 }}
-                      className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${item.color} p-0.5`}
-                    >
-                      <div className="w-full h-full rounded-2xl bg-card flex items-center justify-center">
-                        <item.icon className="h-7 w-7 text-primary" />
-                      </div>
-                    </motion.div>
-                    
-                    {/* Step Number Badge */}
-                    <span className="absolute -top-2 -right-2 text-xs font-mono font-bold text-primary-foreground bg-primary px-2.5 py-1 rounded-full shadow-lg">
-                      {item.step}
-                    </span>
-                  </div>
-
-                  {/* Content */}
-                  <h3 className="font-display text-lg font-medium mb-2 group-hover:text-primary transition-colors">
-                    {item.title}
+                {/* Content */}
+                <div className="flex-1">
+                  <h3 className="font-display text-lg font-semibold mb-1 group-hover:text-primary transition-colors">
+                    {step.title}
                   </h3>
-                  <p className="text-muted-foreground text-sm">{item.description}</p>
+                  <p className="text-sm text-muted-foreground">{step.description}</p>
                 </div>
               </motion.div>
             ))}

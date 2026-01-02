@@ -186,7 +186,7 @@ const TopicIdeas = () => {
               </div>
 
               <Button
-                variant="hero"
+                variant="glow"
                 size="lg"
                 onClick={handleGenerate}
                 disabled={isGenerating || !channelNiche.trim()}
