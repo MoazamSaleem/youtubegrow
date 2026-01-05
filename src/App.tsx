@@ -16,6 +16,7 @@ import Billing from "./pages/Billing";
 import AIChat from "./pages/AIChat";
 import ScriptWriter from "./pages/ScriptWriter";
 import CompetitorAnalysis from "./pages/CompetitorAnalysis";
+import GrowthTasks from "./pages/GrowthTasks";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -39,6 +40,7 @@ const App = () => (
               <Route path="/dashboard/chat" element={<AIChat />} />
               <Route path="/dashboard/scripts" element={<ScriptWriter />} />
               <Route path="/dashboard/competitors" element={<CompetitorAnalysis />} />
+              <Route path="/dashboard/growth" element={<GrowthTasks />} />
               <Route path="/admin" element={<AdminDashboard />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

@@ -14,6 +14,120 @@ export type Database = {
   }
   public: {
     Tables: {
+      growth_tasks: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          difficulty: string
+          id: string
+          is_recurring: boolean
+          order_index: number
+          recurrence_days: number | null
+          tier: string
+          title: string
+          token_reward: number
+          xp_reward: number
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          description?: string | null
+          difficulty?: string
+          id?: string
+          is_recurring?: boolean
+          order_index?: number
+          recurrence_days?: number | null
+          tier?: string
+          title: string
+          token_reward?: number
+          xp_reward?: number
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          difficulty?: string
+          id?: string
+          is_recurring?: boolean
+          order_index?: number
+          recurrence_days?: number | null
+          tier?: string
+          title?: string
+          token_reward?: number
+          xp_reward?: number
+        }
+        Relationships: []
+      }
+      milestones: {
+        Row: {
+          created_at: string
+          description: string | null
+          icon: string | null
+          id: string
+          order_index: number
+          required_xp: number
+          tier: string
+          title: string
+          token_reward: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          order_index?: number
+          required_xp: number
+          tier?: string
+          title: string
+          token_reward?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          order_index?: number
+          required_xp?: number
+          tier?: string
+          title?: string
+          token_reward?: number
+        }
+        Relationships: []
+      }
+      perks: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          perk_type: string
+          perk_value: Json | null
+          token_cost: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          perk_type: string
+          perk_value?: Json | null
+          token_cost: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          perk_type?: string
+          perk_value?: Json | null
+          token_cost?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -128,6 +242,73 @@ export type Database = {
         }
         Relationships: []
       }
+      user_milestones: {
+        Row: {
+          claimed: boolean
+          claimed_at: string | null
+          id: string
+          milestone_id: string
+          unlocked_at: string
+          user_id: string
+        }
+        Insert: {
+          claimed?: boolean
+          claimed_at?: string | null
+          id?: string
+          milestone_id: string
+          unlocked_at?: string
+          user_id: string
+        }
+        Update: {
+          claimed?: boolean
+          claimed_at?: string | null
+          id?: string
+          milestone_id?: string
+          unlocked_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_milestones_milestone_id_fkey"
+            columns: ["milestone_id"]
+            isOneToOne: false
+            referencedRelation: "milestones"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_perks: {
+        Row: {
+          expires_at: string | null
+          id: string
+          perk_id: string
+          unlocked_at: string
+          user_id: string
+        }
+        Insert: {
+          expires_at?: string | null
+          id?: string
+          perk_id: string
+          unlocked_at?: string
+          user_id: string
+        }
+        Update: {
+          expires_at?: string | null
+          id?: string
+          perk_id?: string
+          unlocked_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_perks_perk_id_fkey"
+            columns: ["perk_id"]
+            isOneToOne: false
+            referencedRelation: "perks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -145,6 +326,77 @@ export type Database = {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_task_progress: {
+        Row: {
+          completed_at: string | null
+          completion_count: number
+          created_at: string
+          id: string
+          last_completed_at: string | null
+          task_id: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          completion_count?: number
+          created_at?: string
+          id?: string
+          last_completed_at?: string | null
+          task_id: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          completion_count?: number
+          created_at?: string
+          id?: string
+          last_completed_at?: string | null
+          task_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_task_progress_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "growth_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_tokens: {
+        Row: {
+          balance: number
+          created_at: string
+          current_xp: number
+          id: string
+          total_earned: number
+          total_spent: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          balance?: number
+          created_at?: string
+          current_xp?: number
+          id?: string
+          total_earned?: number
+          total_spent?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          balance?: number
+          created_at?: string
+          current_xp?: number
+          id?: string
+          total_earned?: number
+          total_spent?: number
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
