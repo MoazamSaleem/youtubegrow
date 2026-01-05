@@ -50,6 +50,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     { name: "Thumbnails", icon: Image, href: "/dashboard/thumbnails", requiredPlan: ["pro", "advanced"] },
     { name: "Competitors", icon: Users, href: "/dashboard/competitors", requiredPlan: ["basic", "pro", "advanced"] },
     { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"] },
+    { name: "AI Credits", icon: Sparkles, href: "/dashboard/credits" },
     { name: "Leaderboard", icon: Crown, href: "/dashboard/leaderboard" },
     { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat" },
   ];

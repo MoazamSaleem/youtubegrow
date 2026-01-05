@@ -41,6 +41,133 @@ export type Database = {
         }
         Relationships: []
       }
+      badges: {
+        Row: {
+          color: string
+          created_at: string
+          description: string | null
+          icon: string
+          id: string
+          milestone_id: string | null
+          name: string
+          rarity: string
+          requirement_type: string
+          requirement_value: Json | null
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          description?: string | null
+          icon: string
+          id?: string
+          milestone_id?: string | null
+          name: string
+          rarity?: string
+          requirement_type?: string
+          requirement_value?: Json | null
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          description?: string | null
+          icon?: string
+          id?: string
+          milestone_id?: string | null
+          name?: string
+          rarity?: string
+          requirement_type?: string
+          requirement_value?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "badges_milestone_id_fkey"
+            columns: ["milestone_id"]
+            isOneToOne: false
+            referencedRelation: "milestones"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_packages: {
+        Row: {
+          bonus_percentage: number | null
+          created_at: string
+          credits_amount: number
+          id: string
+          is_active: boolean
+          name: string
+          price_usd: number | null
+          stripe_price_id: string | null
+          token_cost: number | null
+        }
+        Insert: {
+          bonus_percentage?: number | null
+          created_at?: string
+          credits_amount: number
+          id?: string
+          is_active?: boolean
+          name: string
+          price_usd?: number | null
+          stripe_price_id?: string | null
+          token_cost?: number | null
+        }
+        Update: {
+          bonus_percentage?: number | null
+          created_at?: string
+          credits_amount?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          price_usd?: number | null
+          stripe_price_id?: string | null
+          token_cost?: number | null
+        }
+        Relationships: []
+      }
+      credits_purchases: {
+        Row: {
+          amount_usd: number | null
+          created_at: string
+          credits_amount: number
+          id: string
+          package_id: string | null
+          payment_method: string
+          stripe_payment_id: string | null
+          tokens_spent: number | null
+          user_id: string
+        }
+        Insert: {
+          amount_usd?: number | null
+          created_at?: string
+          credits_amount: number
+          id?: string
+          package_id?: string | null
+          payment_method: string
+          stripe_payment_id?: string | null
+          tokens_spent?: number | null
+          user_id: string
+        }
+        Update: {
+          amount_usd?: number | null
+          created_at?: string
+          credits_amount?: number
+          id?: string
+          package_id?: string | null
+          payment_method?: string
+          stripe_payment_id?: string | null
+          tokens_spent?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credits_purchases_package_id_fkey"
+            columns: ["package_id"]
+            isOneToOne: false
+            referencedRelation: "credit_packages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       growth_tasks: {
         Row: {
           category: string
@@ -307,6 +434,41 @@ export type Database = {
         }
         Relationships: []
       }
+      user_badges: {
+        Row: {
+          badge_id: string
+          display_order: number | null
+          earned_at: string
+          id: string
+          is_displayed: boolean
+          user_id: string
+        }
+        Insert: {
+          badge_id: string
+          display_order?: number | null
+          earned_at?: string
+          id?: string
+          is_displayed?: boolean
+          user_id: string
+        }
+        Update: {
+          badge_id?: string
+          display_order?: number | null
+          earned_at?: string
+          id?: string
+          is_displayed?: boolean
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_badges_badge_id_fkey"
+            columns: ["badge_id"]
+            isOneToOne: false
+            referencedRelation: "badges"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_milestones: {
         Row: {
           claimed: boolean
@@ -441,6 +603,7 @@ export type Database = {
           created_at: string
           current_xp: number
           display_name: string | null
+          displayed_badges: string[] | null
           id: string
           show_on_leaderboard: boolean
           total_earned: number
@@ -455,6 +618,7 @@ export type Database = {
           created_at?: string
           current_xp?: number
           display_name?: string | null
+          displayed_badges?: string[] | null
           id?: string
           show_on_leaderboard?: boolean
           total_earned?: number
@@ -469,6 +633,7 @@ export type Database = {
           created_at?: string
           current_xp?: number
           display_name?: string | null
+          displayed_badges?: string[] | null
           id?: string
           show_on_leaderboard?: boolean
           total_earned?: number
