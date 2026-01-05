@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { PLAN_LIMITS } from "@/lib/planLimits";
 import {
   Rocket,
   Star,
@@ -28,6 +29,9 @@ import {
   Video,
   CheckCircle,
   DollarSign,
+  RefreshCw,
+  Calendar,
+  Clock,
 } from "lucide-react";
 
 interface GrowthTask {
@@ -41,6 +45,7 @@ interface GrowthTask {
   difficulty: string;
   order_index: number;
   is_recurring: boolean;
+  reset_frequency: string | null;
 }
 
 interface Milestone {
@@ -58,6 +63,8 @@ interface UserTokens {
   balance: number;
   total_earned: number;
   current_xp: number;
+  ai_credits_balance: number;
+  ai_credits_used: number;
 }
 
 interface Perk {
@@ -66,6 +73,11 @@ interface Perk {
   description: string;
   token_cost: number;
   perk_type: string;
+}
+
+interface RecurringCompletion {
+  task_id: string;
+  period_start: string;
 }
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -89,10 +101,13 @@ const GrowthTasks = () => {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [perks, setPerks] = useState<Perk[]>([]);
   const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
+  const [recurringCompletions, setRecurringCompletions] = useState<RecurringCompletion[]>([]);
   const [unlockedMilestoneIds, setUnlockedMilestoneIds] = useState<Set<string>>(new Set());
   const [claimedMilestoneIds, setClaimedMilestoneIds] = useState<Set<string>>(new Set());
   const [unlockedPerkIds, setUnlockedPerkIds] = useState<Set<string>>(new Set());
-  const [userTokens, setUserTokens] = useState<UserTokens>({ balance: 0, total_earned: 0, current_xp: 0 });
+  const [userTokens, setUserTokens] = useState<UserTokens>({ 
+    balance: 0, total_earned: 0, current_xp: 0, ai_credits_balance: 0, ai_credits_used: 0 
+  });
   const [activeTab, setActiveTab] = useState("tasks");
   const [processingTask, setProcessingTask] = useState<string | null>(null);
   const [processingMilestone, setProcessingMilestone] = useState<string | null>(null);
@@ -100,10 +115,48 @@ const GrowthTasks = () => {
 
   const currentPlan = subscription?.plan || "free";
   const userTier = currentPlan === "free" ? "basic" : currentPlan === "basic" ? "basic" : currentPlan === "pro" ? "pro" : "advanced";
+  const planLimits = PLAN_LIMITS[currentPlan];
 
   useEffect(() => {
     fetchData();
   }, [user]);
+
+  // Get current period start/end for a recurring task
+  const getCurrentPeriod = (frequency: string) => {
+    const now = new Date();
+    let periodStart: Date;
+    let periodEnd: Date;
+
+    if (frequency === "daily") {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 1);
+    } else if (frequency === "weekly") {
+      const dayOfWeek = now.getDay();
+      periodStart = new Date(now);
+      periodStart.setDate(now.getDate() - dayOfWeek);
+      periodStart.setHours(0, 0, 0, 0);
+      periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 7);
+    } else {
+      // monthly
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+
+    return {
+      periodStart: periodStart.toISOString().split("T")[0],
+      periodEnd: periodEnd.toISOString().split("T")[0],
+    };
+  };
+
+  const isRecurringTaskCompleted = (task: GrowthTask) => {
+    if (!task.is_recurring || !task.reset_frequency) return false;
+    const { periodStart } = getCurrentPeriod(task.reset_frequency);
+    return recurringCompletions.some(
+      (c) => c.task_id === task.id && c.period_start === periodStart
+    );
+  };
 
   const fetchData = async () => {
     if (!user) return;
@@ -131,28 +184,35 @@ const GrowthTasks = () => {
         .eq("is_active", true);
       setPerks(perksData || []);
 
-      // Fetch user progress
+      // Fetch user progress for one-time tasks
       const { data: progressData } = await supabase
         .from("user_task_progress")
         .select("task_id")
         .eq("user_id", user.id)
         .not("completed_at", "is", null);
-      setCompletedTaskIds(new Set(progressData?.map(p => p.task_id) || []));
+      setCompletedTaskIds(new Set(progressData?.map((p) => p.task_id) || []));
+
+      // Fetch recurring task completions
+      const { data: recurringData } = await supabase
+        .from("recurring_task_completions")
+        .select("task_id, period_start")
+        .eq("user_id", user.id);
+      setRecurringCompletions(recurringData || []);
 
       // Fetch user milestones
       const { data: userMilestonesData } = await supabase
         .from("user_milestones")
         .select("milestone_id, claimed")
         .eq("user_id", user.id);
-      setUnlockedMilestoneIds(new Set(userMilestonesData?.map(m => m.milestone_id) || []));
-      setClaimedMilestoneIds(new Set(userMilestonesData?.filter(m => m.claimed).map(m => m.milestone_id) || []));
+      setUnlockedMilestoneIds(new Set(userMilestonesData?.map((m) => m.milestone_id) || []));
+      setClaimedMilestoneIds(new Set(userMilestonesData?.filter((m) => m.claimed).map((m) => m.milestone_id) || []));
 
       // Fetch user perks
       const { data: userPerksData } = await supabase
         .from("user_perks")
         .select("perk_id")
         .eq("user_id", user.id);
-      setUnlockedPerkIds(new Set(userPerksData?.map(p => p.perk_id) || []));
+      setUnlockedPerkIds(new Set(userPerksData?.map((p) => p.perk_id) || []));
 
       // Fetch user tokens
       const { data: tokensData } = await supabase
@@ -160,14 +220,17 @@ const GrowthTasks = () => {
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
-      
+
       if (tokensData) {
         setUserTokens(tokensData);
       } else {
-        // Create initial tokens record
+        // Create initial tokens record with plan's AI credits
         const { data: newTokens } = await supabase
           .from("user_tokens")
-          .insert({ user_id: user.id })
+          .insert({ 
+            user_id: user.id,
+            ai_credits_balance: planLimits.aiStrategistCredits 
+          })
           .select()
           .single();
         if (newTokens) setUserTokens(newTokens);
@@ -180,33 +243,56 @@ const GrowthTasks = () => {
   };
 
   const completeTask = async (task: GrowthTask) => {
-    if (!user || completedTaskIds.has(task.id)) return;
+    if (!user) return;
+
+    // Check if already completed
+    if (task.is_recurring) {
+      if (isRecurringTaskCompleted(task)) return;
+    } else {
+      if (completedTaskIds.has(task.id)) return;
+    }
+
     setProcessingTask(task.id);
 
     try {
-      // Add task progress
-      await supabase.from("user_task_progress").upsert({
-        user_id: user.id,
-        task_id: task.id,
-        completed_at: new Date().toISOString(),
-        last_completed_at: new Date().toISOString(),
-        completion_count: 1,
-      });
+      if (task.is_recurring && task.reset_frequency) {
+        // Handle recurring task
+        const { periodStart, periodEnd } = getCurrentPeriod(task.reset_frequency);
+        await supabase.from("recurring_task_completions").insert({
+          user_id: user.id,
+          task_id: task.id,
+          period_start: periodStart,
+          period_end: periodEnd,
+        });
+        setRecurringCompletions([...recurringCompletions, { task_id: task.id, period_start: periodStart }]);
+      } else {
+        // Handle one-time task
+        await supabase.from("user_task_progress").upsert({
+          user_id: user.id,
+          task_id: task.id,
+          completed_at: new Date().toISOString(),
+          last_completed_at: new Date().toISOString(),
+          completion_count: 1,
+        });
+        setCompletedTaskIds(new Set([...completedTaskIds, task.id]));
+      }
 
       // Update tokens
       const newBalance = userTokens.balance + task.token_reward;
       const newXp = userTokens.current_xp + task.xp_reward;
       const newTotalEarned = userTokens.total_earned + task.token_reward;
 
-      await supabase.from("user_tokens").update({
-        balance: newBalance,
-        current_xp: newXp,
-        total_earned: newTotalEarned,
-        updated_at: new Date().toISOString(),
-      }).eq("user_id", user.id);
+      await supabase
+        .from("user_tokens")
+        .update({
+          balance: newBalance,
+          current_xp: newXp,
+          total_earned: newTotalEarned,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id);
 
       setUserTokens({ ...userTokens, balance: newBalance, current_xp: newXp, total_earned: newTotalEarned });
-      setCompletedTaskIds(new Set([...completedTaskIds, task.id]));
 
       // Check for milestone unlocks
       await checkMilestoneUnlocks(newXp);
@@ -236,7 +322,7 @@ const GrowthTasks = () => {
           milestone_id: milestone.id,
         });
         setUnlockedMilestoneIds(new Set([...unlockedMilestoneIds, milestone.id]));
-        
+
         toast({
           title: "Milestone Unlocked!",
           description: `${milestone.title} - Claim your reward!`,
@@ -250,21 +336,26 @@ const GrowthTasks = () => {
     setProcessingMilestone(milestone.id);
 
     try {
-      // Update milestone as claimed
-      await supabase.from("user_milestones").update({
-        claimed: true,
-        claimed_at: new Date().toISOString(),
-      }).eq("user_id", user.id).eq("milestone_id", milestone.id);
+      await supabase
+        .from("user_milestones")
+        .update({
+          claimed: true,
+          claimed_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id)
+        .eq("milestone_id", milestone.id);
 
-      // Add tokens
       const newBalance = userTokens.balance + milestone.token_reward;
       const newTotalEarned = userTokens.total_earned + milestone.token_reward;
 
-      await supabase.from("user_tokens").update({
-        balance: newBalance,
-        total_earned: newTotalEarned,
-        updated_at: new Date().toISOString(),
-      }).eq("user_id", user.id);
+      await supabase
+        .from("user_tokens")
+        .update({
+          balance: newBalance,
+          total_earned: newTotalEarned,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id);
 
       setUserTokens({ ...userTokens, balance: newBalance, total_earned: newTotalEarned });
       setClaimedMilestoneIds(new Set([...claimedMilestoneIds, milestone.id]));
@@ -289,21 +380,21 @@ const GrowthTasks = () => {
     setProcessingPerk(perk.id);
 
     try {
-      // Add user perk
       await supabase.from("user_perks").insert({
         user_id: user.id,
         perk_id: perk.id,
       });
 
-      // Deduct tokens
       const newBalance = userTokens.balance - perk.token_cost;
-      const newTotalSpent = (userTokens as any).total_spent + perk.token_cost;
 
-      await supabase.from("user_tokens").update({
-        balance: newBalance,
-        total_spent: newTotalSpent,
-        updated_at: new Date().toISOString(),
-      }).eq("user_id", user.id);
+      await supabase
+        .from("user_tokens")
+        .update({
+          balance: newBalance,
+          total_spent: (userTokens as any).total_spent + perk.token_cost,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id);
 
       setUserTokens({ ...userTokens, balance: newBalance });
       setUnlockedPerkIds(new Set([...unlockedPerkIds, perk.id]));
@@ -325,19 +416,27 @@ const GrowthTasks = () => {
 
   const getTierColor = (tier: string) => {
     switch (tier) {
-      case "basic": return "from-blue-500 to-blue-600";
-      case "pro": return "from-purple-500 to-purple-600";
-      case "advanced": return "from-orange-500 to-orange-600";
-      default: return "from-slate-500 to-slate-600";
+      case "basic":
+        return "from-blue-500 to-blue-600";
+      case "pro":
+        return "from-purple-500 to-purple-600";
+      case "advanced":
+        return "from-orange-500 to-orange-600";
+      default:
+        return "from-slate-500 to-slate-600";
     }
   };
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case "easy": return "bg-green-500/10 text-green-500 border-green-500/20";
-      case "medium": return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
-      case "hard": return "bg-red-500/10 text-red-500 border-red-500/20";
-      default: return "bg-muted";
+      case "easy":
+        return "bg-green-500/10 text-green-500 border-green-500/20";
+      case "medium":
+        return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
+      case "hard":
+        return "bg-red-500/10 text-red-500 border-red-500/20";
+      default:
+        return "bg-muted";
     }
   };
 
@@ -349,13 +448,16 @@ const GrowthTasks = () => {
   };
 
   const getNextMilestone = () => {
-    return milestones.find(m => userTokens.current_xp < m.required_xp);
+    return milestones.find((m) => userTokens.current_xp < m.required_xp);
   };
 
   const nextMilestone = getNextMilestone();
-  const progressToNext = nextMilestone 
-    ? (userTokens.current_xp / nextMilestone.required_xp) * 100 
-    : 100;
+  const progressToNext = nextMilestone ? (userTokens.current_xp / nextMilestone.required_xp) * 100 : 100;
+
+  // Separate tasks by type
+  const oneTimeTasks = tasks.filter((t) => !t.is_recurring);
+  const dailyTasks = tasks.filter((t) => t.is_recurring && t.reset_frequency === "daily");
+  const weeklyTasks = tasks.filter((t) => t.is_recurring && t.reset_frequency === "weekly");
 
   if (loading) {
     return (
@@ -372,18 +474,12 @@ const GrowthTasks = () => {
       <main className="flex-1 p-4 lg:p-8 overflow-auto">
         <div className="max-w-6xl mx-auto">
           {/* Header */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-8"
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2 rounded-xl bg-gradient-to-br from-primary to-accent">
                 <Target className="h-6 w-6 text-primary-foreground" />
               </div>
-              <h1 className="font-display text-2xl sm:text-3xl font-bold">
-                Growth Tasks & Milestones
-              </h1>
+              <h1 className="font-display text-2xl sm:text-3xl font-bold">Growth Tasks & Milestones</h1>
             </div>
             <p className="text-muted-foreground">
               Complete tasks to earn tokens and unlock perks for your channel growth journey.
@@ -391,7 +487,7 @@ const GrowthTasks = () => {
           </motion.div>
 
           {/* Stats Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -403,7 +499,7 @@ const GrowthTasks = () => {
                   <Coins className="h-5 w-5 text-yellow-500" />
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Token Balance</p>
+                  <p className="text-sm text-muted-foreground">Tokens</p>
                   <p className="text-2xl font-bold">{userTokens.balance}</p>
                 </div>
               </div>
@@ -420,8 +516,25 @@ const GrowthTasks = () => {
                   <Zap className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Current XP</p>
+                  <p className="text-sm text-muted-foreground">XP</p>
                   <p className="text-2xl font-bold">{userTokens.current_xp}</p>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+              className="glass rounded-xl p-4"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-cyan-500/10">
+                  <Sparkles className="h-5 w-5 text-cyan-500" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">AI Credits</p>
+                  <p className="text-2xl font-bold">{userTokens.ai_credits_balance}</p>
                 </div>
               </div>
             </motion.div>
@@ -455,7 +568,9 @@ const GrowthTasks = () => {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Milestones</p>
-                  <p className="text-2xl font-bold">{unlockedMilestoneIds.size}/{milestones.length}</p>
+                  <p className="text-2xl font-bold">
+                    {unlockedMilestoneIds.size}/{milestones.length}
+                  </p>
                 </div>
               </div>
             </motion.div>
@@ -480,7 +595,8 @@ const GrowthTasks = () => {
               </div>
               <Progress value={progressToNext} className="h-3" />
               <p className="text-sm text-muted-foreground mt-2">
-                {nextMilestone.required_xp - userTokens.current_xp} XP to unlock • +{nextMilestone.token_reward} token reward
+                {nextMilestone.required_xp - userTokens.current_xp} XP to unlock • +{nextMilestone.token_reward} token
+                reward
               </p>
             </motion.div>
           )}
@@ -490,7 +606,15 @@ const GrowthTasks = () => {
             <TabsList className="mb-6">
               <TabsTrigger value="tasks" className="gap-2">
                 <Target className="h-4 w-4" />
-                Tasks
+                One-Time Tasks
+              </TabsTrigger>
+              <TabsTrigger value="daily" className="gap-2">
+                <Clock className="h-4 w-4" />
+                Daily
+              </TabsTrigger>
+              <TabsTrigger value="weekly" className="gap-2">
+                <Calendar className="h-4 w-4" />
+                Weekly
               </TabsTrigger>
               <TabsTrigger value="milestones" className="gap-2">
                 <Trophy className="h-4 w-4" />
@@ -498,20 +622,26 @@ const GrowthTasks = () => {
               </TabsTrigger>
               <TabsTrigger value="perks" className="gap-2">
                 <Gift className="h-4 w-4" />
-                Perks Shop
+                Perks
               </TabsTrigger>
             </TabsList>
 
-            {/* Tasks Tab */}
+            {/* One-Time Tasks Tab */}
             <TabsContent value="tasks">
               <div className="space-y-4">
                 {["basic", "pro", "advanced"].map((tier) => (
                   <div key={tier}>
                     <div className="flex items-center gap-2 mb-4">
-                      <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${getTierColor(tier)} flex items-center justify-center`}>
-                        {tier === "basic" ? <Star className="h-4 w-4 text-white" /> :
-                         tier === "pro" ? <Crown className="h-4 w-4 text-white" /> :
-                         <Rocket className="h-4 w-4 text-white" />}
+                      <div
+                        className={`w-8 h-8 rounded-lg bg-gradient-to-br ${getTierColor(tier)} flex items-center justify-center`}
+                      >
+                        {tier === "basic" ? (
+                          <Star className="h-4 w-4 text-white" />
+                        ) : tier === "pro" ? (
+                          <Crown className="h-4 w-4 text-white" />
+                        ) : (
+                          <Rocket className="h-4 w-4 text-white" />
+                        )}
                       </div>
                       <h3 className="font-display text-lg font-semibold capitalize">{tier} Tasks</h3>
                       {!canAccessTier(tier) && (
@@ -523,68 +653,90 @@ const GrowthTasks = () => {
                     </div>
 
                     <div className="grid gap-3 mb-6">
-                      {tasks.filter(t => t.tier === tier).map((task, index) => {
-                        const isCompleted = completedTaskIds.has(task.id);
-                        const isLocked = !canAccessTier(tier);
+                      {oneTimeTasks
+                        .filter((t) => t.tier === tier)
+                        .map((task, index) => {
+                          const isCompleted = completedTaskIds.has(task.id);
+                          const isLocked = !canAccessTier(tier);
 
-                        return (
-                          <motion.div
-                            key={task.id}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: index * 0.05 }}
-                            className={`glass rounded-xl p-4 ${isCompleted ? "bg-green-500/5 border-green-500/20" : ""} ${isLocked ? "opacity-50" : ""}`}
-                          >
-                            <div className="flex items-center justify-between gap-4">
-                              <div className="flex items-center gap-4 flex-1">
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isCompleted ? "bg-green-500" : "bg-muted"}`}>
-                                  {isCompleted ? (
-                                    <Check className="h-5 w-5 text-white" />
-                                  ) : isLocked ? (
-                                    <Lock className="h-5 w-5 text-muted-foreground" />
-                                  ) : (
-                                    <Target className="h-5 w-5 text-muted-foreground" />
-                                  )}
-                                </div>
-                                <div className="flex-1">
-                                  <h4 className="font-semibold">{task.title}</h4>
-                                  <p className="text-sm text-muted-foreground">{task.description}</p>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-3">
-                                <Badge variant="outline" className={getDifficultyColor(task.difficulty)}>
-                                  {task.difficulty}
-                                </Badge>
-                                <div className="text-right">
-                                  <div className="flex items-center gap-1 text-yellow-500">
-                                    <Coins className="h-4 w-4" />
-                                    <span className="font-semibold">{task.token_reward}</span>
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">+{task.xp_reward} XP</div>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant={isCompleted ? "outline" : "default"}
-                                  disabled={isCompleted || isLocked || processingTask === task.id}
-                                  onClick={() => completeTask(task)}
-                                >
-                                  {processingTask === task.id ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : isCompleted ? (
-                                    "Done"
-                                  ) : (
-                                    <>Complete<ChevronRight className="h-4 w-4 ml-1" /></>
-                                  )}
-                                </Button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
+                          return (
+                            <TaskCard
+                              key={task.id}
+                              task={task}
+                              isCompleted={isCompleted}
+                              isLocked={isLocked}
+                              isProcessing={processingTask === task.id}
+                              onComplete={() => completeTask(task)}
+                              getDifficultyColor={getDifficultyColor}
+                              index={index}
+                            />
+                          );
+                        })}
                     </div>
                   </div>
                 ))}
+              </div>
+            </TabsContent>
+
+            {/* Daily Tasks Tab */}
+            <TabsContent value="daily">
+              <div className="mb-4 p-4 glass rounded-xl bg-primary/5 flex items-center gap-3">
+                <RefreshCw className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="font-semibold">Daily Tasks</p>
+                  <p className="text-sm text-muted-foreground">These tasks reset every day at midnight</p>
+                </div>
+              </div>
+              <div className="grid gap-3">
+                {dailyTasks.map((task, index) => {
+                  const isCompleted = isRecurringTaskCompleted(task);
+                  const isLocked = !canAccessTier(task.tier);
+
+                  return (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      isCompleted={isCompleted}
+                      isLocked={isLocked}
+                      isProcessing={processingTask === task.id}
+                      onComplete={() => completeTask(task)}
+                      getDifficultyColor={getDifficultyColor}
+                      index={index}
+                      isRecurring
+                    />
+                  );
+                })}
+              </div>
+            </TabsContent>
+
+            {/* Weekly Tasks Tab */}
+            <TabsContent value="weekly">
+              <div className="mb-4 p-4 glass rounded-xl bg-purple-500/5 flex items-center gap-3">
+                <Calendar className="h-5 w-5 text-purple-500" />
+                <div>
+                  <p className="font-semibold">Weekly Tasks</p>
+                  <p className="text-sm text-muted-foreground">These tasks reset every Sunday</p>
+                </div>
+              </div>
+              <div className="grid gap-3">
+                {weeklyTasks.map((task, index) => {
+                  const isCompleted = isRecurringTaskCompleted(task);
+                  const isLocked = !canAccessTier(task.tier);
+
+                  return (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      isCompleted={isCompleted}
+                      isLocked={isLocked}
+                      isProcessing={processingTask === task.id}
+                      onComplete={() => completeTask(task)}
+                      getDifficultyColor={getDifficultyColor}
+                      index={index}
+                      isRecurring
+                    />
+                  );
+                })}
               </div>
             </TabsContent>
 
@@ -605,15 +757,17 @@ const GrowthTasks = () => {
                       transition={{ delay: index * 0.05 }}
                       className={`glass rounded-xl p-6 text-center ${isUnlocked ? "bg-primary/5 ring-2 ring-primary" : ""}`}
                     >
-                      <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${
-                        isUnlocked ? `bg-gradient-to-br ${getTierColor(milestone.tier)}` : "bg-muted"
-                      }`}>
+                      <div
+                        className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${
+                          isUnlocked ? `bg-gradient-to-br ${getTierColor(milestone.tier)}` : "bg-muted"
+                        }`}
+                      >
                         <IconComponent className={`h-8 w-8 ${isUnlocked ? "text-white" : "text-muted-foreground"}`} />
                       </div>
-                      
+
                       <h3 className="font-display text-lg font-bold mb-1">{milestone.title}</h3>
                       <p className="text-sm text-muted-foreground mb-3">{milestone.description}</p>
-                      
+
                       {!isUnlocked && (
                         <div className="mb-3">
                           <Progress value={progress} className="h-2 mb-1" />
@@ -634,7 +788,7 @@ const GrowthTasks = () => {
                       </div>
 
                       {isUnlocked && !isClaimed ? (
-                        <Button 
+                        <Button
                           onClick={() => claimMilestone(milestone)}
                           disabled={processingMilestone === milestone.id}
                           className="w-full"
@@ -686,7 +840,7 @@ const GrowthTasks = () => {
                         </div>
                         <h3 className="font-semibold">{perk.name}</h3>
                       </div>
-                      
+
                       <p className="text-sm text-muted-foreground mb-4">{perk.description}</p>
 
                       <div className="flex items-center justify-between">
@@ -731,5 +885,92 @@ const GrowthTasks = () => {
     </div>
   );
 };
+
+// Task Card Component
+interface TaskCardProps {
+  task: GrowthTask;
+  isCompleted: boolean;
+  isLocked: boolean;
+  isProcessing: boolean;
+  onComplete: () => void;
+  getDifficultyColor: (difficulty: string) => string;
+  index: number;
+  isRecurring?: boolean;
+}
+
+const TaskCard = ({
+  task,
+  isCompleted,
+  isLocked,
+  isProcessing,
+  onComplete,
+  getDifficultyColor,
+  index,
+  isRecurring,
+}: TaskCardProps) => (
+  <motion.div
+    initial={{ opacity: 0, x: -20 }}
+    animate={{ opacity: 1, x: 0 }}
+    transition={{ delay: index * 0.05 }}
+    className={`glass rounded-xl p-4 ${isCompleted ? "bg-green-500/5 border-green-500/20" : ""} ${isLocked ? "opacity-50" : ""}`}
+  >
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center gap-4 flex-1">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isCompleted ? "bg-green-500" : "bg-muted"}`}>
+          {isCompleted ? (
+            <Check className="h-5 w-5 text-white" />
+          ) : isLocked ? (
+            <Lock className="h-5 w-5 text-muted-foreground" />
+          ) : isRecurring ? (
+            <RefreshCw className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <Target className="h-5 w-5 text-muted-foreground" />
+          )}
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h4 className="font-semibold">{task.title}</h4>
+            {isRecurring && (
+              <Badge variant="outline" className="text-xs">
+                {task.reset_frequency}
+              </Badge>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground">{task.description}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Badge variant="outline" className={getDifficultyColor(task.difficulty)}>
+          {task.difficulty}
+        </Badge>
+        <div className="text-right">
+          <div className="flex items-center gap-1 text-yellow-500">
+            <Coins className="h-4 w-4" />
+            <span className="font-semibold">{task.token_reward}</span>
+          </div>
+          <div className="text-xs text-muted-foreground">+{task.xp_reward} XP</div>
+        </div>
+        <Button
+          size="sm"
+          variant={isCompleted ? "outline" : "default"}
+          disabled={isCompleted || isLocked || isProcessing}
+          onClick={onComplete}
+        >
+          {isProcessing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : isCompleted ? (
+            "Done"
+          ) : (
+            <>
+              Complete
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  </motion.div>
+);
 
 export default GrowthTasks;

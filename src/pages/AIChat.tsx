@@ -6,18 +6,24 @@ import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  MessageSquare, 
-  Send, 
-  Bot, 
-  User, 
+import { supabase } from "@/integrations/supabase/client";
+import { PLAN_LIMITS } from "@/lib/planLimits";
+import {
+  MessageSquare,
+  Send,
+  Bot,
+  User,
   Sparkles,
   Menu,
   Lightbulb,
   TrendingUp,
   Target,
-  Youtube
+  Youtube,
+  Coins,
+  AlertCircle,
 } from "lucide-react";
 
 interface Message {
@@ -25,16 +31,31 @@ interface Message {
   content: string;
 }
 
+interface UserCredits {
+  ai_credits_balance: number;
+  ai_credits_used: number;
+}
+
+const CREDIT_COSTS = {
+  basic: 20,
+  standard: 50,
+  extensive: 100,
+};
+
 const AIChat = () => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, subscription, loading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [userCredits, setUserCredits] = useState<UserCredits>({ ai_credits_balance: 0, ai_credits_used: 0 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const currentPlan = subscription?.plan || "free";
+  const planLimits = PLAN_LIMITS[currentPlan];
 
   useEffect(() => {
     if (!loading && !user) {
@@ -43,8 +64,90 @@ const AIChat = () => {
   }, [user, loading, navigate]);
 
   useEffect(() => {
+    if (user) {
+      fetchUserCredits();
+    }
+  }, [user]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const fetchUserCredits = async () => {
+    if (!user) return;
+
+    const { data } = await supabase
+      .from("user_tokens")
+      .select("ai_credits_balance, ai_credits_used")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (data) {
+      setUserCredits(data);
+    } else {
+      // Initialize user tokens with plan credits
+      const { data: newData } = await supabase
+        .from("user_tokens")
+        .insert({
+          user_id: user.id,
+          ai_credits_balance: planLimits.aiStrategistCredits,
+        })
+        .select("ai_credits_balance, ai_credits_used")
+        .single();
+      if (newData) setUserCredits(newData);
+    }
+  };
+
+  const estimateQueryComplexity = (query: string): "basic" | "standard" | "extensive" => {
+    const wordCount = query.split(/\s+/).length;
+    const hasAnalysis = /analyz|research|compare|strateg|plan|comprehensive|detail/i.test(query);
+    const hasMultiple = /multiple|several|all|complete|full/i.test(query);
+
+    if (wordCount > 50 || (hasAnalysis && hasMultiple)) {
+      return "extensive";
+    } else if (wordCount > 20 || hasAnalysis) {
+      return "standard";
+    }
+    return "basic";
+  };
+
+  const deductCredits = async (complexity: "basic" | "standard" | "extensive") => {
+    if (!user) return false;
+
+    const cost = CREDIT_COSTS[complexity];
+    if (userCredits.ai_credits_balance < cost) {
+      toast({
+        title: "Insufficient credits",
+        description: `You need ${cost} credits for this query. Current balance: ${userCredits.ai_credits_balance}`,
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    const newBalance = userCredits.ai_credits_balance - cost;
+    const newUsed = userCredits.ai_credits_used + cost;
+
+    // Update user tokens
+    await supabase
+      .from("user_tokens")
+      .update({
+        ai_credits_balance: newBalance,
+        ai_credits_used: newUsed,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user.id);
+
+    // Log usage
+    await supabase.from("ai_credits_usage").insert({
+      user_id: user.id,
+      credits_used: cost,
+      query_type: "ai_chat",
+      query_complexity: complexity,
+    });
+
+    setUserCredits({ ai_credits_balance: newBalance, ai_credits_used: newUsed });
+    return true;
+  };
 
   const quickPrompts = [
     { icon: Lightbulb, text: "Give me 5 viral video ideas for my niche" },
@@ -56,12 +159,34 @@ const AIChat = () => {
   const handleSend = async () => {
     if (!input.trim() || isStreaming) return;
 
+    // Estimate complexity and check credits
+    const complexity = estimateQueryComplexity(input);
+    const cost = CREDIT_COSTS[complexity];
+
+    if (planLimits.aiStrategistCredits > 0 && userCredits.ai_credits_balance < cost) {
+      toast({
+        title: "Insufficient AI credits",
+        description: `This query requires ${cost} credits. Upgrade your plan or complete tasks to earn more.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     const userMessage: Message = { role: "user", content: input.trim() };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsStreaming(true);
 
     try {
+      // Deduct credits if plan has credits
+      if (planLimits.aiStrategistCredits > 0) {
+        const success = await deductCredits(complexity);
+        if (!success) {
+          setIsStreaming(false);
+          return;
+        }
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`,
         {
@@ -92,13 +217,13 @@ const AIChat = () => {
 
       if (reader) {
         let textBuffer = "";
-        
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
           textBuffer += decoder.decode(value, { stream: true });
-          
+
           let newlineIndex: number;
           while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
             let line = textBuffer.slice(0, newlineIndex);
@@ -158,6 +283,10 @@ const AIChat = () => {
     );
   }
 
+  const creditsPercentage = planLimits.aiStrategistCredits > 0 
+    ? (userCredits.ai_credits_balance / planLimits.aiStrategistCredits) * 100 
+    : 0;
+
   return (
     <div className="min-h-screen bg-background flex">
       <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
@@ -165,26 +294,56 @@ const AIChat = () => {
       <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "lg:ml-64" : "ml-0"} flex flex-col h-screen`}>
         {/* Header */}
         <header className="sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="lg:hidden"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-primary to-accent">
-                <MessageSquare className="h-5 w-5 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="font-display text-xl font-bold">AI YouTube Strategist</h1>
-                <p className="text-sm text-muted-foreground">Your personal growth advisor</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="lg:hidden"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-gradient-to-br from-primary to-accent">
+                  <MessageSquare className="h-5 w-5 text-primary-foreground" />
+                </div>
+                <div>
+                  <h1 className="font-display text-xl font-bold">AI YouTube Strategist</h1>
+                  <p className="text-sm text-muted-foreground">Your personal growth advisor</p>
+                </div>
               </div>
             </div>
+
+            {/* Credits Display */}
+            {planLimits.aiStrategistCredits > 0 && (
+              <div className="hidden sm:flex items-center gap-4">
+                <div className="text-right">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <span className="font-semibold">{userCredits.ai_credits_balance}</span>
+                    <span className="text-sm text-muted-foreground">/ {planLimits.aiStrategistCredits}</span>
+                  </div>
+                  <Progress value={creditsPercentage} className="h-1.5 w-32" />
+                </div>
+                <Badge variant="outline" className="gap-1">
+                  <Coins className="h-3 w-3" />
+                  Credits
+                </Badge>
+              </div>
+            )}
           </div>
         </header>
+
+        {/* Credits Warning */}
+        {planLimits.aiStrategistCredits > 0 && userCredits.ai_credits_balance < 100 && (
+          <div className="px-4 lg:px-6 py-2 bg-yellow-500/10 border-b border-yellow-500/20 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-yellow-500" />
+            <span className="text-sm text-yellow-600 dark:text-yellow-400">
+              Low credits! Complete growth tasks or upgrade to earn more AI credits.
+            </span>
+          </div>
+        )}
 
         {/* Chat Area */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -210,10 +369,33 @@ const AIChat = () => {
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.2 }}
-                  className="text-muted-foreground mb-8"
+                  className="text-muted-foreground mb-4"
                 >
                   Ask me anything about YouTube strategy, content ideas, SEO, thumbnails, or audience growth.
                 </motion.p>
+
+                {/* Credit Cost Info */}
+                {planLimits.aiStrategistCredits > 0 && (
+                  <motion.div
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.25 }}
+                    className="flex justify-center gap-4 mb-8 text-sm"
+                  >
+                    <div className="flex items-center gap-1">
+                      <Badge variant="secondary" className="bg-green-500/10 text-green-500">20</Badge>
+                      <span className="text-muted-foreground">Basic</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-500">50</Badge>
+                      <span className="text-muted-foreground">Standard</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="secondary" className="bg-red-500/10 text-red-500">100</Badge>
+                      <span className="text-muted-foreground">Extensive</span>
+                    </div>
+                  </motion.div>
+                )}
 
                 <motion.div
                   initial={{ y: 20, opacity: 0 }}
@@ -304,9 +486,16 @@ const AIChat = () => {
                   <Send className="h-5 w-5" />
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground text-center mt-3">
-                AI responses are for guidance. Always verify advice before implementation.
-              </p>
+              <div className="flex items-center justify-between mt-3">
+                <p className="text-xs text-muted-foreground">
+                  AI responses are for guidance. Always verify advice before implementation.
+                </p>
+                {planLimits.aiStrategistCredits > 0 && input && (
+                  <Badge variant="outline" className="text-xs">
+                    ~{CREDIT_COSTS[estimateQueryComplexity(input)]} credits
+                  </Badge>
+                )}
+              </div>
             </div>
           </div>
         </div>
