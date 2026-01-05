@@ -11,6 +11,8 @@ export interface PlanLimits {
   hasAdvancedAnalytics: boolean;
   hasGrowthTasks: boolean;
   hasYoutubeStrategist: boolean;
+  aiStrategistCredits: number;
+  growthTasksTier: "none" | "basic" | "pro" | "advanced";
   price: {
     monthly: number;
     yearly: number;
@@ -29,6 +31,8 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     hasAdvancedAnalytics: false,
     hasGrowthTasks: false,
     hasYoutubeStrategist: false,
+    aiStrategistCredits: 0,
+    growthTasksTier: "none",
     price: {
       monthly: 0,
       yearly: 0,
@@ -45,6 +49,8 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     hasAdvancedAnalytics: false,
     hasGrowthTasks: true,
     hasYoutubeStrategist: false,
+    aiStrategistCredits: 1000,
+    growthTasksTier: "basic",
     price: {
       monthly: 7,
       yearly: 70,
@@ -61,6 +67,8 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     hasAdvancedAnalytics: true,
     hasGrowthTasks: true,
     hasYoutubeStrategist: false,
+    aiStrategistCredits: 10000,
+    growthTasksTier: "pro",
     price: {
       monthly: 15,
       yearly: 120,
@@ -77,6 +85,8 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     hasAdvancedAnalytics: true,
     hasGrowthTasks: true,
     hasYoutubeStrategist: true,
+    aiStrategistCredits: 25000,
+    growthTasksTier: "advanced",
     price: {
       monthly: 25,
       yearly: 230,
