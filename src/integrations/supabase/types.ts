@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_credits_usage: {
+        Row: {
+          created_at: string
+          credits_used: number
+          id: string
+          query_complexity: string
+          query_type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          credits_used: number
+          id?: string
+          query_complexity: string
+          query_type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          credits_used?: number
+          id?: string
+          query_complexity?: string
+          query_type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       growth_tasks: {
         Row: {
           category: string
@@ -24,6 +51,7 @@ export type Database = {
           is_recurring: boolean
           order_index: number
           recurrence_days: number | null
+          reset_frequency: string | null
           tier: string
           title: string
           token_reward: number
@@ -38,6 +66,7 @@ export type Database = {
           is_recurring?: boolean
           order_index?: number
           recurrence_days?: number | null
+          reset_frequency?: string | null
           tier?: string
           title: string
           token_reward?: number
@@ -52,6 +81,7 @@ export type Database = {
           is_recurring?: boolean
           order_index?: number
           recurrence_days?: number | null
+          reset_frequency?: string | null
           tier?: string
           title?: string
           token_reward?: number
@@ -157,6 +187,41 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      recurring_task_completions: {
+        Row: {
+          completed_at: string
+          id: string
+          period_end: string
+          period_start: string
+          task_id: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string
+          id?: string
+          period_end: string
+          period_start: string
+          task_id: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string
+          id?: string
+          period_end?: string
+          period_start?: string
+          task_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recurring_task_completions_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "growth_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       subscriptions: {
         Row: {
@@ -370,30 +435,42 @@ export type Database = {
       }
       user_tokens: {
         Row: {
+          ai_credits_balance: number
+          ai_credits_used: number
           balance: number
           created_at: string
           current_xp: number
+          display_name: string | null
           id: string
+          show_on_leaderboard: boolean
           total_earned: number
           total_spent: number
           updated_at: string
           user_id: string
         }
         Insert: {
+          ai_credits_balance?: number
+          ai_credits_used?: number
           balance?: number
           created_at?: string
           current_xp?: number
+          display_name?: string | null
           id?: string
+          show_on_leaderboard?: boolean
           total_earned?: number
           total_spent?: number
           updated_at?: string
           user_id: string
         }
         Update: {
+          ai_credits_balance?: number
+          ai_credits_used?: number
           balance?: number
           created_at?: string
           current_xp?: number
+          display_name?: string | null
           id?: string
+          show_on_leaderboard?: boolean
           total_earned?: number
           total_spent?: number
           updated_at?: string
@@ -448,7 +525,19 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      leaderboard: {
+        Row: {
+          avatar_url: string | null
+          current_xp: number | null
+          display_name: string | null
+          token_balance: number | null
+          tokens_earned: number | null
+          tokens_rank: number | null
+          user_id: string | null
+          xp_rank: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       has_role: {
