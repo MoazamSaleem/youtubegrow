@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { PLAN_LIMITS, SubscriptionPlan, getPlanDisplayName } from "@/lib/planLimits";
+import { STRIPE_PLANS } from "@/lib/stripeConfig";
 import { supabase } from "@/integrations/supabase/client";
 import {
   CreditCard,
@@ -18,17 +19,39 @@ import {
   Star,
   Rocket,
   Loader2,
+  Settings,
+  Sparkles,
 } from "lucide-react";
 
 const Billing = () => {
   const navigate = useNavigate();
-  const { user, subscription, loading } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { user, subscription, loading, refreshSubscription } = useAuth();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isYearly, setIsYearly] = useState(false);
   const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
+  const [managingSubscription, setManagingSubscription] = useState(false);
 
   const currentPlan = subscription?.plan || "free";
+
+  // Handle checkout success/cancel
+  useEffect(() => {
+    const checkout = searchParams.get("checkout");
+    if (checkout === "success") {
+      toast({
+        title: "Subscription successful!",
+        description: "Your subscription has been activated. Refreshing...",
+      });
+      refreshSubscription();
+    } else if (checkout === "cancelled") {
+      toast({
+        title: "Checkout cancelled",
+        description: "Your subscription was not changed.",
+        variant: "destructive",
+      });
+    }
+  }, [searchParams, toast, refreshSubscription]);
 
   const plans: { key: SubscriptionPlan; icon: React.ElementType; color: string; popular?: boolean }[] = [
     { key: "free", icon: Zap, color: "from-slate-500 to-slate-600" },
@@ -41,49 +64,94 @@ const Billing = () => {
     { name: "Channels", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].maxChannels },
     { name: "Keywords/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].keywordsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].keywordsPerDay },
     { name: "Topics/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].topicsPerDay },
+    { name: "AI Strategist Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "—" : PLAN_LIMITS[p].aiStrategistCredits.toLocaleString() },
+    { name: "Growth Tasks Tier", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].growthTasksTier === "none" ? false : PLAN_LIMITS[p].growthTasksTier },
     { name: "Thumbnails/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].thumbnailsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].thumbnailsPerDay || "—" },
     { name: "Channel Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].channelAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].channelAnalysisFrequency },
     { name: "Competitor Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].competitorAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].competitorAnalysisFrequency },
     { name: "Script Writer", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasScriptWriter },
     { name: "Advanced Analytics", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasAdvancedAnalytics },
-    { name: "Growth Tasks", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasGrowthTasks },
-    { name: "AI Strategist", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasYoutubeStrategist },
+    { name: "AI Strategist Access", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasYoutubeStrategist },
   ];
 
   const handleUpgrade = async (plan: SubscriptionPlan) => {
     if (plan === currentPlan) return;
     
+    // Free plan - direct downgrade
+    if (plan === "free") {
+      setUpgradingPlan(plan);
+      try {
+        const { error } = await supabase
+          .from("subscriptions")
+          .update({
+            plan: "free",
+            billing_cycle: "monthly",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", user?.id);
+
+        if (error) throw error;
+
+        toast({
+          title: "Downgraded to Free",
+          description: "Your plan has been updated.",
+        });
+        refreshSubscription();
+      } catch (error: any) {
+        toast({
+          title: "Failed to downgrade",
+          description: error.message,
+          variant: "destructive",
+        });
+      } finally {
+        setUpgradingPlan(null);
+      }
+      return;
+    }
+
+    // Paid plans - use Stripe checkout
+    const stripePlan = STRIPE_PLANS[plan as keyof typeof STRIPE_PLANS];
+    if (!stripePlan) return;
+
     setUpgradingPlan(plan);
     try {
-      // For now, we'll just update the subscription in the database
-      // In production, this would integrate with Stripe
-      const { error } = await supabase
-        .from("subscriptions")
-        .update({
-          plan,
-          billing_cycle: isYearly ? "yearly" : "monthly",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", user?.id);
-
-      if (error) throw error;
-
-      toast({
-        title: `Successfully ${plan === "free" ? "downgraded" : "upgraded"} to ${getPlanDisplayName(plan)}!`,
-        description: "Your plan has been updated.",
+      const { data, error } = await supabase.functions.invoke("create-checkout", {
+        body: { priceId: stripePlan.priceId },
       });
 
-      // Refresh the page to update the subscription
-      window.location.reload();
+      if (error) throw error;
+      if (data?.url) {
+        window.open(data.url, "_blank");
+      }
     } catch (error: any) {
-      console.error("Error updating subscription:", error);
+      console.error("Checkout error:", error);
       toast({
-        title: "Failed to update subscription",
-        description: error.message,
+        title: "Checkout failed",
+        description: error.message || "Unable to start checkout",
         variant: "destructive",
       });
     } finally {
       setUpgradingPlan(null);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    setManagingSubscription(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("customer-portal");
+      
+      if (error) throw error;
+      if (data?.url) {
+        window.open(data.url, "_blank");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Unable to open portal",
+        description: error.message || "Please try again later",
+        variant: "destructive",
+      });
+    } finally {
+      setManagingSubscription(false);
     }
   };
 
@@ -130,6 +198,29 @@ const Billing = () => {
             <p className="text-muted-foreground max-w-2xl mx-auto">
               Choose the perfect plan for your YouTube growth journey. Upgrade or downgrade anytime.
             </p>
+
+            {/* Current Plan Info & Manage Button */}
+            {currentPlan !== "free" && (
+              <div className="mt-4 flex items-center justify-center gap-3">
+                <Badge className="bg-primary/10 text-primary border-primary/20">
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  {getPlanDisplayName(currentPlan)} Plan Active
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleManageSubscription}
+                  disabled={managingSubscription}
+                >
+                  {managingSubscription ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Settings className="h-4 w-4 mr-2" />
+                  )}
+                  Manage Subscription
+                </Button>
+              </div>
+            )}
 
             {/* Billing Toggle */}
             <div className="flex items-center justify-center gap-4 mt-6">
@@ -215,6 +306,12 @@ const Billing = () => {
                       <Check className="h-4 w-4 text-green-500" />
                       {limits.topicsPerDay} topics/day
                     </li>
+                    {limits.aiStrategistCredits > 0 && (
+                      <li className="flex items-center gap-2 text-sm">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        {limits.aiStrategistCredits.toLocaleString()} AI Credits
+                      </li>
+                    )}
                     {limits.hasScriptWriter && (
                       <li className="flex items-center gap-2 text-sm">
                         <Check className="h-4 w-4 text-green-500" />
@@ -225,6 +322,12 @@ const Billing = () => {
                       <li className="flex items-center gap-2 text-sm">
                         <Check className="h-4 w-4 text-green-500" />
                         Advanced Analytics
+                      </li>
+                    )}
+                    {limits.growthTasksTier !== "none" && (
+                      <li className="flex items-center gap-2 text-sm">
+                        <Check className="h-4 w-4 text-green-500" />
+                        {limits.growthTasksTier.charAt(0).toUpperCase() + limits.growthTasksTier.slice(1)} Growth Tasks
                       </li>
                     )}
                   </ul>
@@ -249,6 +352,39 @@ const Billing = () => {
               );
             })}
           </div>
+
+          {/* AI Credits Info */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="glass rounded-xl p-6 mb-8"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <Sparkles className="h-6 w-6 text-primary" />
+              <h2 className="font-display text-xl font-bold">AI Strategist Credits</h2>
+            </div>
+            <p className="text-muted-foreground mb-4">
+              AI Strategist credits power personalized YouTube growth recommendations. Each query consumes credits based on complexity:
+            </p>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <div className="p-4 rounded-lg bg-muted/30">
+                <div className="text-2xl font-bold text-primary">20</div>
+                <div className="text-sm text-muted-foreground">Basic Query</div>
+                <div className="text-xs mt-1">Quick questions, simple advice</div>
+              </div>
+              <div className="p-4 rounded-lg bg-muted/30">
+                <div className="text-2xl font-bold text-primary">50</div>
+                <div className="text-sm text-muted-foreground">Standard Query</div>
+                <div className="text-xs mt-1">Detailed analysis, strategy tips</div>
+              </div>
+              <div className="p-4 rounded-lg bg-muted/30">
+                <div className="text-2xl font-bold text-primary">100</div>
+                <div className="text-sm text-muted-foreground">Extensive Query</div>
+                <div className="text-xs mt-1">In-depth research, comprehensive plans</div>
+              </div>
+            </div>
+          </motion.div>
 
           {/* Feature Comparison Table */}
           <motion.div
@@ -288,7 +424,7 @@ const Billing = () => {
                                 <X className="h-5 w-5 text-muted-foreground mx-auto" />
                               )
                             ) : (
-                              <span className={typeof value === "number" || value === "Unlimited" ? "font-semibold" : ""}>
+                              <span className={typeof value === "number" || value === "Unlimited" ? "font-semibold" : "capitalize"}>
                                 {value}
                               </span>
                             )}

@@ -150,7 +150,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshSubscription = async () => {
-    if (user) {
+    if (!user) return;
+    
+    try {
+      // First check Stripe for active subscription
+      const { data: stripeData } = await supabase.functions.invoke("check-subscription");
+      
+      if (stripeData?.subscribed && stripeData?.plan) {
+        // Update local subscription with Stripe data
+        const { data: updatedSub } = await supabase
+          .from("subscriptions")
+          .update({
+            plan: stripeData.plan,
+            status: "active",
+            current_period_end: stripeData.subscription_end,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", user.id)
+          .select()
+          .single();
+        
+        if (updatedSub) {
+          setSubscription(updatedSub as Subscription);
+          return;
+        }
+      }
+      
+      // Fallback to local subscription data
       const { data } = await supabase
         .from("subscriptions")
         .select("*")
@@ -160,6 +186,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data) {
         setSubscription(data as Subscription);
       }
+    } catch (error) {
+      console.error("Error refreshing subscription:", error);
     }
   };
 
