@@ -10,7 +10,6 @@ import {
   Lightbulb,
   Users,
   MessageSquare,
-  Settings,
   LogOut,
   Menu,
   X,
@@ -21,6 +20,7 @@ import {
   Image,
   Target,
   Shield,
+  User,
 } from "lucide-react";
 
 interface NavItem {
@@ -52,6 +52,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"] },
     { name: "AI Credits", icon: Sparkles, href: "/dashboard/credits" },
     { name: "Leaderboard", icon: Crown, href: "/dashboard/leaderboard" },
+    { name: "Profile", icon: User, href: "/dashboard/profile" },
     { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat" },
   ];
 
