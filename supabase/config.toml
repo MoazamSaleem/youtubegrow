@@ -23,3 +23,15 @@ verify_jwt = false
 [functions.youtube-oauth]
 enabled = true
 verify_jwt = false
+
+[functions.purchase-credits]
+enabled = true
+verify_jwt = false
+
+[functions.reset-recurring-tasks]
+enabled = true
+verify_jwt = false
+
+[functions.generate-thumbnail]
+enabled = true
+verify_jwt = false
