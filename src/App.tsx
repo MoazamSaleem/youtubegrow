@@ -20,6 +20,7 @@ import GrowthTasks from "./pages/GrowthTasks";
 import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
 import CreditsShop from "./pages/CreditsShop";
+import ThumbnailGenerator from "./pages/ThumbnailGenerator";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -47,6 +48,7 @@ const App = () => (
               <Route path="/dashboard/leaderboard" element={<Leaderboard />} />
               <Route path="/dashboard/profile" element={<Profile />} />
               <Route path="/dashboard/credits" element={<CreditsShop />} />
+              <Route path="/dashboard/thumbnails" element={<ThumbnailGenerator />} />
               <Route path="/admin" element={<AdminDashboard />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
