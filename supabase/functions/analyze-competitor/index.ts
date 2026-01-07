@@ -1,3 +1,4 @@
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -42,16 +43,36 @@ serve(async (req) => {
     console.log('Authenticated user:', userId);
 
     const { competitorChannel, niche, yourChannelInfo } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
-
-    if (!competitorChannel) {
-      return new Response(JSON.stringify({ error: "Competitor channel name is required" }), {
+    // Input validation
+    if (!competitorChannel || typeof competitorChannel !== 'string' || competitorChannel.length > 500) {
+      return new Response(JSON.stringify({ error: "Competitor channel name is required (max 500 chars)" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (niche && niche.length > 200) {
+      return new Response(JSON.stringify({ error: "Niche too long (max 200 chars)" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (yourChannelInfo && yourChannelInfo.length > 2000) {
+      return new Response(JSON.stringify({ error: "Channel info too long (max 2000 chars)" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    
+    if (!OPENAI_API_KEY) {
+      console.error("OPENAI_API_KEY is not configured");
+      return new Response(JSON.stringify({ error: "AI service not configured" }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
@@ -107,14 +128,14 @@ Provide a comprehensive analysis in the following JSON format:
   "engagementTactics": ["How they engage their audience"]
 }`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: "You are an expert YouTube strategy consultant specializing in competitive analysis. You provide actionable insights based on publicly observable patterns and strategies. Always respond with valid JSON." },
           { role: "user", content: prompt },
@@ -129,14 +150,8 @@ Provide a comprehensive analysis in the following JSON format:
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits to continue." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("OpenAI API error:", response.status, errorText);
       return new Response(JSON.stringify({ error: "Failed to analyze competitor" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
