@@ -21,6 +21,7 @@ import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
 import CreditsShop from "./pages/CreditsShop";
 import ThumbnailGenerator from "./pages/ThumbnailGenerator";
+import YouTubeCallback from "./pages/YouTubeCallback";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ const App = () => (
               <Route path="/dashboard/credits" element={<CreditsShop />} />
               <Route path="/dashboard/thumbnails" element={<ThumbnailGenerator />} />
               <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/youtube-callback" element={<YouTubeCallback />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { YouTubeChannelLink } from "@/components/youtube/YouTubeChannelLink";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -258,6 +259,16 @@ const Profile = () => {
                 Save Changes
               </Button>
             </div>
+          </motion.div>
+
+          {/* YouTube Channel Link */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="mb-8"
+          >
+            <YouTubeChannelLink />
           </motion.div>
 
           {/* Displayed Badges */}

@@ -645,42 +645,54 @@ export type Database = {
       }
       youtube_channels: {
         Row: {
+          access_token: string | null
           channel_id: string
           channel_name: string | null
+          channel_thumbnail: string | null
           channel_url: string | null
           created_at: string
           id: string
           is_primary: boolean | null
+          refresh_token: string | null
           subscriber_count: number | null
           thumbnail_url: string | null
+          token_expires_at: string | null
           updated_at: string
           user_id: string
           video_count: number | null
           view_count: number | null
         }
         Insert: {
+          access_token?: string | null
           channel_id: string
           channel_name?: string | null
+          channel_thumbnail?: string | null
           channel_url?: string | null
           created_at?: string
           id?: string
           is_primary?: boolean | null
+          refresh_token?: string | null
           subscriber_count?: number | null
           thumbnail_url?: string | null
+          token_expires_at?: string | null
           updated_at?: string
           user_id: string
           video_count?: number | null
           view_count?: number | null
         }
         Update: {
+          access_token?: string | null
           channel_id?: string
           channel_name?: string | null
+          channel_thumbnail?: string | null
           channel_url?: string | null
           created_at?: string
           id?: string
           is_primary?: boolean | null
+          refresh_token?: string | null
           subscriber_count?: number | null
           thumbnail_url?: string | null
+          token_expires_at?: string | null
           updated_at?: string
           user_id?: string
           video_count?: number | null
