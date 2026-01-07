@@ -1,3 +1,4 @@
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -42,10 +43,32 @@ serve(async (req) => {
     console.log('Authenticated user:', userId);
 
     const { channelNiche, channelDescription, targetAudience, count = 5 } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    // Input validation
+    if (channelNiche && channelNiche.length > 500) {
+      return new Response(JSON.stringify({ error: "Channel niche too long (max 500 chars)" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (channelDescription && channelDescription.length > 2000) {
+      return new Response(JSON.stringify({ error: "Channel description too long (max 2000 chars)" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const validCount = Math.min(Math.max(1, count), 10);
+
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    
+    if (!OPENAI_API_KEY) {
+      console.error("OPENAI_API_KEY is not configured");
+      return new Response(JSON.stringify({ error: "AI service not configured" }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     const systemPrompt = `You are a YouTube content strategist specializing in viral video topics. Your job is to generate creative, engaging, and trend-aware video topic ideas.
@@ -63,55 +86,36 @@ For each topic, provide:
 3. Why this topic would perform well
 4. Estimated difficulty (easy, medium, hard)`;
 
-    const userPrompt = `Generate ${count} YouTube video topic ideas for a channel with the following details:
+    const userPrompt = `Generate ${validCount} YouTube video topic ideas for a channel with the following details:
 
 Channel Niche: ${channelNiche || "General"}
 Channel Description: ${channelDescription || "Not specified"}
 Target Audience: ${targetAudience || "General audience"}
 
-Please return the topics in a structured JSON format.`;
+Please return the topics in this JSON format:
+{
+  "topics": [
+    {
+      "title": "Video title",
+      "description": "What the video should cover",
+      "whyItWorks": "Why this would perform well",
+      "difficulty": "easy/medium/hard"
+    }
+  ]
+}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "generate_topics",
-              description: "Return video topic suggestions",
-              parameters: {
-                type: "object",
-                properties: {
-                  topics: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        title: { type: "string" },
-                        description: { type: "string" },
-                        whyItWorks: { type: "string" },
-                        difficulty: { type: "string", enum: ["easy", "medium", "hard"] },
-                      },
-                      required: ["title", "description", "whyItWorks", "difficulty"],
-                    },
-                  },
-                },
-                required: ["topics"],
-              },
-            },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "generate_topics" } },
       }),
     });
 
@@ -122,28 +126,29 @@ Please return the topics in a structured JSON format.`;
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("OpenAI API error:", response.status, errorText);
       throw new Error("Failed to generate topics");
     }
 
     const data = await response.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    const content = data.choices[0]?.message?.content;
     
-    if (toolCall?.function?.arguments) {
-      const topics = JSON.parse(toolCall.function.arguments);
-      return new Response(JSON.stringify(topics), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!content) {
+      throw new Error("No content received from AI");
     }
 
-    throw new Error("Invalid response from AI");
+    // Parse the JSON from the response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Failed to parse topics response");
+    }
+    
+    const topics = JSON.parse(jsonMatch[0]);
+
+    return new Response(JSON.stringify(topics), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (error) {
     console.error("Error in generate-topics:", error);
     return new Response(
