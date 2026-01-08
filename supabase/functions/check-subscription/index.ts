@@ -12,6 +12,14 @@ const logStep = (step: string, details?: any) => {
   console.log(`[CHECK-SUBSCRIPTION] ${step}${detailsStr}`);
 };
 
+// AI Credits included with each plan
+const PLAN_AI_CREDITS: Record<string, number> = {
+  free: 0,
+  basic: 1000,
+  pro: 10000,
+  advanced: 25000,
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -64,6 +72,15 @@ serve(async (req) => {
     let plan = "free";
     let subscriptionEnd = null;
 
+    // Get current subscription from database to check for plan changes
+    const { data: currentSubData } = await supabaseClient
+      .from("subscriptions")
+      .select("plan")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    
+    const previousPlan = currentSubData?.plan || "free";
+
     if (hasActiveSub) {
       const subscription = subscriptions.data[0];
       subscriptionEnd = new Date(subscription.current_period_end * 1000).toISOString();
@@ -76,7 +93,93 @@ serve(async (req) => {
         "prod_TjlCT4ijKq11hk": "advanced",
       };
       plan = productPlanMap[productId] || "free";
-      logStep("Active subscription found", { plan, subscriptionEnd });
+      logStep("Active subscription found", { plan, subscriptionEnd, previousPlan });
+
+      // Check if plan has changed (upgrade or new subscription)
+      if (previousPlan !== plan) {
+        logStep("Plan changed, updating subscription and adding credits", { from: previousPlan, to: plan });
+        
+        // Update subscription in database
+        const { error: upsertError } = await supabaseClient
+          .from("subscriptions")
+          .upsert({
+            user_id: user.id,
+            plan: plan,
+            status: "active",
+            current_period_end: subscriptionEnd,
+            current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+            billing_cycle: subscription.items.data[0].price.recurring?.interval === "year" ? "yearly" : "monthly",
+            stripe_customer_id: customerId,
+            stripe_subscription_id: subscription.id,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id" });
+
+        if (upsertError) {
+          logStep("Error updating subscription", { error: upsertError.message });
+        } else {
+          logStep("Subscription updated successfully");
+        }
+
+        // Add AI credits for the new plan
+        const creditsToAdd = PLAN_AI_CREDITS[plan] || 0;
+        if (creditsToAdd > 0) {
+          // Get current credits
+          const { data: tokenData } = await supabaseClient
+            .from("user_tokens")
+            .select("ai_credits_balance")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+          const currentCredits = tokenData?.ai_credits_balance || 0;
+          const newCredits = currentCredits + creditsToAdd;
+
+          // Update or insert credits
+          const { error: creditError } = await supabaseClient
+            .from("user_tokens")
+            .upsert({
+              user_id: user.id,
+              ai_credits_balance: newCredits,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: "user_id" });
+
+          if (creditError) {
+            logStep("Error adding credits", { error: creditError.message });
+          } else {
+            logStep("Credits added successfully", { creditsAdded: creditsToAdd, newBalance: newCredits });
+          }
+        }
+      } else {
+        // Plan unchanged, just update subscription status
+        const { error: updateError } = await supabaseClient
+          .from("subscriptions")
+          .upsert({
+            user_id: user.id,
+            plan: plan,
+            status: "active",
+            current_period_end: subscriptionEnd,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id" });
+
+        if (updateError) {
+          logStep("Error updating subscription", { error: updateError.message });
+        }
+      }
+    } else {
+      logStep("No active subscription found");
+      
+      // If user had a paid plan but no longer has active subscription, downgrade to free
+      if (previousPlan !== "free") {
+        logStep("Downgrading to free plan", { from: previousPlan });
+        
+        await supabaseClient
+          .from("subscriptions")
+          .upsert({
+            user_id: user.id,
+            plan: "free",
+            status: "inactive",
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id" });
+      }
     }
 
     return new Response(JSON.stringify({
