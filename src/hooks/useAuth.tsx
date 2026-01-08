@@ -153,22 +153,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return;
     
     try {
-      // First check Stripe for active subscription
-      const { data: stripeData } = await supabase.functions.invoke("check-subscription");
+      // First check Stripe for active subscription - this also syncs subscription and credits
+      const { data: stripeData, error: stripeError } = await supabase.functions.invoke("check-subscription");
+      
+      if (stripeError) {
+        console.error("Error checking subscription:", stripeError);
+      }
       
       if (stripeData?.subscribed && stripeData?.plan) {
-        // Update local subscription with Stripe data
+        // Refetch subscription from database (it was updated by the edge function)
         const { data: updatedSub } = await supabase
           .from("subscriptions")
-          .update({
-            plan: stripeData.plan,
-            status: "active",
-            current_period_end: stripeData.subscription_end,
-            updated_at: new Date().toISOString(),
-          })
+          .select("*")
           .eq("user_id", user.id)
-          .select()
-          .single();
+          .maybeSingle();
         
         if (updatedSub) {
           setSubscription(updatedSub as Subscription);

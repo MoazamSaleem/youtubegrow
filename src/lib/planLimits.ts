@@ -66,7 +66,7 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     hasScriptWriter: true,
     hasAdvancedAnalytics: true,
     hasGrowthTasks: true,
-    hasYoutubeStrategist: false,
+    hasYoutubeStrategist: true,
     aiStrategistCredits: 10000,
     growthTasksTier: "pro",
     price: {
