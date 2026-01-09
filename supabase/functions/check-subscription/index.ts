@@ -14,7 +14,7 @@ const logStep = (step: string, details?: any) => {
 
 // AI Credits included with each plan
 const PLAN_AI_CREDITS: Record<string, number> = {
-  free: 0,
+  free: 100, // Small amount for free trial
   basic: 1000,
   pro: 10000,
   advanced: 25000,
@@ -50,9 +50,38 @@ serve(async (req) => {
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
     const customers = await stripe.customers.list({ email: user.email, limit: 1 });
     
+    // Get current subscription from database to check for plan changes
+    const { data: currentSubData } = await supabaseClient
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    
+    const previousPlan = currentSubData?.plan || "free";
+    const previousStatus = currentSubData?.status || null;
+    logStep("Current subscription data", { previousPlan, previousStatus });
+
     if (customers.data.length === 0) {
-      logStep("No customer found");
-      return new Response(JSON.stringify({ subscribed: false, plan: "free" }), {
+      logStep("No Stripe customer found");
+      
+      // If they have pending status, it means payment failed or was cancelled
+      if (previousStatus === "pending") {
+        // Reset to free plan
+        await supabaseClient
+          .from("subscriptions")
+          .update({
+            plan: "free",
+            status: "inactive",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", user.id);
+      }
+      
+      return new Response(JSON.stringify({ 
+        subscribed: false, 
+        plan: currentSubData?.plan || "free",
+        has_used_free_trial: currentSubData?.has_used_free_trial || false
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
@@ -69,17 +98,8 @@ serve(async (req) => {
     
     const hasActiveSub = subscriptions.data.length > 0;
     let productId = null;
-    let plan = "free";
+    let plan = previousPlan;
     let subscriptionEnd = null;
-
-    // Get current subscription from database to check for plan changes
-    const { data: currentSubData } = await supabaseClient
-      .from("subscriptions")
-      .select("plan")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    
-    const previousPlan = currentSubData?.plan || "free";
 
     if (hasActiveSub) {
       const subscription = subscriptions.data[0];
@@ -93,11 +113,14 @@ serve(async (req) => {
         "prod_TjlCT4ijKq11hk": "advanced",
       };
       plan = productPlanMap[productId] || "free";
-      logStep("Active subscription found", { plan, subscriptionEnd, previousPlan });
+      logStep("Active subscription found", { plan, subscriptionEnd, previousPlan, previousStatus });
 
-      // Check if plan has changed (upgrade or new subscription)
-      if (previousPlan !== plan) {
-        logStep("Plan changed, updating subscription and adding credits", { from: previousPlan, to: plan });
+      // Check if this is a new subscription or plan upgrade (status was pending or plan changed)
+      const isNewSubscription = previousStatus === "pending" || previousStatus === "trialing";
+      const isPlanUpgrade = previousPlan !== plan;
+
+      if (isNewSubscription || isPlanUpgrade) {
+        logStep("New subscription or plan change detected", { isNewSubscription, isPlanUpgrade, from: previousPlan, to: plan });
         
         // Update subscription in database
         const { error: upsertError } = await supabaseClient
@@ -122,71 +145,120 @@ serve(async (req) => {
 
         // Add AI credits for the new plan
         const creditsToAdd = PLAN_AI_CREDITS[plan] || 0;
+        logStep("Adding AI credits", { plan, creditsToAdd });
+        
         if (creditsToAdd > 0) {
           // Get current credits
-          const { data: tokenData } = await supabaseClient
+          const { data: tokenData, error: tokenFetchError } = await supabaseClient
             .from("user_tokens")
-            .select("ai_credits_balance")
+            .select("*")
             .eq("user_id", user.id)
             .maybeSingle();
 
-          const currentCredits = tokenData?.ai_credits_balance || 0;
-          const newCredits = currentCredits + creditsToAdd;
+          logStep("Current token data", { tokenData, tokenFetchError });
 
-          // Update or insert credits
-          const { error: creditError } = await supabaseClient
-            .from("user_tokens")
-            .upsert({
-              user_id: user.id,
-              ai_credits_balance: newCredits,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: "user_id" });
+          if (tokenData) {
+            // Update existing record
+            const currentCredits = tokenData.ai_credits_balance || 0;
+            const newCredits = currentCredits + creditsToAdd;
 
-          if (creditError) {
-            logStep("Error adding credits", { error: creditError.message });
+            const { error: creditError } = await supabaseClient
+              .from("user_tokens")
+              .update({
+                ai_credits_balance: newCredits,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("user_id", user.id);
+
+            if (creditError) {
+              logStep("Error updating credits", { error: creditError.message });
+            } else {
+              logStep("Credits updated successfully", { creditsAdded: creditsToAdd, newBalance: newCredits });
+            }
           } else {
-            logStep("Credits added successfully", { creditsAdded: creditsToAdd, newBalance: newCredits });
+            // Insert new record
+            const { error: creditError } = await supabaseClient
+              .from("user_tokens")
+              .insert({
+                user_id: user.id,
+                ai_credits_balance: creditsToAdd,
+                balance: 0,
+                total_earned: 0,
+                total_spent: 0,
+                current_xp: 0,
+                ai_credits_used: 0,
+              });
+
+            if (creditError) {
+              logStep("Error inserting credits", { error: creditError.message });
+            } else {
+              logStep("Credits inserted successfully", { creditsAdded: creditsToAdd });
+            }
           }
         }
       } else {
-        // Plan unchanged, just update subscription status
-        const { error: updateError } = await supabaseClient
-          .from("subscriptions")
-          .upsert({
-            user_id: user.id,
-            plan: plan,
-            status: "active",
-            current_period_end: subscriptionEnd,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "user_id" });
+        // Plan unchanged, just update subscription status if needed
+        if (currentSubData?.status !== "active") {
+          const { error: updateError } = await supabaseClient
+            .from("subscriptions")
+            .update({
+              status: "active",
+              current_period_end: subscriptionEnd,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("user_id", user.id);
 
-        if (updateError) {
-          logStep("Error updating subscription", { error: updateError.message });
+          if (updateError) {
+            logStep("Error updating subscription status", { error: updateError.message });
+          }
         }
       }
     } else {
-      logStep("No active subscription found");
+      logStep("No active Stripe subscription found");
+      
+      // If user had a pending paid plan, it failed - revert to free
+      if (previousStatus === "pending") {
+        logStep("Reverting pending subscription to free");
+        await supabaseClient
+          .from("subscriptions")
+          .update({
+            plan: "free",
+            status: "inactive",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", user.id);
+        plan = "free";
+      }
       
       // If user had a paid plan but no longer has active subscription, downgrade to free
-      if (previousPlan !== "free") {
+      if (previousPlan !== "free" && previousStatus === "active") {
         logStep("Downgrading to free plan", { from: previousPlan });
         
         await supabaseClient
           .from("subscriptions")
-          .upsert({
-            user_id: user.id,
+          .update({
             plan: "free",
             status: "inactive",
             updated_at: new Date().toISOString(),
-          }, { onConflict: "user_id" });
+          })
+          .eq("user_id", user.id);
+        plan = "free";
       }
     }
+
+    // Get updated has_used_free_trial status
+    const { data: finalSubData } = await supabaseClient
+      .from("subscriptions")
+      .select("has_used_free_trial")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
     return new Response(JSON.stringify({
       subscribed: hasActiveSub,
       product_id: productId,
       plan,
-      subscription_end: subscriptionEnd
+      subscription_end: subscriptionEnd,
+      has_used_free_trial: finalSubData?.has_used_free_trial || false
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
