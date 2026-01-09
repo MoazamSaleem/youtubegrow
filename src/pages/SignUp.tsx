@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -56,8 +56,44 @@ const SignUp = () => {
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; agreed?: string }>({});
+  const [freeTrialEligible, setFreeTrialEligible] = useState(true);
+  const [checkingEligibility, setCheckingEligibility] = useState(false);
+
+  // Check free trial eligibility when email changes
+  useEffect(() => {
+    const checkEligibility = async () => {
+      if (!email || !z.string().email().safeParse(email).success) {
+        return;
+      }
+
+      setCheckingEligibility(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("check-free-trial-eligibility", {
+          body: { email },
+        });
+
+        if (!error && data) {
+          setFreeTrialEligible(data.eligible);
+          if (!data.eligible && selectedPlan === "free") {
+            setSelectedPlan(null);
+            toast.info("You've already used your free trial. Please choose a paid plan.");
+          }
+        }
+      } catch (err) {
+        console.error("Error checking eligibility:", err);
+      }
+      setCheckingEligibility(false);
+    };
+
+    const timeoutId = setTimeout(checkEligibility, 500);
+    return () => clearTimeout(timeoutId);
+  }, [email, selectedPlan]);
 
   const handlePlanSelect = (plan: SubscriptionPlan) => {
+    if (plan === "free" && !freeTrialEligible) {
+      toast.error("You've already used your free trial. Please choose a paid plan.");
+      return;
+    }
     setSelectedPlan(plan);
   };
 
@@ -83,6 +119,21 @@ const SignUp = () => {
       return;
     }
 
+    // Re-check free trial eligibility before signup
+    if (selectedPlan === "free") {
+      const { data: eligibilityData } = await supabase.functions.invoke("check-free-trial-eligibility", {
+        body: { email },
+      });
+
+      if (eligibilityData && !eligibilityData.eligible) {
+        toast.error("You've already used your free trial. Please choose a paid plan.");
+        setFreeTrialEligible(false);
+        setStep("plan");
+        setSelectedPlan(null);
+        return;
+      }
+    }
+
     setLoading(true);
     const { error } = await signUp(email, password, name);
 
@@ -90,6 +141,7 @@ const SignUp = () => {
       setLoading(false);
       if (error.message.includes("already registered")) {
         toast.error("This email is already registered. Please sign in instead.");
+        setFreeTrialEligible(false);
       } else {
         toast.error(error.message);
       }
@@ -113,7 +165,7 @@ const SignUp = () => {
 
     if (selectedPlan === "free") {
       // Free trial - create subscription and redirect to dashboard
-      const { error: subError } = await supabase.from("subscriptions").insert({
+      const { error: subError } = await supabase.from("subscriptions").upsert({
         user_id: userId,
         plan: "free",
         status: "trialing",
@@ -123,18 +175,29 @@ const SignUp = () => {
         trial_ends_at: trialEnd.toISOString(),
         current_period_start: now.toISOString(),
         current_period_end: trialEnd.toISOString(),
-      });
+      }, { onConflict: "user_id" });
 
       if (subError) {
         console.error("Subscription error:", subError);
       }
+
+      // Add free trial credits
+      await supabase.from("user_tokens").upsert({
+        user_id: userId,
+        ai_credits_balance: 100, // Free trial gets 100 credits
+        balance: 0,
+        total_earned: 0,
+        total_spent: 0,
+        current_xp: 0,
+        ai_credits_used: 0,
+      }, { onConflict: "user_id" });
 
       setLoading(false);
       toast.success("Welcome to TubeGrow! Your 1-month free trial has started.");
       navigate("/dashboard");
     } else {
       // Paid plan - create pending subscription and redirect to Stripe
-      const { error: subError } = await supabase.from("subscriptions").insert({
+      const { error: subError } = await supabase.from("subscriptions").upsert({
         user_id: userId,
         plan: selectedPlan,
         status: "pending",
@@ -142,7 +205,7 @@ const SignUp = () => {
         has_used_free_trial: false,
         current_period_start: now.toISOString(),
         current_period_end: now.toISOString(),
-      });
+      }, { onConflict: "user_id" });
 
       if (subError) {
         console.error("Subscription error:", subError);
@@ -186,6 +249,14 @@ const SignUp = () => {
     ].filter(Boolean);
   };
 
+  // Filter plans based on eligibility
+  const availablePlans = planConfigs.filter(config => {
+    if (config.key === "free" && !freeTrialEligible) {
+      return false;
+    }
+    return true;
+  });
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -228,11 +299,16 @@ const SignUp = () => {
                 <p className="text-muted-foreground text-lg">
                   Select the plan that fits your YouTube growth goals
                 </p>
+                {!freeTrialEligible && (
+                  <p className="text-amber-500 text-sm mt-2">
+                    Note: You've already used your free trial. Please choose a paid plan.
+                  </p>
+                )}
               </div>
 
               {/* Plan Cards */}
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                {planConfigs.map((config) => {
+              <div className={`grid sm:grid-cols-2 ${availablePlans.length === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4 mb-8`}>
+                {availablePlans.map((config) => {
                   const limits = PLAN_LIMITS[config.key];
                   const isSelected = selectedPlan === config.key;
                   const features = getFeatures(config.key);
@@ -400,6 +476,9 @@ const SignUp = () => {
                       onChange={(e) => setEmail(e.target.value)}
                       className={`pl-10 h-12 bg-secondary border-border ${errors.email ? "border-destructive" : ""}`}
                     />
+                    {checkingEligibility && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                    )}
                   </div>
                   {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
                 </div>
@@ -433,24 +512,34 @@ const SignUp = () => {
                       id="terms"
                       checked={agreed}
                       onCheckedChange={(checked) => setAgreed(checked as boolean)}
-                      className="mt-1"
+                      className="mt-0.5"
                     />
-                    <Label htmlFor="terms" className="text-sm text-muted-foreground font-normal">
+                    <label
+                      htmlFor="terms"
+                      className="text-sm text-muted-foreground cursor-pointer"
+                    >
                       I agree to the{" "}
-                      <a href="#" className="text-primary hover:underline">Terms of Service</a>{" "}
+                      <Link to="/terms" className="text-primary hover:underline">
+                        Terms of Service
+                      </Link>{" "}
                       and{" "}
-                      <a href="#" className="text-primary hover:underline">Privacy Policy</a>
-                    </Label>
+                      <Link to="/privacy" className="text-primary hover:underline">
+                        Privacy Policy
+                      </Link>
+                    </label>
                   </div>
                   {errors.agreed && <p className="text-sm text-destructive">{errors.agreed}</p>}
                 </div>
 
-                <Button type="submit" variant="hero" size="lg" className="w-full" disabled={loading}>
+                <Button
+                  type="submit"
+                  variant="hero"
+                  size="lg"
+                  disabled={loading}
+                  className="w-full h-12"
+                >
                   {loading ? (
-                    <>
-                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                      Creating account...
-                    </>
+                    <Loader2 className="h-5 w-5 animate-spin" />
                   ) : selectedPlan === "free" ? (
                     "Start Free Trial"
                   ) : (
@@ -459,7 +548,6 @@ const SignUp = () => {
                 </Button>
               </form>
 
-              {/* Sign In Link */}
               <p className="text-center text-sm text-muted-foreground mt-6">
                 Already have an account?{" "}
                 <Link to="/signin" className="text-primary hover:underline font-medium">

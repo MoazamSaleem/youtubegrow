@@ -153,39 +153,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return;
     
     try {
-      // First check Stripe for active subscription - this also syncs subscription and credits
+      console.log("[AUTH] Refreshing subscription for user:", user.id);
+      
+      // Call check-subscription which syncs with Stripe and updates database
       const { data: stripeData, error: stripeError } = await supabase.functions.invoke("check-subscription");
       
       if (stripeError) {
-        console.error("Error checking subscription:", stripeError);
+        console.error("[AUTH] Error checking subscription:", stripeError);
+      } else {
+        console.log("[AUTH] Stripe check response:", stripeData);
       }
       
-      if (stripeData?.subscribed && stripeData?.plan) {
-        // Refetch subscription from database (it was updated by the edge function)
-        const { data: updatedSub } = await supabase
-          .from("subscriptions")
-          .select("*")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        
-        if (updatedSub) {
-          setSubscription(updatedSub as Subscription);
-          return;
-        }
-      }
-      
-      // Fallback to local subscription data
-      const { data } = await supabase
+      // Always refetch from database to get the latest state
+      const { data: updatedSub, error: subError } = await supabase
         .from("subscriptions")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
-
-      if (data) {
-        setSubscription(data as Subscription);
+      
+      if (subError) {
+        console.error("[AUTH] Error fetching subscription:", subError);
+      } else if (updatedSub) {
+        console.log("[AUTH] Updated subscription:", updatedSub);
+        setSubscription(updatedSub as Subscription);
       }
     } catch (error) {
-      console.error("Error refreshing subscription:", error);
+      console.error("[AUTH] Error refreshing subscription:", error);
     }
   };
 
