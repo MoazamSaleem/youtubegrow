@@ -46,7 +46,7 @@ serve(async (req) => {
     if (pkgError || !pkg) throw new Error("Package not found");
     logStep("Package found", { name: pkg.name, credits: pkg.credits_amount, price: pkg.price_usd });
 
-    const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", { apiVersion: "2025-08-27.basil" });
+    const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", { apiVersion: "2024-06-20" });
 
     // Check for existing customer
     const customers = await stripe.customers.list({ email: user.email, limit: 1 });

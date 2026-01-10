@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -43,6 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
 
   const fetchUserData = async (userId: string) => {
     try {
@@ -149,33 +150,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAdmin(false);
   };
 
-  const refreshSubscription = async () => {
+  const refreshSubscription = useCallback(async () => {
     if (!user) return;
-    
-    try {
-      // First check Stripe for active subscription
-      const { data: stripeData } = await supabase.functions.invoke("check-subscription");
-      
-      if (stripeData?.subscribed && stripeData?.plan) {
-        // Update local subscription with Stripe data
-        const { data: updatedSub } = await supabase
-          .from("subscriptions")
-          .update({
-            plan: stripeData.plan,
-            status: "active",
-            current_period_end: stripeData.subscription_end,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", user.id)
-          .select()
-          .single();
-        
-        if (updatedSub) {
-          setSubscription(updatedSub as Subscription);
+    if (refreshInFlight.current) {
+      await refreshInFlight.current;
+      return;
+    }
+
+    const run = (async () => {
+      try {
+        // First check Stripe and sync server-side subscription
+        const { data: stripeData, error } = await supabase.functions.invoke("check-subscription");
+        if (!error && stripeData?.subscription) {
+          setSubscription(stripeData.subscription as Subscription);
           return;
         }
+        if (error) {
+          console.warn("Subscription check failed, falling back:", error.message ?? error);
+        }
+      } catch (error) {
+        console.warn("Subscription check failed, falling back:", error);
       }
-      
+
       // Fallback to local subscription data
       const { data } = await supabase
         .from("subscriptions")
@@ -186,10 +182,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data) {
         setSubscription(data as Subscription);
       }
-    } catch (error) {
-      console.error("Error refreshing subscription:", error);
-    }
-  };
+    })().finally(() => {
+      refreshInFlight.current = null;
+    });
+
+    refreshInFlight.current = run;
+    await run;
+  }, [user]);
 
   return (
     <AuthContext.Provider
