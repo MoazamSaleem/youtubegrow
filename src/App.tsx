@@ -20,6 +20,7 @@ import GrowthTasks from "./pages/GrowthTasks";
 import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
 import CreditsShop from "./pages/CreditsShop";
+import CreditsHistory from "./pages/CreditsHistory";
 import ThumbnailGenerator from "./pages/ThumbnailGenerator";
 import YouTubeCallback from "./pages/YouTubeCallback";
 import NotFound from "./pages/NotFound";
@@ -49,6 +50,7 @@ const App = () => (
               <Route path="/dashboard/leaderboard" element={<Leaderboard />} />
               <Route path="/dashboard/profile" element={<Profile />} />
               <Route path="/dashboard/credits" element={<CreditsShop />} />
+              <Route path="/dashboard/credits/history" element={<CreditsHistory />} />
               <Route path="/dashboard/thumbnails" element={<ThumbnailGenerator />} />
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/youtube-callback" element={<YouTubeCallback />} />
