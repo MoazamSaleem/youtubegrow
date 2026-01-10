@@ -53,25 +53,52 @@ const Billing = () => {
     }
   }, [searchParams, toast, refreshSubscription]);
 
-  const plans: { key: SubscriptionPlan; icon: React.ElementType; color: string; popular?: boolean }[] = [
-    { key: "free", icon: Zap, color: "from-slate-500 to-slate-600" },
-    { key: "basic", icon: Star, color: "from-blue-500 to-blue-600" },
-    { key: "pro", icon: Crown, color: "from-purple-500 to-purple-600", popular: true },
-    { key: "advanced", icon: Rocket, color: "from-orange-500 to-orange-600" },
+  const plans: { key: SubscriptionPlan; icon: React.ElementType; color: string; description: string; cta: string; popular?: boolean }[] = [
+    { key: "free", icon: Star, color: "from-slate-500 to-slate-600", description: "1 month trial", cta: "Start Free Trial" },
+    { key: "basic", icon: Zap, color: "from-teal-500 to-teal-600", description: "For growing creators", cta: "Get Started" },
+    { key: "pro", icon: Crown, color: "from-teal-500 to-cyan-500", description: "Most popular choice", cta: "Get Pro", popular: true },
+    { key: "advanced", icon: Rocket, color: "from-amber-500 to-orange-500", description: "For serious creators", cta: "Go Advanced" },
   ];
+
+  const getPlanFeatures = (plan: SubscriptionPlan) => {
+    const limits = PLAN_LIMITS[plan];
+    const features: { text: string; included: boolean }[] = [];
+    
+    features.push({ text: limits.maxChannels === 1 ? "Link 1 channel" : `Link up to ${limits.maxChannels} channels`, included: true });
+    features.push({ text: limits.hasAdvancedAnalytics ? "Advanced analytics" : "View basic analytics", included: true });
+    features.push({ text: limits.keywordsPerDay === -1 ? "Unlimited keywords" : `${limits.keywordsPerDay} keywords/day`, included: true });
+    features.push({ text: `${limits.topicsPerDay} topic suggestions/day`, included: true });
+    features.push({ text: limits.channelAnalysisFrequency === "never" ? "AI channel analysis" : limits.channelAnalysisFrequency === "unlimited" ? "Unlimited AI analysis" : `AI analysis ${limits.channelAnalysisFrequency}`, included: limits.channelAnalysisFrequency !== "never" });
+    features.push({ text: limits.competitorAnalysisFrequency === "never" ? "Competitor analysis" : limits.competitorAnalysisFrequency === "daily" ? "Daily competitor analysis" : `Competitor analysis ${limits.competitorAnalysisFrequency}`, included: limits.competitorAnalysisFrequency !== "never" });
+    features.push({ text: "Script writer", included: limits.hasScriptWriter });
+    features.push({ text: limits.thumbnailsPerDay === -1 ? "Unlimited thumbnails" : limits.thumbnailsPerDay > 0 ? `${limits.thumbnailsPerDay} thumbnails/day` : "Thumbnail generator", included: limits.thumbnailsPerDay !== 0 });
+    
+    if (plan === "pro" || plan === "advanced") {
+      features.push({ text: "YouTube Strategist AI", included: limits.hasYoutubeStrategist });
+    }
+    
+    if (plan !== "free") {
+      features.push({ text: "Growth tasks & milestones", included: limits.growthTasksTier !== "none" });
+    }
+    
+    if (limits.aiStrategistCredits > 0) {
+      features.push({ text: `${limits.aiStrategistCredits.toLocaleString()} AI Credits`, included: true });
+    }
+    
+    return features;
+  };
 
   const features = [
     { name: "Channels", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].maxChannels },
     { name: "Keywords/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].keywordsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].keywordsPerDay },
     { name: "Topics/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].topicsPerDay },
-    { name: "AI Strategist Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "—" : PLAN_LIMITS[p].aiStrategistCredits.toLocaleString() },
-    { name: "Growth Tasks Tier", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].growthTasksTier === "none" ? false : PLAN_LIMITS[p].growthTasksTier },
-    { name: "Thumbnails/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].thumbnailsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].thumbnailsPerDay || "—" },
+    { name: "AI Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "—" : PLAN_LIMITS[p].aiStrategistCredits.toLocaleString() },
     { name: "Channel Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].channelAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].channelAnalysisFrequency },
     { name: "Competitor Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].competitorAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].competitorAnalysisFrequency },
     { name: "Script Writer", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasScriptWriter },
-    { name: "Advanced Analytics", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasAdvancedAnalytics },
-    { name: "AI Strategist Access", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasYoutubeStrategist },
+    { name: "Thumbnails/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].thumbnailsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].thumbnailsPerDay || "—" },
+    { name: "YouTube Strategist AI", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasYoutubeStrategist },
+    { name: "Growth Tasks", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].growthTasksTier === "none" ? false : true },
   ];
 
   const handleUpgrade = async (plan: SubscriptionPlan) => {
@@ -294,46 +321,22 @@ const Billing = () => {
                   )}
 
                   <ul className="space-y-2 mb-6">
-                    <li className="flex items-center gap-2 text-sm">
-                      <Check className="h-4 w-4 text-green-500" />
-                      {limits.maxChannels} channel{limits.maxChannels > 1 ? "s" : ""}
-                    </li>
-                    <li className="flex items-center gap-2 text-sm">
-                      <Check className="h-4 w-4 text-green-500" />
-                      {limits.keywordsPerDay === -1 ? "Unlimited" : limits.keywordsPerDay} keywords/day
-                    </li>
-                    <li className="flex items-center gap-2 text-sm">
-                      <Check className="h-4 w-4 text-green-500" />
-                      {limits.topicsPerDay} topics/day
-                    </li>
-                    {limits.aiStrategistCredits > 0 && (
-                      <li className="flex items-center gap-2 text-sm">
-                        <Sparkles className="h-4 w-4 text-primary" />
-                        {limits.aiStrategistCredits.toLocaleString()} AI Credits
+                    {getPlanFeatures(plan.key).map((feature, featureIndex) => (
+                      <li key={featureIndex} className="flex items-center gap-2 text-sm">
+                        {feature.included ? (
+                          <Check className="h-4 w-4 text-green-500 shrink-0" />
+                        ) : (
+                          <X className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+                        )}
+                        <span className={feature.included ? "" : "text-muted-foreground/50"}>
+                          {feature.text}
+                        </span>
                       </li>
-                    )}
-                    {limits.hasScriptWriter && (
-                      <li className="flex items-center gap-2 text-sm">
-                        <Check className="h-4 w-4 text-green-500" />
-                        Script Writer
-                      </li>
-                    )}
-                    {limits.hasAdvancedAnalytics && (
-                      <li className="flex items-center gap-2 text-sm">
-                        <Check className="h-4 w-4 text-green-500" />
-                        Advanced Analytics
-                      </li>
-                    )}
-                    {limits.growthTasksTier !== "none" && (
-                      <li className="flex items-center gap-2 text-sm">
-                        <Check className="h-4 w-4 text-green-500" />
-                        {limits.growthTasksTier.charAt(0).toUpperCase() + limits.growthTasksTier.slice(1)} Growth Tasks
-                      </li>
-                    )}
+                    ))}
                   </ul>
 
                   <Button
-                    variant={isCurrentPlan ? "outline" : plan.popular ? "hero" : "default"}
+                    variant={isCurrentPlan ? "outline" : plan.key === "advanced" ? "premium" : plan.popular ? "hero" : "default"}
                     className="w-full"
                     disabled={isCurrentPlan || upgradingPlan !== null}
                     onClick={() => handleUpgrade(plan.key)}
@@ -343,9 +346,9 @@ const Billing = () => {
                     ) : isCurrentPlan ? (
                       "Current Plan"
                     ) : plan.key === "free" ? (
-                      "Downgrade"
+                      "Start Free Trial"
                     ) : (
-                      "Upgrade"
+                      plan.cta
                     )}
                   </Button>
                 </motion.div>
