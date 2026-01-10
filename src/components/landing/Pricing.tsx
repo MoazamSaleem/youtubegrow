@@ -23,28 +23,79 @@ const Pricing = () => {
 
   const getFeatures = (plan: SubscriptionPlan) => {
     const limits = PLAN_LIMITS[plan];
-    const features = [
-      { text: `Link ${limits.maxChannels === 1 ? "1 channel" : `up to ${limits.maxChannels} channels`}`, included: true },
-      { text: limits.hasAdvancedAnalytics ? "Advanced analytics" : "View basic analytics", included: true },
-      { text: limits.keywordsPerDay === -1 ? "Unlimited keywords" : `${limits.keywordsPerDay} keywords/day`, included: true },
-      { text: `${limits.topicsPerDay} topic suggestions/day`, included: true },
-      { text: limits.channelAnalysisFrequency === "never" ? "AI channel analysis" : limits.channelAnalysisFrequency === "unlimited" ? "Unlimited AI analysis" : `AI analysis ${limits.channelAnalysisFrequency}`, included: limits.channelAnalysisFrequency !== "never" },
-      { text: limits.competitorAnalysisFrequency === "never" ? "Competitor analysis" : limits.competitorAnalysisFrequency === "daily" ? "Daily competitor analysis" : `Competitor analysis ${limits.competitorAnalysisFrequency}`, included: limits.competitorAnalysisFrequency !== "never" },
-      { text: limits.hasScriptWriter ? "AI Script Writer" : "Script writer", included: limits.hasScriptWriter },
-      { text: limits.thumbnailsPerDay === -1 ? "Unlimited thumbnails" : limits.thumbnailsPerDay > 0 ? `${limits.thumbnailsPerDay} thumbnails/day` : "Thumbnail generator", included: limits.thumbnailsPerDay !== 0 },
-    ];
+    const features: { text: string; included: boolean }[] = [];
     
-    // Add AI Strategist for plans that have it
-    if (limits.hasYoutubeStrategist) {
-      features.push({ text: "YouTube Strategist AI", included: true });
+    // Channel linking
+    features.push({ 
+      text: limits.maxChannels === 1 ? "Link 1 channel" : `Link up to ${limits.maxChannels} channels`, 
+      included: true 
+    });
+    
+    // Analytics
+    features.push({ 
+      text: limits.hasAdvancedAnalytics ? "Advanced analytics" : "View basic analytics", 
+      included: true 
+    });
+    
+    // Keywords
+    features.push({ 
+      text: limits.keywordsPerDay === -1 ? "Unlimited keywords" : `${limits.keywordsPerDay} keywords/day`, 
+      included: true 
+    });
+    
+    // Topics
+    features.push({ 
+      text: `${limits.topicsPerDay} topic suggestions/day`, 
+      included: true 
+    });
+    
+    // AI Channel analysis
+    features.push({ 
+      text: limits.channelAnalysisFrequency === "never" 
+        ? "AI channel analysis" 
+        : limits.channelAnalysisFrequency === "unlimited" 
+          ? "Unlimited AI analysis" 
+          : `AI analysis ${limits.channelAnalysisFrequency}`, 
+      included: limits.channelAnalysisFrequency !== "never" 
+    });
+    
+    // Competitor analysis
+    features.push({ 
+      text: limits.competitorAnalysisFrequency === "never" 
+        ? "Competitor analysis" 
+        : limits.competitorAnalysisFrequency === "daily" 
+          ? "Daily competitor analysis" 
+          : `Competitor analysis ${limits.competitorAnalysisFrequency}`, 
+      included: limits.competitorAnalysisFrequency !== "never" 
+    });
+    
+    // Script writer
+    features.push({ 
+      text: "Script writer", 
+      included: limits.hasScriptWriter 
+    });
+    
+    // Thumbnails
+    features.push({ 
+      text: limits.thumbnailsPerDay === -1 
+        ? "Unlimited thumbnails" 
+        : limits.thumbnailsPerDay > 0 
+          ? `${limits.thumbnailsPerDay} thumbnails/day` 
+          : "Thumbnail generator", 
+      included: limits.thumbnailsPerDay !== 0 
+    });
+    
+    // YouTube Strategist AI (only show for Pro+)
+    if (plan === "pro" || plan === "advanced") {
+      features.push({ text: "YouTube Strategist AI", included: limits.hasYoutubeStrategist });
     }
     
-    // Add growth tasks for plans that have it
-    if (limits.growthTasksTier !== "none") {
-      features.push({ text: "Growth tasks & milestones", included: true });
+    // Growth tasks (only show for paid plans)
+    if (plan !== "free") {
+      features.push({ text: "Growth tasks & milestones", included: limits.growthTasksTier !== "none" });
     }
     
-    // Add AI credits info for paid plans
+    // AI credits (only show for paid plans)
     if (limits.aiStrategistCredits > 0) {
       features.push({ text: `${limits.aiStrategistCredits.toLocaleString()} AI Credits`, included: true });
     }
