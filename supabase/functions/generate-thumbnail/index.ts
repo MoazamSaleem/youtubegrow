@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { checkAndDeductCredits, refundCredits } from "../_shared/credits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -89,9 +90,19 @@ serve(async (req) => {
       );
     }
 
+    // Check and deduct AI credits (thumbnails are expensive)
+    const creditCheck = await checkAndDeductCredits(user.id, "generate-thumbnail", "extensive");
+    if (!creditCheck.success) {
+      return new Response(JSON.stringify({ error: creditCheck.error }), {
+        status: 402,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       console.error("LOVABLE_API_KEY is not configured");
+      await refundCredits(user.id, creditCheck.cost!, "AI service not configured - refund");
       return new Response(
         JSON.stringify({ error: "AI service not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -141,6 +152,9 @@ Ultra high resolution, professional quality YouTube thumbnail.`;
       const errorText = await response.text();
       console.error("AI gateway error:", response.status, errorText);
       
+      // Refund credits on error
+      await refundCredits(user.id, creditCheck.cost!, "AI gateway error - refund");
+      
       if (response.status === 429) {
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
@@ -166,6 +180,7 @@ Ultra high resolution, professional quality YouTube thumbnail.`;
 
     if (!imageUrl) {
       console.error("No image in response:", data);
+      await refundCredits(user.id, creditCheck.cost!, "No image generated - refund");
       return new Response(
         JSON.stringify({ error: "No image generated" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
