@@ -4,6 +4,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Button } from "@/components/ui/button";
 import { Check, X, Sparkles, Crown, Zap, Star } from "lucide-react";
+import { PLAN_LIMITS, SubscriptionPlan } from "@/lib/planLimits";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -13,89 +14,94 @@ const Pricing = () => {
   const headerRef = useRef<HTMLDivElement>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
 
-  const plans = [
-    {
-      name: "Free",
-      description: "1 month trial",
-      monthlyPrice: 0,
-      yearlyPrice: 0,
-      icon: Star,
-      features: [
-        { text: "Link 1 channel", included: true },
-        { text: "View basic analytics", included: true },
-        { text: "20 keywords/day", included: true },
-        { text: "2 topic suggestions/day", included: true },
-        { text: "AI channel analysis", included: false },
-        { text: "Competitor analysis", included: false },
-        { text: "Script writer", included: false },
-        { text: "Thumbnail generator", included: false },
-      ],
-      cta: "Start Free Trial",
-      variant: "outline" as const,
-      popular: false,
-    },
-    {
-      name: "Basic",
-      description: "For growing creators",
-      monthlyPrice: 7,
-      yearlyPrice: 70,
-      icon: Zap,
-      features: [
-        { text: "Link 1 channel", included: true },
-        { text: "View analytics", included: true },
-        { text: "50 keywords/day", included: true },
-        { text: "5 topic suggestions/day", included: true },
-        { text: "AI analysis weekly", included: true },
-        { text: "Competitor analysis weekly", included: true },
-        { text: "Growth tasks & milestones", included: true },
-        { text: "Thumbnail generator", included: false },
-      ],
-      cta: "Get Started",
-      variant: "default" as const,
-      popular: false,
-    },
-    {
-      name: "Pro",
-      description: "Most popular choice",
-      monthlyPrice: 15,
-      yearlyPrice: 120,
-      icon: Crown,
-      features: [
-        { text: "Link up to 3 channels", included: true },
-        { text: "Advanced analytics", included: true },
-        { text: "150 keywords/day", included: true },
-        { text: "10 topic suggestions/day", included: true },
-        { text: "AI analysis weekly", included: true },
-        { text: "Competitor analysis weekly", included: true },
-        { text: "AI Script Writer", included: true },
-        { text: "5 thumbnails/day", included: true },
-      ],
-      cta: "Get Pro",
-      variant: "hero" as const,
-      popular: true,
-    },
-    {
-      name: "Advanced",
-      description: "For serious creators",
-      monthlyPrice: 25,
-      yearlyPrice: 230,
-      icon: Sparkles,
-      features: [
-        { text: "Link up to 10 channels", included: true },
-        { text: "Advanced analytics", included: true },
-        { text: "Unlimited keywords", included: true },
-        { text: "20 topic suggestions/day", included: true },
-        { text: "Unlimited AI analysis", included: true },
-        { text: "Daily competitor analysis", included: true },
-        { text: "AI Script Writer", included: true },
-        { text: "Unlimited thumbnails", included: true },
-        { text: "YouTube Strategist AI", included: true },
-      ],
-      cta: "Go Advanced",
-      variant: "premium" as const,
-      popular: false,
-    },
+  const planConfigs: { key: SubscriptionPlan; description: string; icon: typeof Star; cta: string; variant: "outline" | "default" | "hero" | "premium"; popular: boolean }[] = [
+    { key: "free", description: "1 month trial", icon: Star, cta: "Start Free Trial", variant: "outline", popular: false },
+    { key: "basic", description: "For growing creators", icon: Zap, cta: "Get Started", variant: "default", popular: false },
+    { key: "pro", description: "Most popular choice", icon: Crown, cta: "Get Pro", variant: "hero", popular: true },
+    { key: "advanced", description: "For serious creators", icon: Sparkles, cta: "Go Advanced", variant: "premium", popular: false },
   ];
+
+  const getFeatures = (plan: SubscriptionPlan) => {
+    const limits = PLAN_LIMITS[plan];
+    const features: { text: string; included: boolean }[] = [];
+    
+    // Channel linking
+    features.push({ 
+      text: limits.maxChannels === 1 ? "Link 1 channel" : `Link up to ${limits.maxChannels} channels`, 
+      included: true 
+    });
+    
+    // Analytics
+    features.push({ 
+      text: limits.hasAdvancedAnalytics ? "Advanced analytics" : "View basic analytics", 
+      included: true 
+    });
+    
+    // Keywords
+    features.push({ 
+      text: limits.keywordsPerDay === -1 ? "Unlimited keywords" : `${limits.keywordsPerDay} keywords/day`, 
+      included: true 
+    });
+    
+    // Topics
+    features.push({ 
+      text: `${limits.topicsPerDay} topic suggestions/day`, 
+      included: true 
+    });
+    
+    // AI Channel analysis
+    features.push({ 
+      text: limits.channelAnalysisFrequency === "never" 
+        ? "AI channel analysis" 
+        : limits.channelAnalysisFrequency === "unlimited" 
+          ? "Unlimited AI analysis" 
+          : `AI analysis ${limits.channelAnalysisFrequency}`, 
+      included: limits.channelAnalysisFrequency !== "never" 
+    });
+    
+    // Competitor analysis
+    features.push({ 
+      text: limits.competitorAnalysisFrequency === "never" 
+        ? "Competitor analysis" 
+        : limits.competitorAnalysisFrequency === "daily" 
+          ? "Daily competitor analysis" 
+          : `Competitor analysis ${limits.competitorAnalysisFrequency}`, 
+      included: limits.competitorAnalysisFrequency !== "never" 
+    });
+    
+    // Script writer
+    features.push({ 
+      text: "Script writer", 
+      included: limits.hasScriptWriter 
+    });
+    
+    // Thumbnails
+    features.push({ 
+      text: limits.thumbnailsPerDay === -1 
+        ? "Unlimited thumbnails" 
+        : limits.thumbnailsPerDay > 0 
+          ? `${limits.thumbnailsPerDay} thumbnails/day` 
+          : "Thumbnail generator", 
+      included: limits.thumbnailsPerDay !== 0 
+    });
+    
+    // YouTube Strategist AI (only show for Pro+)
+    if (plan === "pro" || plan === "advanced") {
+      features.push({ text: "YouTube Strategist AI", included: limits.hasYoutubeStrategist });
+    }
+    
+    // Growth tasks (only show for paid plans)
+    if (plan !== "free") {
+      features.push({ text: "Growth tasks & milestones", included: limits.growthTasksTier !== "none" });
+    }
+    
+    // AI credits (only show for paid plans)
+    if (limits.aiStrategistCredits > 0) {
+      features.push({ text: `${limits.aiStrategistCredits.toLocaleString()} AI Credits`, included: true });
+    }
+    
+    return features;
+  };
 
   const calculateDiscount = (monthly: number, yearly: number) => {
     if (monthly === 0) return 0;
@@ -195,87 +201,95 @@ const Pricing = () => {
           ref={cardsRef}
           className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 max-w-7xl mx-auto"
         >
-          {plans.map((plan) => (
-            <div
-              key={plan.name}
-              className={`relative ${plan.popular ? "lg:-mt-4 lg:mb-4" : ""}`}
-            >
-              {plan.popular && (
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-primary to-accent rounded-full text-xs font-medium text-primary-foreground z-10">
-                  Most Popular
-                </div>
-              )}
-
+          {planConfigs.map((config) => {
+            const limits = PLAN_LIMITS[config.key];
+            const monthlyPrice = limits.price.monthly;
+            const yearlyPrice = limits.price.yearly;
+            const features = getFeatures(config.key);
+            const planName = config.key.charAt(0).toUpperCase() + config.key.slice(1);
+            
+            return (
               <div
-                className={`glass rounded-2xl p-5 lg:p-6 h-full flex flex-col transition-all hover:-translate-y-1 hover:shadow-lg ${
-                  plan.popular
-                    ? "border-primary/50 shadow-lg shadow-primary/10"
-                    : "hover:border-primary/30"
-                }`}
+                key={config.key}
+                className={`relative ${config.popular ? "lg:-mt-4 lg:mb-4" : ""}`}
               >
-                {/* Plan Header */}
-                <div className="mb-5 lg:mb-6">
-                  <div className="flex items-center gap-2 mb-2">
-                    <plan.icon
-                      className={`h-5 w-5 ${
-                        plan.popular ? "text-primary" : "text-muted-foreground"
-                      }`}
-                    />
-                    <h3 className="font-display text-xl font-semibold">
-                      {plan.name}
-                    </h3>
+                {config.popular && (
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-primary to-accent rounded-full text-xs font-medium text-primary-foreground z-10">
+                    Most Popular
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {plan.description}
-                  </p>
-                </div>
+                )}
 
-                {/* Price */}
-                <div className="mb-5 lg:mb-6">
-                  <div className="flex items-baseline gap-1">
-                    <span className="font-display text-3xl lg:text-4xl font-bold">
-                      ${isYearly ? plan.yearlyPrice : plan.monthlyPrice}
-                    </span>
-                    <span className="text-muted-foreground">
-                      /{isYearly ? "year" : "month"}
-                    </span>
-                  </div>
-                  {isYearly && plan.monthlyPrice > 0 && (
-                    <p className="text-sm text-accent mt-1">
-                      Save {calculateDiscount(plan.monthlyPrice, plan.yearlyPrice)}%
-                    </p>
-                  )}
-                </div>
-
-                {/* Features */}
-                <ul className="space-y-2 lg:space-y-3 mb-6 lg:mb-8 flex-1">
-                  {plan.features.map((feature, featureIndex) => (
-                    <li key={featureIndex} className="flex items-start gap-2">
-                      {feature.included ? (
-                        <Check className="h-5 w-5 text-success shrink-0 mt-0.5" />
-                      ) : (
-                        <X className="h-5 w-5 text-muted-foreground/50 shrink-0 mt-0.5" />
-                      )}
-                      <span
-                        className={`text-sm ${
-                          feature.included
-                            ? "text-foreground"
-                            : "text-muted-foreground/50"
+                <div
+                  className={`glass rounded-2xl p-5 lg:p-6 h-full flex flex-col transition-all hover:-translate-y-1 hover:shadow-lg ${
+                    config.popular
+                      ? "border-primary/50 shadow-lg shadow-primary/10"
+                      : "hover:border-primary/30"
+                  }`}
+                >
+                  {/* Plan Header */}
+                  <div className="mb-5 lg:mb-6">
+                    <div className="flex items-center gap-2 mb-2">
+                      <config.icon
+                        className={`h-5 w-5 ${
+                          config.popular ? "text-primary" : "text-muted-foreground"
                         }`}
-                      >
-                        {feature.text}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                      />
+                      <h3 className="font-display text-xl font-semibold">
+                        {planName}
+                      </h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {config.description}
+                    </p>
+                  </div>
 
-                {/* CTA */}
-                <Button variant={plan.variant} className="w-full" asChild>
-                  <Link to="/signup">{plan.cta}</Link>
-                </Button>
+                  {/* Price */}
+                  <div className="mb-5 lg:mb-6">
+                    <div className="flex items-baseline gap-1">
+                      <span className="font-display text-3xl lg:text-4xl font-bold">
+                        ${isYearly ? yearlyPrice : monthlyPrice}
+                      </span>
+                      <span className="text-muted-foreground">
+                        /{isYearly ? "year" : "month"}
+                      </span>
+                    </div>
+                    {isYearly && monthlyPrice > 0 && (
+                      <p className="text-sm text-accent mt-1">
+                        Save {calculateDiscount(monthlyPrice, yearlyPrice)}%
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Features */}
+                  <ul className="space-y-2 lg:space-y-3 mb-6 lg:mb-8 flex-1">
+                    {features.map((feature, featureIndex) => (
+                      <li key={featureIndex} className="flex items-start gap-2">
+                        {feature.included ? (
+                          <Check className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                        ) : (
+                          <X className="h-5 w-5 text-muted-foreground/50 shrink-0 mt-0.5" />
+                        )}
+                        <span
+                          className={`text-sm ${
+                            feature.included
+                              ? "text-foreground"
+                              : "text-muted-foreground/50"
+                          }`}
+                        >
+                          {feature.text}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* CTA */}
+                  <Button variant={config.variant} className="w-full" asChild>
+                    <Link to="/signup">{config.cta}</Link>
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </section>

@@ -18,7 +18,9 @@ import {
   Gift,
   Zap,
   TrendingUp,
+  History,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 interface CreditPackage {
   id: string;
@@ -135,6 +137,15 @@ const CreditsShop = () => {
         tokens_spent: pkg.token_cost,
       });
 
+      // Log to credits history
+      await supabase.from("credits_history").insert({
+        user_id: user.id,
+        amount: totalCredits,
+        type: "purchase",
+        description: `Purchased ${pkg.name} with tokens`,
+        balance_after: newCreditsBalance,
+      });
+
       setUserCredits({
         ...userCredits,
         balance: newTokenBalance,
@@ -208,9 +219,17 @@ const CreditsShop = () => {
               </div>
               <h1 className="font-display text-2xl sm:text-3xl font-bold">AI Credits Shop</h1>
             </div>
-            <p className="text-muted-foreground">
-              Purchase additional AI Strategist credits to power your YouTube growth.
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-muted-foreground">
+                Purchase additional AI Strategist credits to power your YouTube growth.
+              </p>
+              <Link to="/dashboard/credits/history">
+                <Button variant="outline" size="sm" className="gap-2">
+                  <History className="h-4 w-4" />
+                  View History
+                </Button>
+              </Link>
+            </div>
           </motion.div>
 
           {/* Current Balance */}

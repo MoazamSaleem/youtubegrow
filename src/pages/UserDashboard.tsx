@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
@@ -9,6 +9,7 @@ import { UsageProgress } from "@/components/dashboard/UsageProgress";
 import { Button } from "@/components/ui/button";
 import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import {
   Youtube,
   Eye,
@@ -34,7 +35,8 @@ import {
 
 const UserDashboard = () => {
   const navigate = useNavigate();
-  const { user, subscription, loading } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { user, subscription, loading, refreshSubscription } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [timeFilter, setTimeFilter] = useState<"live" | "daily" | "weekly" | "monthly">("weekly");
   const [channels, setChannels] = useState<any[]>([]);
@@ -48,6 +50,15 @@ const UserDashboard = () => {
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
+
+  // Handle checkout success
+  useEffect(() => {
+    const checkout = searchParams.get("checkout");
+    if (checkout === "success") {
+      toast.success("Subscription activated! Your features are now unlocked.");
+      refreshSubscription();
+    }
+  }, [searchParams, refreshSubscription]);
 
   useEffect(() => {
     if (!loading && !user) {

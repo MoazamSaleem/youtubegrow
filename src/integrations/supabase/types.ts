@@ -124,6 +124,39 @@ export type Database = {
         }
         Relationships: []
       }
+      credits_history: {
+        Row: {
+          amount: number
+          balance_after: number | null
+          created_at: string
+          description: string | null
+          id: string
+          related_id: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          balance_after?: number | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          related_id?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          balance_after?: number | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          related_id?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       credits_purchases: {
         Row: {
           amount_usd: number | null
@@ -356,12 +389,14 @@ export type Database = {
           created_at: string
           current_period_end: string
           current_period_start: string
+          has_used_free_trial: boolean | null
           id: string
           plan: Database["public"]["Enums"]["subscription_plan"]
           status: string
           stripe_customer_id: string | null
           stripe_subscription_id: string | null
           trial_ends_at: string | null
+          trial_started_at: string | null
           updated_at: string
           user_id: string
         }
@@ -370,12 +405,14 @@ export type Database = {
           created_at?: string
           current_period_end?: string
           current_period_start?: string
+          has_used_free_trial?: boolean | null
           id?: string
           plan?: Database["public"]["Enums"]["subscription_plan"]
           status?: string
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
+          trial_started_at?: string | null
           updated_at?: string
           user_id: string
         }
@@ -384,12 +421,14 @@ export type Database = {
           created_at?: string
           current_period_end?: string
           current_period_start?: string
+          has_used_free_trial?: boolean | null
           id?: string
           plan?: Database["public"]["Enums"]["subscription_plan"]
           status?: string
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
+          trial_started_at?: string | null
           updated_at?: string
           user_id?: string
         }

@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { checkAndDeductCredits, refundCredits } from "../_shared/credits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,7 +40,7 @@ serve(async (req) => {
       });
     }
 
-    const userId = claimsData.claims.sub;
+    const userId = claimsData.claims.sub as string;
     console.log('Authenticated user:', userId);
 
     const { messages, channelContext } = await req.json();
@@ -67,10 +68,25 @@ serve(async (req) => {
       }
     }
 
+    // Determine complexity based on message length
+    const totalLength = messages.reduce((acc: number, msg: any) => acc + (msg.content?.length || 0), 0);
+    const complexity = totalLength > 2000 ? "extensive" : totalLength > 500 ? "standard" : "basic";
+
+    // Check and deduct credits
+    const creditCheck = await checkAndDeductCredits(userId, "ai-chat", complexity);
+    if (!creditCheck.success) {
+      return new Response(JSON.stringify({ error: creditCheck.error }), {
+        status: 402,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     
     if (!OPENAI_API_KEY) {
       console.error("OPENAI_API_KEY is not configured");
+      // Refund credits if API not configured
+      await refundCredits(userId, creditCheck.cost!, "AI service not configured - refund");
       return new Response(JSON.stringify({ error: "AI service not configured" }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -116,6 +132,9 @@ Remember: You're their personal YouTube strategist. Be supportive, insightful, a
     });
 
     if (!response.ok) {
+      // Refund credits on API error
+      await refundCredits(userId, creditCheck.cost!, "OpenAI API error - refund");
+      
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
           status: 429,

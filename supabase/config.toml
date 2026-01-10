@@ -35,3 +35,15 @@ verify_jwt = false
 [functions.generate-thumbnail]
 enabled = true
 verify_jwt = false
+
+[functions.check-subscription]
+enabled = true
+verify_jwt = false
+
+[functions.check-trial-expiration]
+enabled = true
+verify_jwt = false
+
+[functions.check-free-trial-eligibility]
+enabled = true
+verify_jwt = false
