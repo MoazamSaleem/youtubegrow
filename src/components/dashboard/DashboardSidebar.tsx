@@ -1,7 +1,9 @@
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { getPlanDisplayName } from "@/lib/planLimits";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Youtube,
   Sparkles,
@@ -21,6 +23,7 @@ import {
   Target,
   Shield,
   User,
+  Coins,
 } from "lucide-react";
 
 interface NavItem {
@@ -37,9 +40,52 @@ interface DashboardSidebarProps {
 }
 
 export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSidebarProps) {
-  const { profile, subscription, isAdmin, signOut } = useAuth();
+  const { user, profile, subscription, isAdmin, signOut } = useAuth();
   const location = useLocation();
   const currentPlan = subscription?.plan || "free";
+  const [aiCredits, setAiCredits] = useState<number>(0);
+
+  // Fetch AI credits balance
+  useEffect(() => {
+    const fetchCredits = async () => {
+      if (!user) return;
+      
+      const { data } = await supabase
+        .from("user_tokens")
+        .select("ai_credits_balance")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      if (data) {
+        setAiCredits(data.ai_credits_balance || 0);
+      }
+    };
+
+    fetchCredits();
+
+    // Subscribe to realtime changes
+    const channel = supabase
+      .channel('user_tokens_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_tokens',
+          filter: `user_id=eq.${user?.id}`,
+        },
+        (payload: any) => {
+          if (payload.new?.ai_credits_balance !== undefined) {
+            setAiCredits(payload.new.ai_credits_balance);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const navigation: NavItem[] = [
     { name: "Overview", icon: BarChart3, href: "/dashboard" },
@@ -144,6 +190,27 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
               </Link>
             )}
           </nav>
+
+          {/* AI Credits Display */}
+          {sidebarOpen && (
+            <div className="px-4 pb-2">
+              <Link 
+                to="/dashboard/credits"
+                className="glass rounded-xl p-3 flex items-center gap-3 hover:bg-secondary/50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+                  <Coins className="h-5 w-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground">AI Credits</p>
+                  <p className="font-bold text-lg leading-tight">
+                    {aiCredits.toLocaleString()}
+                  </p>
+                </div>
+                <Sparkles className="h-4 w-4 text-primary" />
+              </Link>
+            </div>
+          )}
 
           {/* Upgrade Banner */}
           {sidebarOpen && currentPlan !== "advanced" && (
