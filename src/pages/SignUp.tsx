@@ -192,6 +192,15 @@ const SignUp = () => {
         ai_credits_used: 0,
       }, { onConflict: "user_id" });
 
+      // Log to credits history
+      await supabase.from("credits_history").insert({
+        user_id: userId,
+        amount: 100,
+        type: "subscription",
+        description: "Free trial signup bonus",
+        balance_after: 100,
+      });
+
       setLoading(false);
       toast.success("Welcome to TubeGrow! Your 1-month free trial has started.");
       navigate("/dashboard");
