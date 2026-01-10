@@ -2,8 +2,15 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { getPlanDisplayName } from "@/lib/planLimits";
+import { PLAN_LIMITS, getPlanDisplayName, SubscriptionPlan } from "@/lib/planLimits";
 import { supabase } from "@/integrations/supabase/client";
+import { UpgradeModal } from "./UpgradeModal";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Youtube,
   Sparkles,
@@ -24,6 +31,7 @@ import {
   Shield,
   User,
   Coins,
+  ArrowUpRight,
 } from "lucide-react";
 
 interface NavItem {
@@ -31,7 +39,8 @@ interface NavItem {
   icon: React.ElementType;
   href: string;
   locked?: boolean;
-  requiredPlan?: string[];
+  requiredPlan?: SubscriptionPlan[];
+  description?: string;
 }
 
 interface DashboardSidebarProps {
@@ -42,8 +51,11 @@ interface DashboardSidebarProps {
 export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSidebarProps) {
   const { user, profile, subscription, isAdmin, signOut } = useAuth();
   const location = useLocation();
-  const currentPlan = subscription?.plan || "free";
+  const currentPlan = (subscription?.plan || "free") as SubscriptionPlan;
   const [aiCredits, setAiCredits] = useState<number>(0);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [selectedFeature, setSelectedFeature] = useState<string>("");
+  const [requiredPlanForFeature, setRequiredPlanForFeature] = useState<SubscriptionPlan>("basic");
 
   // Fetch AI credits balance
   useEffect(() => {
@@ -88,23 +100,41 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
   }, [user]);
 
   const navigation: NavItem[] = [
-    { name: "Overview", icon: BarChart3, href: "/dashboard" },
-    { name: "Channel Analysis", icon: Brain, href: "/dashboard/analysis", requiredPlan: ["basic", "pro", "advanced"] },
-    { name: "Keywords", icon: Search, href: "/dashboard/keywords" },
-    { name: "Topic Ideas", icon: Lightbulb, href: "/dashboard/topics" },
-    { name: "Script Writer", icon: FileText, href: "/dashboard/scripts", requiredPlan: ["pro", "advanced"] },
-    { name: "Thumbnails", icon: Image, href: "/dashboard/thumbnails", requiredPlan: ["pro", "advanced"] },
-    { name: "Competitors", icon: Users, href: "/dashboard/competitors", requiredPlan: ["basic", "pro", "advanced"] },
-    { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"] },
-    { name: "AI Credits", icon: Sparkles, href: "/dashboard/credits" },
-    { name: "Leaderboard", icon: Crown, href: "/dashboard/leaderboard" },
-    { name: "Profile", icon: User, href: "/dashboard/profile" },
-    { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat" },
+    { name: "Overview", icon: BarChart3, href: "/dashboard", description: "Your channel dashboard" },
+    { name: "Channel Analysis", icon: Brain, href: "/dashboard/analysis", requiredPlan: ["basic", "pro", "advanced"], description: "AI-powered channel insights" },
+    { name: "Keywords", icon: Search, href: "/dashboard/keywords", description: "Research trending keywords" },
+    { name: "Topic Ideas", icon: Lightbulb, href: "/dashboard/topics", description: "Get video topic suggestions" },
+    { name: "Script Writer", icon: FileText, href: "/dashboard/scripts", requiredPlan: ["pro", "advanced"], description: "AI-generated video scripts" },
+    { name: "Thumbnails", icon: Image, href: "/dashboard/thumbnails", requiredPlan: ["pro", "advanced"], description: "Generate eye-catching thumbnails" },
+    { name: "Competitors", icon: Users, href: "/dashboard/competitors", requiredPlan: ["basic", "pro", "advanced"], description: "Analyze competitor channels" },
+    { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"], description: "Track your growth journey" },
+    { name: "AI Credits", icon: Sparkles, href: "/dashboard/credits", description: "Manage your AI credits" },
+    { name: "Leaderboard", icon: Crown, href: "/dashboard/leaderboard", description: "See top creators" },
+    { name: "Profile", icon: User, href: "/dashboard/profile", description: "Your account settings" },
+    { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat", description: "Chat with AI strategist" },
   ];
 
   const isLocked = (item: NavItem): boolean => {
     if (!item.requiredPlan) return false;
     return !item.requiredPlan.includes(currentPlan);
+  };
+
+  const getMinRequiredPlan = (item: NavItem): SubscriptionPlan => {
+    if (!item.requiredPlan || item.requiredPlan.length === 0) return "free";
+    const planOrder: SubscriptionPlan[] = ["free", "basic", "pro", "advanced"];
+    let minPlan: SubscriptionPlan = "advanced";
+    for (const plan of item.requiredPlan) {
+      if (planOrder.indexOf(plan) < planOrder.indexOf(minPlan)) {
+        minPlan = plan;
+      }
+    }
+    return minPlan;
+  };
+
+  const handleLockedClick = (item: NavItem) => {
+    setSelectedFeature(item.name);
+    setRequiredPlanForFeature(getMinRequiredPlan(item));
+    setUpgradeModalOpen(true);
   };
 
   const isActive = (href: string): boolean => {
@@ -113,6 +143,8 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     }
     return location.pathname.startsWith(href);
   };
+
+  const planLimits = PLAN_LIMITS[currentPlan];
 
   return (
     <>
@@ -146,34 +178,66 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-            {navigation.map((item) => {
-              const locked = isLocked(item);
-              const active = isActive(item.href);
-              
-              return (
-                <Link
-                  key={item.name}
-                  to={locked ? "#" : item.href}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors relative ${
-                    active
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                  } ${locked ? "opacity-60 cursor-not-allowed" : ""}`}
-                  onClick={(e) => locked && e.preventDefault()}
-                >
-                  <item.icon className="h-5 w-5 shrink-0" />
-                  {sidebarOpen && (
-                    <>
-                      <span className="font-medium">{item.name}</span>
-                      {locked && (
-                        <Lock className="h-4 w-4 ml-auto text-warning" />
-                      )}
-                    </>
-                  )}
-                </Link>
-              );
-            })}
+          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+            <TooltipProvider>
+              {navigation.map((item) => {
+                const locked = isLocked(item);
+                const active = isActive(item.href);
+                const minPlan = getMinRequiredPlan(item);
+                
+                const navContent = (
+                  <div
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all relative group ${
+                      active
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    } ${locked ? "opacity-60 cursor-pointer hover:opacity-80" : ""}`}
+                    onClick={locked ? () => handleLockedClick(item) : undefined}
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    {sidebarOpen && (
+                      <>
+                        <span className="font-medium flex-1">{item.name}</span>
+                        {locked && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-warning hidden group-hover:inline">
+                              {getPlanDisplayName(minPlan)}+
+                            </span>
+                            <Lock className="h-4 w-4 text-warning" />
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+
+                if (locked) {
+                  return (
+                    <Tooltip key={item.name} delayDuration={300}>
+                      <TooltipTrigger asChild>
+                        {navContent}
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[200px]">
+                        <div className="space-y-1">
+                          <p className="font-semibold">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">{item.description}</p>
+                          <div className="flex items-center gap-1 pt-1 text-warning">
+                            <Lock className="h-3 w-3" />
+                            <span className="text-xs">Requires {getPlanDisplayName(minPlan)} plan</span>
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                }
+
+                return (
+                  <Link key={item.name} to={item.href}>
+                    {navContent}
+                  </Link>
+                );
+              })}
+            </TooltipProvider>
 
             {/* Admin Link */}
             {isAdmin && (
@@ -220,11 +284,29 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
                   <Crown className="h-5 w-5 text-warning" />
                   <span className="font-semibold text-sm">Upgrade Plan</span>
                 </div>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Unlock more features and grow faster
+                <p className="text-xs text-muted-foreground mb-2">
+                  {currentPlan === "free" 
+                    ? "Unlock AI analysis, competitors & more"
+                    : currentPlan === "basic"
+                      ? "Get Script Writer, Thumbnails & AI Chat"
+                      : "Go unlimited with Advanced plan"}
                 </p>
-                <Button variant="premium" size="sm" className="w-full" asChild>
-                  <Link to="/dashboard/billing">Upgrade Now</Link>
+                <div className="text-xs text-muted-foreground mb-3">
+                  <span className="font-medium text-foreground">
+                    {currentPlan === "free" ? "From $7/mo" : currentPlan === "basic" ? "From $15/mo" : "$25/mo"}
+                  </span>
+                </div>
+                <Button 
+                  variant="premium" 
+                  size="sm" 
+                  className="w-full"
+                  onClick={() => {
+                    setSelectedFeature("");
+                    setUpgradeModalOpen(true);
+                  }}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  See What You'll Unlock
                 </Button>
               </div>
             </div>
@@ -259,6 +341,15 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
           </div>
         </div>
       </aside>
+
+      {/* Upgrade Modal */}
+      <UpgradeModal
+        open={upgradeModalOpen}
+        onOpenChange={setUpgradeModalOpen}
+        currentPlan={currentPlan}
+        targetFeature={selectedFeature}
+        requiredPlan={requiredPlanForFeature}
+      />
     </>
   );
 }
