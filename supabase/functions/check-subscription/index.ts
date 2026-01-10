@@ -174,6 +174,15 @@ serve(async (req) => {
               logStep("Error updating credits", { error: creditError.message });
             } else {
               logStep("Credits updated successfully", { creditsAdded: creditsToAdd, newBalance: newCredits });
+              
+              // Log to credits history
+              await supabaseClient.from("credits_history").insert({
+                user_id: user.id,
+                amount: creditsToAdd,
+                type: "subscription",
+                description: `${plan.charAt(0).toUpperCase() + plan.slice(1)} plan subscription`,
+                balance_after: newCredits,
+              });
             }
           } else {
             // Insert new record
@@ -193,6 +202,15 @@ serve(async (req) => {
               logStep("Error inserting credits", { error: creditError.message });
             } else {
               logStep("Credits inserted successfully", { creditsAdded: creditsToAdd });
+              
+              // Log to credits history
+              await supabaseClient.from("credits_history").insert({
+                user_id: user.id,
+                amount: creditsToAdd,
+                type: "subscription",
+                description: `${plan.charAt(0).toUpperCase() + plan.slice(1)} plan subscription`,
+                balance_after: creditsToAdd,
+              });
             }
           }
         }
