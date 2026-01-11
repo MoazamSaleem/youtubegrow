@@ -46,6 +46,13 @@ const YouTubeCallback = () => {
       localStorage.removeItem("youtube_oauth_state");
 
       try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error("Your session expired. Please sign in again.");
+        }
+
         // Parse state to get user ID
         const stateData = JSON.parse(atob(state));
         const userId = stateData.userId;
@@ -62,7 +69,8 @@ const YouTubeCallback = () => {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             },
             body: JSON.stringify({ code, redirectUri, userId }),
           }

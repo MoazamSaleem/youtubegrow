@@ -67,13 +67,15 @@ export const YouTubeChannelLink = () => {
     setLinking(true);
 
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const redirectUri = `${window.location.origin}/youtube-callback`;
       const state = btoa(JSON.stringify({ userId: user.id, timestamp: Date.now() }));
-
-      const { data, error } = await supabase.functions.invoke("youtube-oauth", {
-        body: { redirectUri, state },
-        headers: { "Content-Type": "application/json" },
-      });
 
       // Handle query params for action
       const response = await fetch(
@@ -82,7 +84,8 @@ export const YouTubeChannelLink = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({ redirectUri, state }),
         }
