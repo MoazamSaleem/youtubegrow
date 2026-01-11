@@ -2,56 +2,56 @@ project_id = "ipeqfhtrmgxjsjcdeowp"
 
 [functions.generate-topics]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.research-keywords]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.ai-chat]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-script]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-competitor]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.youtube-oauth]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.create-checkout]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.customer-portal]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.purchase-credits]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.reset-recurring-tasks]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-thumbnail]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.check-subscription]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.check-trial-expiration]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 
 [functions.check-free-trial-eligibility]
 enabled = true
-verify_jwt = false
+verify_jwt = true
