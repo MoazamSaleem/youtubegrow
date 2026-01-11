@@ -46,7 +46,7 @@ verify_jwt = true
 
 [functions.check-subscription]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 
 [functions.check-trial-expiration]
 enabled = true
