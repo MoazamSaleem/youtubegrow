@@ -1,4 +1,4 @@
-project_id = "jxhnuoclxreghspjrffk"
+project_id = "ipeqfhtrmgxjsjcdeowp"
 
 [functions.generate-topics]
 enabled = true
@@ -21,6 +21,14 @@ enabled = true
 verify_jwt = false
 
 [functions.youtube-oauth]
+enabled = true
+verify_jwt = false
+
+[functions.create-checkout]
+enabled = true
+verify_jwt = false
+
+[functions.customer-portal]
 enabled = true
 verify_jwt = false
 
