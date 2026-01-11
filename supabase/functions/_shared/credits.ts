@@ -7,6 +7,7 @@ export const CREDIT_COSTS = {
   "generate-script": { basic: 50, standard: 50, extensive: 50 },
   "research-keywords": { basic: 20, standard: 20, extensive: 20 },
   "analyze-competitor": { basic: 50, standard: 50, extensive: 50 },
+  "analyze-channel": { basic: 100, standard: 100, extensive: 100 },
   "generate-thumbnail": { basic: 100, standard: 100, extensive: 100 },
 };
 
