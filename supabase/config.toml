@@ -26,11 +26,11 @@ verify_jwt = true
 
 [functions.create-checkout]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 
 [functions.customer-portal]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 
 [functions.purchase-credits]
 enabled = true
