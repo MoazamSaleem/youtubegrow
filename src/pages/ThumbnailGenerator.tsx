@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Image, Sparkles, Download, Loader2, Lock, Wand2 } from "lucide-react";
+import { Image, Sparkles, Download, Loader2, Lock, Wand2, Menu } from "lucide-react";
 import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -162,45 +162,61 @@ const ThumbnailGenerator = () => {
     <div className="min-h-screen bg-background flex">
       <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
-      <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "lg:ml-64" : "lg:ml-20"}`}>
-        <div className="p-8">
+      <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "lg:ml-64" : "ml-0"}`}>
+        {/* Header */}
+        <header className="sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="lg:hidden"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-gradient-to-br from-primary to-accent">
+                  <Image className="h-5 w-5 text-primary-foreground" />
+                </div>
+                <div>
+                  <h1 className="font-display text-lg sm:text-xl font-bold">Thumbnail Generator</h1>
+                  <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">
+                    Create eye-catching YouTube thumbnails with AI
+                  </p>
+                </div>
+              </div>
+            </div>
+            {canGenerate && (
+              <div className="text-sm text-muted-foreground bg-muted px-3 py-1.5 rounded-lg">
+                {isUnlimited ? (
+                  <span className="text-primary font-medium">Unlimited</span>
+                ) : (
+                  <>
+                    <span className="font-medium text-foreground">{dailyUsage}</span>
+                    <span className="hidden sm:inline"> / {dailyLimit} today</span>
+                    <span className="sm:hidden">/{dailyLimit}</span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </header>
+
+        <div className="p-4 lg:p-8">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
-                  <Image className="w-8 h-8 text-primary" />
-                  Thumbnail Generator
-                </h1>
-                <p className="text-muted-foreground mt-1">
-                  Create eye-catching YouTube thumbnails with AI
-                </p>
-              </div>
-              {canGenerate && (
-                <div className="text-sm text-muted-foreground bg-muted px-4 py-2 rounded-lg">
-                  {isUnlimited ? (
-                    <span className="text-primary font-medium">Unlimited</span>
-                  ) : (
-                    <>
-                      <span className="font-medium text-foreground">{dailyUsage}</span>
-                      <span> / {dailyLimit} today</span>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
             {!canGenerate ? (
-              <Card className="border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-16">
+              <Card className="border-dashed max-w-2xl mx-auto">
+                <CardContent className="flex flex-col items-center justify-center py-12 sm:py-16">
                   <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
                     <Lock className="w-8 h-8 text-muted-foreground" />
                   </div>
-                  <h3 className="text-xl font-semibold mb-2">Upgrade to Unlock</h3>
-                  <p className="text-muted-foreground text-center max-w-md mb-6">
+                  <h3 className="text-xl font-semibold mb-2 text-center">Upgrade to Unlock</h3>
+                  <p className="text-muted-foreground text-center max-w-md mb-6 px-4">
                     Thumbnail generation is available on Pro (5/day) and Advanced (unlimited) plans.
                   </p>
                   <Button onClick={() => navigate("/dashboard/billing")}>
@@ -210,7 +226,7 @@ const ThumbnailGenerator = () => {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
                 {/* Generator Form */}
                 <Card className="lg:col-span-1">
                   <CardHeader>
@@ -293,15 +309,15 @@ const ThumbnailGenerator = () => {
                   
                   {generatedThumbnails.length === 0 ? (
                     <Card className="border-dashed">
-                      <CardContent className="flex flex-col items-center justify-center py-16">
+                      <CardContent className="flex flex-col items-center justify-center py-12 sm:py-16">
                         <Image className="w-12 h-12 text-muted-foreground mb-4" />
-                        <p className="text-muted-foreground">
+                        <p className="text-muted-foreground text-center">
                           Your generated thumbnails will appear here
                         </p>
                       </CardContent>
                     </Card>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {generatedThumbnails.map((thumbnail, index) => (
                         <motion.div
                           key={index}

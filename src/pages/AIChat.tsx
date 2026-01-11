@@ -317,16 +317,16 @@ const AIChat = () => {
 
             {/* Credits Display */}
             {planLimits.aiStrategistCredits > 0 && (
-              <div className="hidden sm:flex items-center gap-4">
+              <div className="flex items-center gap-2 sm:gap-4">
                 <div className="text-right">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 sm:gap-2">
                     <Sparkles className="h-4 w-4 text-primary" />
-                    <span className="font-semibold">{userCredits.ai_credits_balance}</span>
-                    <span className="text-sm text-muted-foreground">/ {planLimits.aiStrategistCredits}</span>
+                    <span className="font-semibold text-sm sm:text-base">{userCredits.ai_credits_balance}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground hidden sm:inline">/ {planLimits.aiStrategistCredits}</span>
                   </div>
-                  <Progress value={creditsPercentage} className="h-1.5 w-32" />
+                  <Progress value={creditsPercentage} className="h-1.5 w-20 sm:w-32" />
                 </div>
-                <Badge variant="outline" className="gap-1">
+                <Badge variant="outline" className="gap-1 hidden sm:flex">
                   <Coins className="h-3 w-3" />
                   Credits
                 </Badge>

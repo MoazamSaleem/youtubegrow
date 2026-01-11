@@ -16,6 +16,7 @@ import Billing from "./pages/Billing";
 import AIChat from "./pages/AIChat";
 import ScriptWriter from "./pages/ScriptWriter";
 import CompetitorAnalysis from "./pages/CompetitorAnalysis";
+import ChannelAnalysis from "./pages/ChannelAnalysis";
 import GrowthTasks from "./pages/GrowthTasks";
 import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
@@ -46,6 +47,7 @@ const App = () => (
               <Route path="/dashboard/chat" element={<AIChat />} />
               <Route path="/dashboard/scripts" element={<ScriptWriter />} />
               <Route path="/dashboard/competitors" element={<CompetitorAnalysis />} />
+              <Route path="/dashboard/analysis" element={<ChannelAnalysis />} />
               <Route path="/dashboard/growth" element={<GrowthTasks />} />
               <Route path="/dashboard/leaderboard" element={<Leaderboard />} />
               <Route path="/dashboard/profile" element={<Profile />} />
