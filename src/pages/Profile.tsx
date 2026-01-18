@@ -27,6 +27,10 @@ import {
   Coins,
   Flame,
   Save,
+  ShieldAlert,
+  KeyRound,
+  UserX,
+  Trash2,
 } from "lucide-react";
 
 interface BadgeData {
@@ -82,11 +86,13 @@ const RARITY_BORDER: Record<string, string> = {
 };
 
 const Profile = () => {
-  const { user, profile: authProfile } = useAuth();
+  const { user, profile: authProfile, signOut } = useAuth();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [passwordUpdating, setPasswordUpdating] = useState(false);
+  const [accountActionLoading, setAccountActionLoading] = useState(false);
   const [allBadges, setAllBadges] = useState<BadgeData[]>([]);
   const [userBadges, setUserBadges] = useState<UserBadge[]>([]);
   const [profileData, setProfileData] = useState<ProfileData>({
@@ -94,6 +100,9 @@ const Profile = () => {
     show_on_leaderboard: true,
     displayed_badges: [],
   });
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [deactivateDays, setDeactivateDays] = useState(7);
 
   useEffect(() => {
     if (user) fetchData();
@@ -193,6 +202,165 @@ const Profile = () => {
     }
   };
 
+  const getSessionWithRefresh = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return session;
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return null;
+  };
+
+  const invokeAccountAction = async (action: string, payload?: Record<string, unknown>) => {
+    const session = await getSessionWithRefresh();
+    if (!session?.access_token) {
+      throw new Error("Your session expired. Please sign in again.");
+    }
+
+    const { data, error } = await supabase.functions.invoke("account-actions", {
+      body: { action, ...payload },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (error) {
+      throw new Error(error.message || "Account action failed");
+    }
+
+    return data;
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPassword || !confirmPassword) {
+      toast({
+        title: "Missing password",
+        description: "Enter and confirm your new password.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Passwords do not match",
+        description: "Make sure both password fields match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPasswordUpdating(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+
+      setNewPassword("");
+      setConfirmPassword("");
+      toast({
+        title: "Password updated",
+        description: "Your password has been changed successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Password update failed",
+        description: error.message || "Unable to update password.",
+        variant: "destructive",
+      });
+    } finally {
+      setPasswordUpdating(false);
+    }
+  };
+
+  const handleTemporaryDeactivation = async () => {
+    if (!user) return;
+    if (!Number.isFinite(deactivateDays) || deactivateDays <= 0) {
+      toast({
+        title: "Invalid duration",
+        description: "Enter a valid number of days.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const confirm = window.confirm(
+      `Deactivate your account for ${deactivateDays} day(s)? You will be signed out immediately.`
+    );
+    if (!confirm) return;
+
+    setAccountActionLoading(true);
+    try {
+      await invokeAccountAction("deactivate-temporary", {
+        durationHours: Math.round(deactivateDays * 24),
+      });
+      toast({
+        title: "Account deactivated",
+        description: "You can sign back in after the deactivation period ends.",
+      });
+      await signOut();
+    } catch (error: any) {
+      toast({
+        title: "Deactivation failed",
+        description: error.message || "Unable to deactivate account.",
+        variant: "destructive",
+      });
+    } finally {
+      setAccountActionLoading(false);
+    }
+  };
+
+  const handlePermanentDeactivation = async () => {
+    const confirm = window.confirm(
+      "Permanently deactivate your account? This disables sign-in for a long period."
+    );
+    if (!confirm) return;
+
+    setAccountActionLoading(true);
+    try {
+      await invokeAccountAction("deactivate-permanent");
+      toast({
+        title: "Account deactivated",
+        description: "Your account has been permanently deactivated.",
+      });
+      await signOut();
+    } catch (error: any) {
+      toast({
+        title: "Deactivation failed",
+        description: error.message || "Unable to deactivate account.",
+        variant: "destructive",
+      });
+    } finally {
+      setAccountActionLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirm = window.confirm(
+      "Delete your account permanently? This action cannot be undone."
+    );
+    if (!confirm) return;
+
+    setAccountActionLoading(true);
+    try {
+      await invokeAccountAction("delete-account");
+      toast({
+        title: "Account deleted",
+        description: "Your account has been removed.",
+      });
+      await signOut();
+    } catch (error: any) {
+      toast({
+        title: "Delete failed",
+        description: error.message || "Unable to delete account.",
+        variant: "destructive",
+      });
+    } finally {
+      setAccountActionLoading(false);
+    }
+  };
+
   const earnedBadgeIds = new Set(userBadges.map((b) => b.badge_id));
 
   if (loading) {
@@ -269,6 +437,112 @@ const Profile = () => {
             className="mb-8"
           >
             <YouTubeChannelLink />
+          </motion.div>
+
+          {/* Security */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18 }}
+            className="glass rounded-xl p-6 mb-8"
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <KeyRound className="h-5 w-5 text-primary" />
+              <h2 className="font-display text-lg font-bold">Security</h2>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">New Password</label>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Confirm Password</label>
+                <Input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm new password"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <Button onClick={handleChangePassword} disabled={passwordUpdating}>
+                {passwordUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update Password"}
+              </Button>
+            </div>
+          </motion.div>
+
+          {/* Account Actions */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.22 }}
+            className="glass rounded-xl p-6 mb-8"
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <ShieldAlert className="h-5 w-5 text-warning" />
+              <h2 className="font-display text-lg font-bold">Account Actions</h2>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Temporarily deactivate your account for a set number of days. You will be signed out immediately.
+                </p>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={deactivateDays}
+                    onChange={(e) => setDeactivateDays(Number(e.target.value))}
+                    className="max-w-[120px]"
+                  />
+                  <span className="text-sm text-muted-foreground">days</span>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={handleTemporaryDeactivation}
+                  disabled={accountActionLoading}
+                  className="gap-2"
+                >
+                  <UserX className="h-4 w-4" />
+                  Deactivate Temporarily
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Permanently deactivate or delete your account. These actions sign you out immediately.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="destructive"
+                    onClick={handlePermanentDeactivation}
+                    disabled={accountActionLoading}
+                    className="gap-2"
+                  >
+                    <UserX className="h-4 w-4" />
+                    Deactivate Permanently
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleDeleteAccount}
+                    disabled={accountActionLoading}
+                    className="gap-2"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete Account
+                  </Button>
+                </div>
+              </div>
+            </div>
           </motion.div>
 
           {/* Displayed Badges */}

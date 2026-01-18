@@ -14,6 +14,49 @@ const YouTubeCallback = () => {
   const [message, setMessage] = useState("Connecting your YouTube channel...");
   const [channelName, setChannelName] = useState<string | null>(null);
 
+  const getSessionWithRefresh = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return session;
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return null;
+  };
+
+  const invokeWithAuthRetry = async <T,>(payload: {
+    body: Record<string, unknown>;
+    accessToken: string;
+  }) => {
+    let { data, error } = await supabase.functions.invoke<T>("youtube-oauth", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${payload.accessToken}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (!error) return { data, error };
+
+    const message = error?.message?.toLowerCase() || "";
+    if (!message.includes("invalid jwt") && !message.includes("401")) {
+      return { data, error };
+    }
+
+    const refreshed = await getSessionWithRefresh();
+    if (!refreshed?.access_token) {
+      return { data, error };
+    }
+
+    return supabase.functions.invoke<T>("youtube-oauth", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${refreshed.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+  };
+
   useEffect(() => {
     const handleCallback = async () => {
       const code = searchParams.get("code");
@@ -46,7 +89,7 @@ const YouTubeCallback = () => {
       localStorage.removeItem("youtube_oauth_state");
 
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = await getSessionWithRefresh();
         if (!session?.access_token) {
           throw new Error("Your session expired. Please sign in again.");
         }
@@ -61,12 +104,9 @@ const YouTubeCallback = () => {
 
         const redirectUri = `${window.location.origin}/youtube-callback`;
 
-        const { data, error } = await supabase.functions.invoke("youtube-oauth", {
+        const { data, error } = await invokeWithAuthRetry<{ channel?: { name?: string } }>({
           body: { action: "callback", code, redirectUri, userId },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
+          accessToken: session.access_token,
         });
 
         if (error) {

@@ -56,6 +56,49 @@ export const YouTubeChannelLink = () => {
   const planLimits = getPlanLimits(subscription?.plan || "free");
   const maxChannelsReached = channels.length >= planLimits.maxChannels;
 
+  const getSessionWithRefresh = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return session;
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return null;
+  };
+
+  const invokeWithAuthRetry = async <T,>(payload: {
+    body: Record<string, unknown>;
+    accessToken: string;
+  }) => {
+    let { data, error } = await supabase.functions.invoke<T>("youtube-oauth", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${payload.accessToken}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (!error) return { data, error };
+
+    const message = error?.message?.toLowerCase() || "";
+    if (!message.includes("invalid jwt") && !message.includes("401")) {
+      return { data, error };
+    }
+
+    const refreshed = await getSessionWithRefresh();
+    if (!refreshed?.access_token) {
+      return { data, error };
+    }
+
+    return supabase.functions.invoke<T>("youtube-oauth", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${refreshed.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+  };
+
   useEffect(() => {
     if (user) {
       fetchChannels();
@@ -88,7 +131,7 @@ export const YouTubeChannelLink = () => {
     setLinking(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSessionWithRefresh();
       if (!session?.access_token) {
         throw new Error("Your session expired. Please sign in again.");
       }
@@ -96,12 +139,9 @@ export const YouTubeChannelLink = () => {
       const redirectUri = `${window.location.origin}/youtube-callback`;
       const state = btoa(JSON.stringify({ userId: user.id, timestamp: Date.now() }));
 
-      const { data, error } = await supabase.functions.invoke("youtube-oauth", {
+      const { data, error } = await invokeWithAuthRetry<{ authUrl?: string }>({
         body: { action: "auth-url", redirectUri, state },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
+        accessToken: session.access_token,
       });
 
       if (error) {
@@ -241,7 +281,7 @@ export const YouTubeChannelLink = () => {
     setAnalyticsError(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSessionWithRefresh();
       if (!session?.access_token) {
         throw new Error("Your session expired. Please sign in again.");
       }
@@ -251,7 +291,7 @@ export const YouTubeChannelLink = () => {
         .toISOString()
         .split("T")[0];
 
-      const { data, error } = await supabase.functions.invoke("youtube-oauth", {
+      const { data, error } = await invokeWithAuthRetry<{ analytics?: any }>({
         body: {
           action: "analytics",
           channelId: channel.channel_id,
@@ -259,10 +299,7 @@ export const YouTubeChannelLink = () => {
           startDate,
           endDate,
         },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
+        accessToken: session.access_token,
       });
 
       if (error) {
