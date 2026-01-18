@@ -61,8 +61,11 @@ const YouTubeCallback = () => {
 
         const redirectUri = `${window.location.origin}/youtube-callback`;
 
-        const { data, error } = await supabase.functions.invoke("youtube-oauth?action=callback", {
-          body: { code, redirectUri, userId },
+        const { data, error } = await supabase.functions.invoke("youtube-oauth", {
+          body: { action: "callback", code, redirectUri, userId },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
         });
 
         if (error) {

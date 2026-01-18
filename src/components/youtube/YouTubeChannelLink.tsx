@@ -96,8 +96,11 @@ export const YouTubeChannelLink = () => {
       const redirectUri = `${window.location.origin}/youtube-callback`;
       const state = btoa(JSON.stringify({ userId: user.id, timestamp: Date.now() }));
 
-      const { data, error } = await supabase.functions.invoke("youtube-oauth?action=auth-url", {
-        body: { redirectUri, state },
+      const { data, error } = await supabase.functions.invoke("youtube-oauth", {
+        body: { action: "auth-url", redirectUri, state },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       if (error) {
@@ -237,17 +240,26 @@ export const YouTubeChannelLink = () => {
     setAnalyticsError(null);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const endDate = new Date().toISOString().split("T")[0];
       const startDate = new Date(Date.now() - 27 * 24 * 60 * 60 * 1000)
         .toISOString()
         .split("T")[0];
 
-      const { data, error } = await supabase.functions.invoke("youtube-oauth?action=analytics", {
+      const { data, error } = await supabase.functions.invoke("youtube-oauth", {
         body: {
+          action: "analytics",
           channelId: channel.channel_id,
           userId: user.id,
           startDate,
           endDate,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
         },
       });
 
@@ -354,11 +366,12 @@ export const YouTubeChannelLink = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ delay: index * 0.1 }}
-                className={`flex items-center gap-4 p-4 rounded-xl border ${
+                onClick={() => loadAnalytics(channel)}
+                className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer ${
                   channel.is_primary
                     ? "border-primary bg-primary/5"
                     : "border-border bg-card"
-                }`}
+                } ${selectedChannelId === channel.channel_id ? "ring-2 ring-primary/30" : ""}`}
               >
                 {channel.thumbnail_url ? (
                   <img

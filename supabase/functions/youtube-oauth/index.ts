@@ -13,7 +13,18 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const action = url.searchParams.get("action");
+    let action = url.searchParams.get("action");
+    let body: any = null;
+    if (req.method !== "GET") {
+      try {
+        body = await req.json();
+      } catch {
+        body = null;
+      }
+    }
+    if (!action && body?.action) {
+      action = body.action;
+    }
     
     const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID");
     const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET");
@@ -33,7 +44,7 @@ serve(async (req) => {
 
     if (action === "auth-url") {
       // Generate OAuth URL
-      const { redirectUri, state } = await req.json();
+      const { redirectUri, state } = body ?? {};
       
       const scopes = [
         "https://www.googleapis.com/auth/youtube.readonly",
@@ -56,7 +67,7 @@ serve(async (req) => {
 
     if (action === "callback") {
       // Handle OAuth callback
-      const { code, redirectUri, userId } = await req.json();
+      const { code, redirectUri, userId } = body ?? {};
       
       // Exchange code for tokens
       const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -154,7 +165,7 @@ serve(async (req) => {
 
     if (action === "refresh") {
       // Refresh access token
-      const { channelId, userId } = await req.json();
+      const { channelId, userId } = body ?? {};
       
       const { data: channelData, error: fetchError } = await supabase
         .from("youtube_channels")
@@ -206,11 +217,11 @@ serve(async (req) => {
 
     if (action === "analytics") {
       // Fetch analytics data
-      const { channelId, userId, startDate, endDate } = await req.json();
+      const { channelId, userId, startDate, endDate } = body ?? {};
       
       const { data: channelData, error: fetchError } = await supabase
         .from("youtube_channels")
-        .select("access_token, token_expires_at")
+        .select("access_token, refresh_token, token_expires_at")
         .eq("user_id", userId)
         .eq("channel_id", channelId)
         .single();
@@ -225,18 +236,43 @@ serve(async (req) => {
       let accessToken = channelData.access_token;
       
       // Check if token needs refresh
-      if (new Date(channelData.token_expires_at) < new Date()) {
-        // Trigger token refresh
-        const refreshResponse = await fetch(`${SUPABASE_URL}/functions/v1/youtube-oauth?action=refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channelId, userId }),
-        });
-        
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          accessToken = refreshData.accessToken;
+      if (channelData.token_expires_at && new Date(channelData.token_expires_at) < new Date()) {
+        if (!channelData.refresh_token) {
+          return new Response(JSON.stringify({ error: "Refresh token missing" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
+
+        const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: GOOGLE_CLIENT_ID,
+            client_secret: GOOGLE_CLIENT_SECRET,
+            refresh_token: channelData.refresh_token,
+            grant_type: "refresh_token",
+          }),
+        });
+
+        if (!tokenResponse.ok) {
+          return new Response(JSON.stringify({ error: "Failed to refresh token" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const tokens = await tokenResponse.json();
+        accessToken = tokens.access_token;
+
+        await supabase
+          .from("youtube_channels")
+          .update({
+            access_token: tokens.access_token,
+            token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+          })
+          .eq("user_id", userId)
+          .eq("channel_id", channelId);
       }
       
       // Fetch analytics from YouTube Analytics API
