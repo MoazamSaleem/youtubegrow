@@ -65,6 +65,7 @@ const YouTubeCallback = () => {
           body: { action: "callback", code, redirectUri, userId },
           headers: {
             Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
         });
 

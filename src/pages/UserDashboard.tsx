@@ -143,7 +143,7 @@ const UserDashboard = () => {
               <p className="text-sm text-muted-foreground mb-4">
                 You can link up to {limits.maxChannels} channel{limits.maxChannels > 1 ? "s" : ""} with your {currentPlan} plan.
               </p>
-              <Button variant="hero" size="lg">
+              <Button variant="hero" size="lg" onClick={() => navigate("/dashboard/profile")}>
                 <Youtube className="h-5 w-5 mr-2" />
                 Connect YouTube
               </Button>

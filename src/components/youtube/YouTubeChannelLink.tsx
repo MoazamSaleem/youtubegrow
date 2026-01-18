@@ -100,6 +100,7 @@ export const YouTubeChannelLink = () => {
         body: { action: "auth-url", redirectUri, state },
         headers: {
           Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
       });
 
@@ -260,6 +261,7 @@ export const YouTubeChannelLink = () => {
         },
         headers: {
           Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
       });
 
