@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { getPlanLimits } from "@/lib/planLimits";
 import {
   Youtube,
   Link2,
@@ -29,13 +31,30 @@ interface YouTubeChannel {
   updated_at: string;
 }
 
+interface ChannelAnalyticsSummary {
+  views: number;
+  minutesWatched: number;
+  subscribersGained: number;
+  subscribersLost: number;
+  averageViewDuration: number;
+  periodLabel: string;
+}
+
 export const YouTubeChannelLink = () => {
-  const { user } = useAuth();
+  const { user, subscription } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [linking, setLinking] = useState(false);
   const [unlinking, setUnlinking] = useState<string | null>(null);
   const [channels, setChannels] = useState<YouTubeChannel[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [analyticsSummary, setAnalyticsSummary] = useState<ChannelAnalyticsSummary | null>(null);
+
+  const planLimits = getPlanLimits(subscription?.plan || "free");
+  const maxChannelsReached = channels.length >= planLimits.maxChannels;
 
   useEffect(() => {
     if (user) {
@@ -69,37 +88,27 @@ export const YouTubeChannelLink = () => {
     setLinking(true);
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
         throw new Error("Your session expired. Please sign in again.");
       }
 
       const redirectUri = `${window.location.origin}/youtube-callback`;
       const state = btoa(JSON.stringify({ userId: user.id, timestamp: Date.now() }));
 
-      // Handle query params for action
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=auth-url`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ redirectUri, state }),
-        }
-      );
+      const { data, error } = await supabase.functions.invoke("youtube-oauth?action=auth-url", {
+        body: { redirectUri, state },
+      });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to get auth URL");
+      if (error) {
+        throw new Error(error.message || "Failed to get auth URL");
       }
 
-      const { authUrl } = await response.json();
-      
+      const { authUrl } = data || {};
+      if (!authUrl) {
+        throw new Error("Failed to get auth URL");
+      }
+
       // Store state in localStorage for verification
       localStorage.setItem("youtube_oauth_state", state);
       
@@ -181,6 +190,101 @@ export const YouTubeChannelLink = () => {
     }
   };
 
+  const parseAnalyticsSummary = (
+    analytics: any,
+    startDate: string,
+    endDate: string
+  ): ChannelAnalyticsSummary | null => {
+    const rows = analytics?.rows ?? [];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return null;
+    }
+
+    const totals = rows.reduce(
+      (acc: any, row: any[]) => {
+        acc.views += Number(row?.[1] ?? 0);
+        acc.minutesWatched += Number(row?.[2] ?? 0);
+        acc.subscribersGained += Number(row?.[3] ?? 0);
+        acc.subscribersLost += Number(row?.[4] ?? 0);
+        acc.averageViewDuration += Number(row?.[5] ?? 0);
+        acc.count += 1;
+        return acc;
+      },
+      {
+        views: 0,
+        minutesWatched: 0,
+        subscribersGained: 0,
+        subscribersLost: 0,
+        averageViewDuration: 0,
+        count: 0,
+      }
+    );
+
+    return {
+      views: totals.views,
+      minutesWatched: totals.minutesWatched,
+      subscribersGained: totals.subscribersGained,
+      subscribersLost: totals.subscribersLost,
+      averageViewDuration: totals.count ? totals.averageViewDuration / totals.count : 0,
+      periodLabel: `${startDate} to ${endDate}`,
+    };
+  };
+
+  const loadAnalytics = async (channel: YouTubeChannel) => {
+    if (!user) return;
+    setSelectedChannelId(channel.channel_id);
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+
+    try {
+      const endDate = new Date().toISOString().split("T")[0];
+      const startDate = new Date(Date.now() - 27 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+
+      const { data, error } = await supabase.functions.invoke("youtube-oauth?action=analytics", {
+        body: {
+          channelId: channel.channel_id,
+          userId: user.id,
+          startDate,
+          endDate,
+        },
+      });
+
+      if (error) {
+        throw new Error(error.message || "Failed to load analytics");
+      }
+
+      const summary = parseAnalyticsSummary(data?.analytics, startDate, endDate);
+      if (!summary) {
+        setAnalyticsSummary(null);
+        setAnalyticsError("No analytics data available yet for this channel.");
+        return;
+      }
+
+      setAnalyticsSummary(summary);
+    } catch (error: any) {
+      console.error("Analytics error:", error);
+      setAnalyticsSummary(null);
+      setAnalyticsError(error.message || "Failed to load analytics");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const formatDuration = (seconds: number) => {
+    if (!seconds || Number.isNaN(seconds)) return "0s";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    if (mins === 0) return `${secs}s`;
+    return `${mins}m ${secs}s`;
+  };
+
+  const formatHours = (minutes: number) => {
+    if (!minutes || Number.isNaN(minutes)) return "0";
+    return (minutes / 60).toFixed(1);
+  };
+
   const formatNumber = (num: number | null) => {
     if (!num) return "0";
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
@@ -210,14 +314,19 @@ export const YouTubeChannelLink = () => {
             </p>
           </div>
         </div>
-        <Button onClick={initiateOAuth} disabled={linking} className="gap-2">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            {channels.length}/{planLimits.maxChannels} channels connected
+          </span>
+          <Button onClick={initiateOAuth} disabled={linking || maxChannelsReached} className="gap-2">
           {linking ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Link2 className="h-4 w-4" />
           )}
-          {channels.length > 0 ? "Add Channel" : "Connect YouTube"}
+            {maxChannelsReached ? "Limit Reached" : channels.length > 0 ? "Add Channel" : "Connect YouTube"}
         </Button>
+        </div>
       </div>
 
       <AnimatePresence mode="popLayout">
@@ -297,16 +406,47 @@ export const YouTubeChannelLink = () => {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setPrimaryChannel(channel.channel_id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setPrimaryChannel(channel.channel_id);
+                      }}
                     >
                       Set Primary
                     </Button>
                   )}
                   <Button
                     size="sm"
+                    variant="secondary"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      loadAnalytics(channel);
+                    }}
+                    disabled={analyticsLoading && selectedChannelId === channel.channel_id}
+                  >
+                    {analyticsLoading && selectedChannelId === channel.channel_id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Analytics"
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      navigate(`/dashboard/analysis?channelId=${channel.channel_id}`);
+                    }}
+                  >
+                    Analyze with AI
+                  </Button>
+                  <Button
+                    size="sm"
                     variant="ghost"
                     className="text-destructive hover:text-destructive"
-                    onClick={() => unlinkChannel(channel.channel_id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      unlinkChannel(channel.channel_id);
+                    }}
                     disabled={unlinking === channel.channel_id}
                   >
                     {unlinking === channel.channel_id ? (
@@ -321,6 +461,51 @@ export const YouTubeChannelLink = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {selectedChannelId && (
+        <div className="mt-6 rounded-xl border border-border bg-card p-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-display text-base font-semibold">Channel Analytics</h3>
+              <p className="text-xs text-muted-foreground">
+                {analyticsSummary?.periodLabel || "Last 28 days"}
+              </p>
+            </div>
+            {analyticsLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+          </div>
+
+          {analyticsError ? (
+            <p className="text-sm text-muted-foreground">{analyticsError}</p>
+          ) : analyticsSummary ? (
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+              <div className="rounded-lg border border-border p-3">
+                <p className="text-xs text-muted-foreground">Views</p>
+                <p className="font-semibold">{formatNumber(analyticsSummary.views)}</p>
+              </div>
+              <div className="rounded-lg border border-border p-3">
+                <p className="text-xs text-muted-foreground">Watch Hours</p>
+                <p className="font-semibold">{formatHours(analyticsSummary.minutesWatched)}h</p>
+              </div>
+              <div className="rounded-lg border border-border p-3">
+                <p className="text-xs text-muted-foreground">Subs Gained</p>
+                <p className="font-semibold">{formatNumber(analyticsSummary.subscribersGained)}</p>
+              </div>
+              <div className="rounded-lg border border-border p-3">
+                <p className="text-xs text-muted-foreground">Subs Lost</p>
+                <p className="font-semibold">{formatNumber(analyticsSummary.subscribersLost)}</p>
+              </div>
+              <div className="rounded-lg border border-border p-3">
+                <p className="text-xs text-muted-foreground">Avg View Duration</p>
+                <p className="font-semibold">{formatDuration(analyticsSummary.averageViewDuration)}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Select a channel to load analytics.
+            </p>
+          )}
+        </div>
+      )}
 
       {channels.length > 0 && (
         <p className="text-xs text-muted-foreground mt-4 flex items-center gap-1">

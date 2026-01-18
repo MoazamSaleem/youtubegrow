@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -106,6 +106,7 @@ interface ChannelAnalysisResult {
 const ChannelAnalysis = () => {
   const { user, subscription, loading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [channels, setChannels] = useState<YouTubeChannel[]>([]);
@@ -116,6 +117,7 @@ const ChannelAnalysis = () => {
   const [goals, setGoals] = useState("");
   const [lastAnalysisDate, setLastAnalysisDate] = useState<string | null>(null);
   const [channelsLoading, setChannelsLoading] = useState(true);
+  const selectedChannelParam = searchParams.get("channelId");
 
   const currentPlan = subscription?.plan || "free";
   const hasAccess = canAccessFeature(currentPlan, "channelAnalysisFrequency");
@@ -134,6 +136,14 @@ const ChannelAnalysis = () => {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!selectedChannelParam || channels.length === 0) return;
+    const match = channels.find((channel) => channel.channel_id === selectedChannelParam);
+    if (match) {
+      setSelectedChannel(match);
+    }
+  }, [selectedChannelParam, channels]);
+
   const fetchChannels = async () => {
     if (!user) return;
     setChannelsLoading(true);
@@ -150,8 +160,11 @@ const ChannelAnalysis = () => {
     } else if (data && data.length > 0) {
       setChannels(data);
       // Auto-select primary or first channel
-      const primary = data.find(c => c.is_primary) || data[0];
-      setSelectedChannel(primary);
+      const fromParam = selectedChannelParam
+        ? data.find((channel) => channel.channel_id === selectedChannelParam)
+        : null;
+      const primary = data.find((channel) => channel.is_primary) || data[0];
+      setSelectedChannel(fromParam || primary);
     }
     setChannelsLoading(false);
   };

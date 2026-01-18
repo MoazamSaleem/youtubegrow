@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { YouTubeChannelLink } from "@/components/youtube/YouTubeChannelLink";
 import {
   Youtube,
   Eye,
@@ -159,6 +160,9 @@ const UserDashboard = () => {
 
       <main className="flex-1 p-4 lg:p-8 overflow-auto">
         <div className="max-w-7xl mx-auto">
+          <div className="mb-8">
+            <YouTubeChannelLink />
+          </div>
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
             <div>

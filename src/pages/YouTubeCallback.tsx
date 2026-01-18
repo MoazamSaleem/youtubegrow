@@ -46,10 +46,8 @@ const YouTubeCallback = () => {
       localStorage.removeItem("youtube_oauth_state");
 
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (!session) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
           throw new Error("Your session expired. Please sign in again.");
         }
 
@@ -63,23 +61,12 @@ const YouTubeCallback = () => {
 
         const redirectUri = `${window.location.origin}/youtube-callback`;
 
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=callback`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
-              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            },
-            body: JSON.stringify({ code, redirectUri, userId }),
-          }
-        );
+        const { data, error } = await supabase.functions.invoke("youtube-oauth?action=callback", {
+          body: { code, redirectUri, userId },
+        });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to connect channel");
+        if (error) {
+          throw new Error(error.message || "Failed to connect channel");
         }
 
         setStatus("success");
