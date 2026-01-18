@@ -49,7 +49,9 @@ export const YouTubeChannelLink = () => {
     try {
       const { data, error } = await supabase
         .from("youtube_channels")
-        .select("*")
+        .select(
+          "id, channel_id, channel_name, thumbnail_url, subscriber_count, video_count, view_count, is_primary, updated_at"
+        )
         .eq("user_id", user.id)
         .order("is_primary", { ascending: false });
 

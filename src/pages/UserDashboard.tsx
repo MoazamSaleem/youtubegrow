@@ -77,7 +77,7 @@ const UserDashboard = () => {
     if (!user) return;
     const { data } = await supabase
       .from("youtube_channels")
-      .select("*")
+      .select("id, channel_id, channel_name, is_primary")
       .eq("user_id", user.id);
     if (data) setChannels(data);
   };

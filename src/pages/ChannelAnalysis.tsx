@@ -140,7 +140,9 @@ const ChannelAnalysis = () => {
     
     const { data, error } = await supabase
       .from("youtube_channels")
-      .select("*")
+      .select(
+        "id, channel_id, channel_name, subscriber_count, view_count, video_count, thumbnail_url, channel_thumbnail, is_primary"
+      )
       .eq("user_id", user.id);
 
     if (error) {
