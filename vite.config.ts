@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "recharts": path.resolve(__dirname, "./node_modules/recharts/es6/index.js"),
+      "recharts-scale": path.resolve(__dirname, "./node_modules/recharts-scale/es6/index.js"),
     },
   },
 }));
