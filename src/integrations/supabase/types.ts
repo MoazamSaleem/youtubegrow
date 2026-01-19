@@ -792,6 +792,14 @@ export type Database = {
       }
     }
     Functions: {
+      deduct_credits: {
+        Args: { p_amount: number; p_user_id: string }
+        Returns: {
+          current_balance: number
+          new_balance: number
+          success: boolean
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
