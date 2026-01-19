@@ -61,6 +61,10 @@ const Billing = () => {
   ];
 
   const getPlanFeatures = (plan: SubscriptionPlan) => {
+    if (plan !== "free") {
+      return STRIPE_PLANS[plan].features.map((text) => ({ text, included: true }));
+    }
+
     const limits = PLAN_LIMITS[plan];
     const features: { text: string; included: boolean }[] = [];
     
@@ -72,19 +76,7 @@ const Billing = () => {
     features.push({ text: limits.competitorAnalysisFrequency === "never" ? "Competitor analysis" : limits.competitorAnalysisFrequency === "daily" ? "Daily competitor analysis" : `Competitor analysis ${limits.competitorAnalysisFrequency}`, included: limits.competitorAnalysisFrequency !== "never" });
     features.push({ text: "Script writer", included: limits.hasScriptWriter });
     features.push({ text: limits.thumbnailsPerDay === -1 ? "Unlimited thumbnails" : limits.thumbnailsPerDay > 0 ? `${limits.thumbnailsPerDay} thumbnails/day` : "Thumbnail generator", included: limits.thumbnailsPerDay !== 0 });
-    
-    if (plan === "pro" || plan === "advanced") {
-      features.push({ text: "YouTube Strategist AI", included: limits.hasYoutubeStrategist });
-    }
-    
-    if (plan !== "free") {
-      features.push({ text: "Growth tasks & milestones", included: limits.growthTasksTier !== "none" });
-    }
-    
-    if (limits.aiStrategistCredits > 0) {
-      features.push({ text: `${limits.aiStrategistCredits.toLocaleString()} AI Credits`, included: true });
-    }
-    
+
     return features;
   };
 
@@ -92,11 +84,11 @@ const Billing = () => {
     { name: "Channels", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].maxChannels },
     { name: "Keywords/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].keywordsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].keywordsPerDay },
     { name: "Topics/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].topicsPerDay },
-    { name: "AI Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "—" : PLAN_LIMITS[p].aiStrategistCredits.toLocaleString() },
+    { name: "AI Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "None" : PLAN_LIMITS[p].aiStrategistCredits.toLocaleString() },
     { name: "Channel Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].channelAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].channelAnalysisFrequency },
     { name: "Competitor Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].competitorAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].competitorAnalysisFrequency },
     { name: "Script Writer", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasScriptWriter },
-    { name: "Thumbnails/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].thumbnailsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].thumbnailsPerDay || "—" },
+    { name: "Thumbnails/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].thumbnailsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].thumbnailsPerDay || "None" },
     { name: "YouTube Strategist AI", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasYoutubeStrategist },
     { name: "Growth Tasks", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].growthTasksTier === "none" ? false : true },
   ];
@@ -183,15 +175,16 @@ const Billing = () => {
   };
 
   const getPrice = (plan: SubscriptionPlan) => {
-    const prices = PLAN_LIMITS[plan].price;
-    return isYearly ? prices.yearly : prices.monthly;
+    if (plan === "free") return 0;
+    return isYearly ? STRIPE_PLANS[plan].yearlyPrice : STRIPE_PLANS[plan].monthlyPrice;
   };
 
   const getSavings = (plan: SubscriptionPlan) => {
-    const prices = PLAN_LIMITS[plan].price;
-    if (prices.monthly === 0) return 0;
-    const yearlyEquivalent = prices.monthly * 12;
-    return yearlyEquivalent - prices.yearly;
+    if (plan === "free") return 0;
+    const monthly = STRIPE_PLANS[plan].monthlyPrice;
+    const yearly = STRIPE_PLANS[plan].yearlyPrice;
+    const yearlyEquivalent = monthly * 12;
+    return yearlyEquivalent - yearly;
   };
 
   if (loading) {
@@ -447,3 +440,4 @@ const Billing = () => {
 };
 
 export default Billing;
+

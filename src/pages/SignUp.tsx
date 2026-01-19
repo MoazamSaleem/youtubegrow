@@ -156,6 +156,8 @@ const SignUp = () => {
     const userId = data?.user?.id;
     const session = data?.session ?? null;
     const hasSession = !!session;
+    const emailConfirmed = !!data?.user?.email_confirmed_at;
+    const needsConfirmation = !!data?.user && !emailConfirmed;
 
     if (!userId) {
       setLoading(false);
@@ -169,6 +171,10 @@ const SignUp = () => {
     trialEnd.setMonth(trialEnd.getMonth() + 1);
 
     if (selectedPlan === "free") {
+      if (needsConfirmation && hasSession) {
+        await supabase.auth.signOut();
+      }
+
       if (!hasSession) {
         setLoading(false);
         toast.success("Check your email to confirm your account, then sign in.");
@@ -235,8 +241,17 @@ const SignUp = () => {
       // Redirect to Stripe checkout
       const stripePlan = STRIPE_PLANS[selectedPlan as keyof typeof STRIPE_PLANS];
       if (stripePlan) {
+        if (needsConfirmation && hasSession) {
+          await supabase.auth.signOut();
+        }
+
+        const successPath = needsConfirmation
+          ? "/signin?checkout=success&confirm=1"
+          : "/dashboard?checkout=success";
+        const cancelPath = "/dashboard/billing?checkout=cancelled";
+
         const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
-          body: { priceId: stripePlan.priceId, email, userId },
+          body: { priceId: stripePlan.priceId, email, userId, successPath, cancelPath },
           headers: hasSession && session?.access_token
             ? { Authorization: `Bearer ${session.access_token}` }
             : undefined,
@@ -245,7 +260,7 @@ const SignUp = () => {
         if (checkoutError) {
           setLoading(false);
           toast.error("Failed to start checkout. Please try again from the billing page.");
-          navigate("/dashboard/billing");
+          navigate(needsConfirmation ? "/signin" : "/dashboard/billing");
           return;
         }
 
@@ -256,7 +271,7 @@ const SignUp = () => {
       }
 
       setLoading(false);
-      navigate("/dashboard/billing");
+      navigate(needsConfirmation ? "/signin" : "/dashboard/billing");
     }
   };
 

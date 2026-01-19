@@ -40,11 +40,26 @@ serve(async (req) => {
       });
     }
 
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return new Response(JSON.stringify({
+        error: "Supabase service role not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     if (action === "auth-url") {
       // Generate OAuth URL
       const { redirectUri, state } = body ?? {};
+      if (!redirectUri || !state) {
+        return new Response(JSON.stringify({ error: "Missing redirectUri or state" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       
       const scopes = [
         "https://www.googleapis.com/auth/youtube.readonly",
@@ -58,6 +73,7 @@ serve(async (req) => {
       authUrl.searchParams.set("scope", scopes);
       authUrl.searchParams.set("access_type", "offline");
       authUrl.searchParams.set("prompt", "consent");
+      authUrl.searchParams.set("include_granted_scopes", "true");
       authUrl.searchParams.set("state", state);
       
       return new Response(JSON.stringify({ authUrl: authUrl.toString() }), {

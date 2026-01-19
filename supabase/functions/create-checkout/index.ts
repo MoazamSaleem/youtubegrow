@@ -33,7 +33,8 @@ serve(async (req) => {
   try {
     logStep("Function started");
     
-    const { priceId, email, userId } = await req.json();
+    const payload = await req.json();
+    const { priceId, email, userId } = payload ?? {};
     if (!priceId) throw new Error("Price ID is required");
     logStep("Price ID received", { priceId });
 
@@ -43,16 +44,16 @@ serve(async (req) => {
     if (authHeader) {
       const token = authHeader.replace("Bearer ", "");
       const { data, error: authError } = await supabaseClient.auth.getUser(token);
-      if (authError) {
-        return new Response(JSON.stringify({ error: `Authentication failed: ${authError.message}` }), {
+      if (!authError && data.user) {
+        resolvedEmail = data.user.email ?? resolvedEmail;
+        resolvedUserId = data.user.id ?? resolvedUserId;
+        logStep("User authenticated", { email: resolvedEmail });
+      } else if (!resolvedEmail) {
+        return new Response(JSON.stringify({ error: `Authentication failed: ${authError?.message || "Unauthorized"}` }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 401,
         });
       }
-      const user = data.user;
-      resolvedEmail = user?.email ?? resolvedEmail;
-      resolvedUserId = user?.id ?? resolvedUserId;
-      logStep("User authenticated", { email: resolvedEmail });
     }
 
     if (!resolvedEmail) {
@@ -78,6 +79,9 @@ serve(async (req) => {
       logStep("Existing customer found", { customerId });
     }
 
+    const successPath = typeof payload?.successPath === "string" ? payload.successPath : "/dashboard?checkout=success";
+    const cancelPath = typeof payload?.cancelPath === "string" ? payload.cancelPath : "/dashboard/billing?checkout=cancelled";
+
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       customer_email: customerId ? undefined : resolvedEmail,
@@ -85,8 +89,8 @@ serve(async (req) => {
       metadata: resolvedUserId ? { supabase_user_id: resolvedUserId } : undefined,
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "subscription",
-      success_url: `${req.headers.get("origin")}/dashboard?checkout=success`,
-      cancel_url: `${req.headers.get("origin")}/dashboard/billing?checkout=cancelled`,
+      success_url: `${req.headers.get("origin")}${successPath}`,
+      cancel_url: `${req.headers.get("origin")}${cancelPath}`,
     });
     logStep("Checkout session created", { sessionId: session.id });
 
