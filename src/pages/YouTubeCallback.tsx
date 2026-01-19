@@ -16,7 +16,11 @@ const YouTubeCallback = () => {
 
   const getSessionWithRefresh = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) return session;
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!shouldRefresh) return session;
+    }
 
     const { data: refreshed } = await supabase.auth.refreshSession();
     if (refreshed.session?.access_token) return refreshed.session;
@@ -38,8 +42,9 @@ const YouTubeCallback = () => {
 
     if (!error) return { data, error };
 
+    const status = (error as any)?.context?.status ?? (error as any)?.status;
     const message = error?.message?.toLowerCase() || "";
-    if (!message.includes("invalid jwt") && !message.includes("401")) {
+    if (status !== 401 && !message.includes("invalid jwt") && !message.includes("401")) {
       return { data, error };
     }
 
