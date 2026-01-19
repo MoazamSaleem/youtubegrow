@@ -135,7 +135,7 @@ const SignUp = () => {
     }
 
     setLoading(true);
-    const { error } = await signUp(email, password, name);
+    const { data, error } = await signUp(email, password, name);
 
     if (error) {
       setLoading(false);
@@ -148,13 +148,19 @@ const SignUp = () => {
       return;
     }
 
-    // Get the newly created user session
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData.session?.user?.id;
+    const userId = data?.user?.id;
+    const hasSession = !!data?.session;
 
     if (!userId) {
       setLoading(false);
       toast.error("Failed to create account. Please try again.");
+      return;
+    }
+
+    if (!hasSession) {
+      setLoading(false);
+      toast.success("Check your email to confirm your account, then sign in.");
+      navigate("/signin");
       return;
     }
 
