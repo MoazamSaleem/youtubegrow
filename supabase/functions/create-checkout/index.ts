@@ -33,28 +33,34 @@ serve(async (req) => {
   try {
     logStep("Function started");
     
-    const { priceId } = await req.json();
+    const { priceId, email, userId } = await req.json();
     if (!priceId) throw new Error("Price ID is required");
     logStep("Price ID received", { priceId });
 
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+    let resolvedEmail = email as string | undefined;
+    let resolvedUserId = userId as string | undefined;
+    if (authHeader) {
+      const token = authHeader.replace("Bearer ", "");
+      const { data, error: authError } = await supabaseClient.auth.getUser(token);
+      if (authError) {
+        return new Response(JSON.stringify({ error: `Authentication failed: ${authError.message}` }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 401,
+        });
+      }
+      const user = data.user;
+      resolvedEmail = user?.email ?? resolvedEmail;
+      resolvedUserId = user?.id ?? resolvedUserId;
+      logStep("User authenticated", { email: resolvedEmail });
+    }
+
+    if (!resolvedEmail) {
+      return new Response(JSON.stringify({ error: "Missing user email" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 401,
+        status: 400,
       });
     }
-    const token = authHeader.replace("Bearer ", "");
-    const { data, error: authError } = await supabaseClient.auth.getUser(token);
-    if (authError) {
-      return new Response(JSON.stringify({ error: `Authentication failed: ${authError.message}` }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 401,
-      });
-    }
-    const user = data.user;
-    if (!user?.email) throw new Error("User not authenticated or email not available");
-    logStep("User authenticated", { email: user.email });
 
     if (!stripeKey) {
       return new Response(JSON.stringify({ error: "STRIPE_SECRET_KEY is not set" }), {
@@ -65,7 +71,7 @@ serve(async (req) => {
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
     
-    const customers = await stripe.customers.list({ email: user.email, limit: 1 });
+    const customers = await stripe.customers.list({ email: resolvedEmail, limit: 1 });
     let customerId;
     if (customers.data.length > 0) {
       customerId = customers.data[0].id;
@@ -74,7 +80,9 @@ serve(async (req) => {
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
-      customer_email: customerId ? undefined : user.email,
+      customer_email: customerId ? undefined : resolvedEmail,
+      client_reference_id: resolvedUserId,
+      metadata: resolvedUserId ? { supabase_user_id: resolvedUserId } : undefined,
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "subscription",
       success_url: `${req.headers.get("origin")}/dashboard?checkout=success`,

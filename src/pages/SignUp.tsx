@@ -59,6 +59,11 @@ const SignUp = () => {
   const [freeTrialEligible, setFreeTrialEligible] = useState(true);
   const [checkingEligibility, setCheckingEligibility] = useState(false);
 
+  const getPlanPrice = (plan: SubscriptionPlan) => {
+    if (plan === "free") return PLAN_LIMITS.free.price.monthly;
+    return STRIPE_PLANS[plan].monthlyPrice;
+  };
+
   // Check free trial eligibility when email changes
   useEffect(() => {
     const checkEligibility = async () => {
@@ -149,18 +154,12 @@ const SignUp = () => {
     }
 
     const userId = data?.user?.id;
-    const hasSession = !!data?.session;
+    const session = data?.session ?? null;
+    const hasSession = !!session;
 
     if (!userId) {
       setLoading(false);
       toast.error("Failed to create account. Please try again.");
-      return;
-    }
-
-    if (!hasSession) {
-      setLoading(false);
-      toast.success("Check your email to confirm your account, then sign in.");
-      navigate("/signin");
       return;
     }
 
@@ -170,6 +169,13 @@ const SignUp = () => {
     trialEnd.setMonth(trialEnd.getMonth() + 1);
 
     if (selectedPlan === "free") {
+      if (!hasSession) {
+        setLoading(false);
+        toast.success("Check your email to confirm your account, then sign in.");
+        navigate("/signin");
+        return;
+      }
+
       // Free trial - create subscription and redirect to dashboard
       const { error: subError } = await supabase.from("subscriptions").upsert({
         user_id: userId,
@@ -229,8 +235,11 @@ const SignUp = () => {
       // Redirect to Stripe checkout
       const stripePlan = STRIPE_PLANS[selectedPlan as keyof typeof STRIPE_PLANS];
       if (stripePlan) {
-        const { data, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
-          body: { priceId: stripePlan.priceId },
+        const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
+          body: { priceId: stripePlan.priceId, email, userId },
+          headers: hasSession && session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : undefined,
         });
 
         if (checkoutError) {
@@ -240,8 +249,8 @@ const SignUp = () => {
           return;
         }
 
-        if (data?.url) {
-          window.location.href = data.url;
+        if (checkoutData?.url) {
+          window.location.href = checkoutData.url;
           return;
         }
       }
@@ -252,6 +261,9 @@ const SignUp = () => {
   };
 
   const getFeatures = (plan: SubscriptionPlan) => {
+    if (plan !== "free") {
+      return STRIPE_PLANS[plan].features;
+    }
     const limits = PLAN_LIMITS[plan];
     return [
       `${limits.maxChannels} channel${limits.maxChannels > 1 ? "s" : ""}`,
@@ -361,7 +373,7 @@ const SignUp = () => {
                       <p className="text-xs text-muted-foreground mb-3">{config.description}</p>
 
                       <div className="flex items-baseline gap-1 mb-4">
-                        <span className="text-2xl font-bold">${limits.price.monthly}</span>
+                        <span className="text-2xl font-bold">${getPlanPrice(config.key)}</span>
                         <span className="text-muted-foreground text-sm">/month</span>
                       </div>
 
@@ -439,7 +451,7 @@ const SignUp = () => {
                           <p className="text-sm text-muted-foreground">
                             {selectedPlan === "free" 
                               ? "1 month free trial" 
-                              : `$${limits.price.monthly}/month`}
+                              : `$${getPlanPrice(selectedPlan)}/month`}
                           </p>
                         </div>
                         {selectedPlan !== "free" && (
