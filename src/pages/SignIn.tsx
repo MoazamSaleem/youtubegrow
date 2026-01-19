@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { Youtube, Sparkles, Mail, Lock, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { Youtube, Sparkles, Mail, Lock, Eye, EyeOff, ArrowLeft, CheckCircle } from "lucide-react";
 import { z } from "zod";
 
 const signInSchema = z.object({
@@ -16,13 +16,23 @@ const signInSchema = z.object({
 
 const SignIn = () => {
   const navigate = useNavigate();
-  const { signIn, refreshSubscription } = useAuth();
+  const { signIn, refreshSubscription, user } = useAuth();
   const [searchParams] = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  
+  const checkoutSuccess = searchParams.get("checkout") === "success";
+  const needsConfirmation = searchParams.get("confirm") === "1";
+
+  // If user is already logged in, redirect to dashboard
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,16 +58,18 @@ const SignIn = () => {
       if (error.message.includes("Invalid login credentials")) {
         toast.error("Invalid email or password");
       } else if (error.message.includes("Email not confirmed")) {
-        toast.error("Please confirm your email address");
+        toast.error("Please confirm your email address first");
       } else {
         toast.error(error.message);
       }
     } else {
-      const shouldSyncSubscription = searchParams.get("checkout") === "success" || searchParams.get("confirm") === "1";
-      if (shouldSyncSubscription) {
+      // Sync subscription if coming from checkout or email confirmation
+      if (checkoutSuccess || needsConfirmation) {
         await refreshSubscription();
+        toast.success("Your subscription is now active!");
+      } else {
+        toast.success("Welcome back!");
       }
-      toast.success("Welcome back!");
       navigate("/dashboard");
     }
   };
@@ -91,6 +103,27 @@ const SignIn = () => {
               Tube<span className="gradient-text">Grow</span>
             </span>
           </div>
+
+          {/* Success Banner for Payment/Email Confirmation */}
+          {(checkoutSuccess || needsConfirmation) && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20"
+            >
+              <div className="flex items-start gap-3">
+                <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-green-500">
+                    {checkoutSuccess ? "Payment Successful!" : "Email Confirmed!"}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Sign in to access your subscription and start growing your channel.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {/* Header */}
           <div className="mb-8">

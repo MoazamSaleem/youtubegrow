@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import Index from "./pages/Index";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
+import PaymentSuccess from "./pages/PaymentSuccess";
 import UserDashboard from "./pages/UserDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import TopicIdeas from "./pages/TopicIdeas";
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/" element={<Index />} />
               <Route path="/signin" element={<SignIn />} />
               <Route path="/signup" element={<SignUp />} />
+              <Route path="/payment-success" element={<PaymentSuccess />} />
               <Route path="/dashboard" element={<UserDashboard />} />
               <Route path="/dashboard/topics" element={<TopicIdeas />} />
               <Route path="/dashboard/keywords" element={<KeywordsResearch />} />

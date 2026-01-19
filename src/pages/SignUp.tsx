@@ -171,18 +171,7 @@ const SignUp = () => {
     trialEnd.setMonth(trialEnd.getMonth() + 1);
 
     if (selectedPlan === "free") {
-      if (needsConfirmation && hasSession) {
-        await supabase.auth.signOut();
-      }
-
-      if (!hasSession) {
-        setLoading(false);
-        toast.success("Check your email to confirm your account, then sign in.");
-        navigate("/signin");
-        return;
-      }
-
-      // Free trial - create subscription and redirect to dashboard
+      // Free trial - create subscription
       const { error: subError } = await supabase.from("subscriptions").upsert({
         user_id: userId,
         plan: "free",
@@ -202,7 +191,7 @@ const SignUp = () => {
       // Add free trial credits
       await supabase.from("user_tokens").upsert({
         user_id: userId,
-        ai_credits_balance: 100, // Free trial gets 100 credits
+        ai_credits_balance: 100,
         balance: 0,
         total_earned: 0,
         total_spent: 0,
@@ -220,10 +209,16 @@ const SignUp = () => {
       });
 
       setLoading(false);
-      toast.success("Welcome to TubeGrow! Your 1-month free trial has started.");
-      navigate("/dashboard");
+      
+      if (needsConfirmation) {
+        toast.success("Check your email to confirm your account, then sign in to start your free trial.");
+        navigate("/signin");
+      } else {
+        toast.success("Welcome to TubeGrow! Your 1-month free trial has started.");
+        navigate("/dashboard");
+      }
     } else {
-      // Paid plan - create pending subscription and redirect to Stripe
+      // Paid plan - create pending subscription
       const { error: subError } = await supabase.from("subscriptions").upsert({
         user_id: userId,
         plan: selectedPlan,
@@ -241,14 +236,11 @@ const SignUp = () => {
       // Redirect to Stripe checkout
       const stripePlan = STRIPE_PLANS[selectedPlan as keyof typeof STRIPE_PLANS];
       if (stripePlan) {
-        if (needsConfirmation && hasSession) {
-          await supabase.auth.signOut();
-        }
-
+        // Success path: go to payment success page with email confirmation flag
         const successPath = needsConfirmation
-          ? "/signin?checkout=success&confirm=1"
-          : "/dashboard?checkout=success";
-        const cancelPath = "/dashboard/billing?checkout=cancelled";
+          ? "/payment-success?confirm=1"
+          : "/payment-success";
+        const cancelPath = "/signup?checkout=cancelled";
 
         const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
           body: { priceId: stripePlan.priceId, email, userId, successPath, cancelPath },
@@ -259,8 +251,38 @@ const SignUp = () => {
 
         if (checkoutError) {
           setLoading(false);
-          toast.error("Failed to start checkout. Please try again from the billing page.");
-          navigate(needsConfirmation ? "/signin" : "/dashboard/billing");
+          // Payment failed - convert to free trial for new users
+          toast.error("Payment setup failed. We've started you on a free trial instead.");
+          
+          // Update subscription to free trial
+          await supabase.from("subscriptions").upsert({
+            user_id: userId,
+            plan: "free",
+            status: "trialing",
+            billing_cycle: "monthly",
+            has_used_free_trial: true,
+            trial_started_at: now.toISOString(),
+            trial_ends_at: trialEnd.toISOString(),
+            current_period_start: now.toISOString(),
+            current_period_end: trialEnd.toISOString(),
+          }, { onConflict: "user_id" });
+
+          // Add free trial credits
+          await supabase.from("user_tokens").upsert({
+            user_id: userId,
+            ai_credits_balance: 100,
+            balance: 0,
+            total_earned: 0,
+            total_spent: 0,
+            current_xp: 0,
+            ai_credits_used: 0,
+          }, { onConflict: "user_id" });
+
+          if (needsConfirmation) {
+            navigate("/signin");
+          } else {
+            navigate("/dashboard");
+          }
           return;
         }
 
