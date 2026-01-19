@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,8 @@ const signInSchema = z.object({
 
 const SignIn = () => {
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const { signIn, refreshSubscription } = useAuth();
+  const [searchParams] = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -52,6 +53,10 @@ const SignIn = () => {
         toast.error(error.message);
       }
     } else {
+      const shouldSyncSubscription = searchParams.get("checkout") === "success" || searchParams.get("confirm") === "1";
+      if (shouldSyncSubscription) {
+        await refreshSubscription();
+      }
       toast.success("Welcome back!");
       navigate("/dashboard");
     }

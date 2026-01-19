@@ -6,6 +6,44 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const toBase64 = (value: Uint8Array) =>
+  btoa(String.fromCharCode(...value));
+
+const fromBase64 = (value: string) =>
+  Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+
+const getEncryptionKey = async () => {
+  const keyBase64 = Deno.env.get("OAUTH_ENCRYPTION_KEY_BASE64") ?? "";
+  if (!keyBase64) {
+    throw new Error("OAUTH_ENCRYPTION_KEY_BASE64 is not set");
+  }
+  const rawKey = fromBase64(keyBase64);
+  if (rawKey.length !== 32) {
+    throw new Error("OAUTH_ENCRYPTION_KEY_BASE64 must decode to 32 bytes");
+  }
+  return crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt", "decrypt"]);
+};
+
+const encryptToken = async (token: string) => {
+  const key = await getEncryptionKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(token);
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+  return `${toBase64(iv)}:${toBase64(new Uint8Array(cipher))}`;
+};
+
+const decryptToken = async (encrypted: string) => {
+  const [ivBase64, dataBase64] = encrypted.split(":");
+  if (!ivBase64 || !dataBase64) {
+    throw new Error("Invalid encrypted token format");
+  }
+  const key = await getEncryptionKey();
+  const iv = fromBase64(ivBase64);
+  const data = fromBase64(dataBase64);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+  return new TextDecoder().decode(plain);
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -108,6 +146,10 @@ serve(async (req) => {
       }
       
       const tokens = await tokenResponse.json();
+      const encryptedAccessToken = await encryptToken(tokens.access_token);
+      const encryptedRefreshToken = tokens.refresh_token
+        ? await encryptToken(tokens.refresh_token)
+        : null;
       
       // Get channel info
       const channelResponse = await fetch(
@@ -149,8 +191,8 @@ serve(async (req) => {
           video_count: parseInt(channel.statistics.videoCount) || 0,
           view_count: parseInt(channel.statistics.viewCount) || 0,
           is_primary: true,
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
+          access_token: encryptedAccessToken,
+          refresh_token: encryptedRefreshToken,
           token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
         }, {
           onConflict: "user_id,channel_id",
@@ -196,6 +238,8 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      const refreshToken = await decryptToken(channelData.refresh_token);
       
       const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
         method: "POST",
@@ -203,7 +247,7 @@ serve(async (req) => {
         body: new URLSearchParams({
           client_id: GOOGLE_CLIENT_ID,
           client_secret: GOOGLE_CLIENT_SECRET,
-          refresh_token: channelData.refresh_token,
+          refresh_token: refreshToken,
           grant_type: "refresh_token",
         }),
       });
@@ -216,11 +260,12 @@ serve(async (req) => {
       }
       
       const tokens = await tokenResponse.json();
+      const encryptedAccessToken = await encryptToken(tokens.access_token);
       
       await supabase
         .from("youtube_channels")
         .update({
-          access_token: tokens.access_token,
+          access_token: encryptedAccessToken,
           token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
         })
         .eq("user_id", userId)
@@ -249,7 +294,7 @@ serve(async (req) => {
         });
       }
       
-      let accessToken = channelData.access_token;
+      let accessToken = await decryptToken(channelData.access_token);
       
       // Check if token needs refresh
       if (channelData.token_expires_at && new Date(channelData.token_expires_at) < new Date()) {
@@ -260,13 +305,14 @@ serve(async (req) => {
           });
         }
 
+        const refreshToken = await decryptToken(channelData.refresh_token);
         const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({
             client_id: GOOGLE_CLIENT_ID,
             client_secret: GOOGLE_CLIENT_SECRET,
-            refresh_token: channelData.refresh_token,
+            refresh_token: refreshToken,
             grant_type: "refresh_token",
           }),
         });
@@ -280,11 +326,12 @@ serve(async (req) => {
 
         const tokens = await tokenResponse.json();
         accessToken = tokens.access_token;
+        const encryptedAccessToken = await encryptToken(tokens.access_token);
 
         await supabase
           .from("youtube_channels")
           .update({
-            access_token: tokens.access_token,
+            access_token: encryptedAccessToken,
             token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
           })
           .eq("user_id", userId)

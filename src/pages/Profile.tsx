@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { YouTubeChannelLink } from "@/components/youtube/YouTubeChannelLink";
@@ -88,6 +89,7 @@ const RARITY_BORDER: Record<string, string> = {
 const Profile = () => {
   const { user, profile: authProfile, signOut } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -300,6 +302,7 @@ const Profile = () => {
         description: "You can sign back in after the deactivation period ends.",
       });
       await signOut();
+      navigate("/signin");
     } catch (error: any) {
       toast({
         title: "Deactivation failed",
@@ -325,6 +328,7 @@ const Profile = () => {
         description: "Your account has been permanently deactivated.",
       });
       await signOut();
+      navigate("/signin");
     } catch (error: any) {
       toast({
         title: "Deactivation failed",
@@ -350,6 +354,7 @@ const Profile = () => {
         description: "Your account has been removed.",
       });
       await signOut();
+      navigate("/signin");
     } catch (error: any) {
       toast({
         title: "Delete failed",

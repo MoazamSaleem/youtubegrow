@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { PLAN_LIMITS, getPlanDisplayName, SubscriptionPlan } from "@/lib/planLimits";
@@ -51,6 +51,7 @@ interface DashboardSidebarProps {
 export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSidebarProps) {
   const { user, profile, subscription, isAdmin, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const currentPlan = (subscription?.plan || "free") as SubscriptionPlan;
   const [aiCredits, setAiCredits] = useState<number>(0);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
@@ -331,7 +332,10 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
                 </div>
               )}
               <button
-                onClick={() => signOut()}
+                onClick={async () => {
+                  await signOut();
+                  navigate("/signin");
+                }}
                 className="p-2 hover:bg-secondary rounded-lg transition-colors"
                 title="Sign out"
               >

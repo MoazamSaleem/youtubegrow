@@ -158,19 +158,21 @@ serve(async (req) => {
 
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
-      status: "active",
-      limit: 1,
+      status: "all",
+      limit: 5,
     });
     
-    const hasActiveSub = subscriptions.data.length > 0;
+    const activeSubscription = subscriptions.data.find((sub) => sub.status === "active" || sub.status === "trialing") ?? null;
+    const hasActiveSub = !!activeSubscription;
     let productId = null;
     let plan = previousPlan;
     let subscriptionEnd = null;
 
     if (hasActiveSub) {
-      const subscription = subscriptions.data[0];
+      const subscription = activeSubscription!;
       subscriptionEnd = new Date(subscription.current_period_end * 1000).toISOString();
       productId = subscription.items.data[0].price.product as string;
+      const priceId = subscription.items.data[0].price.id;
       
       // Map product IDs to plans
       const productPlanMap: Record<string, string> = {
@@ -178,7 +180,12 @@ serve(async (req) => {
         "prod_TjlBgvbmpocKMF": "pro",
         "prod_TjlCT4ijKq11hk": "advanced",
       };
-      plan = productPlanMap[productId] || "free";
+      const pricePlanMap: Record<string, string> = {
+        "price_1SmHf4IvqpEim8WgtxTKqyp0": "basic",
+        "price_1SmHfXIvqpEim8Wg9JtMKO3J": "pro",
+        "price_1SmHfeIvqpEim8WgyUq2VpbB": "advanced",
+      };
+      plan = productPlanMap[productId] || pricePlanMap[priceId] || "free";
       logStep("Active subscription found", { plan, subscriptionEnd, previousPlan, previousStatus });
 
       // Check if this is a new subscription or plan upgrade (status was pending or plan changed)
