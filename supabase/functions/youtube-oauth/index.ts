@@ -44,6 +44,63 @@ const decryptToken = async (encrypted: string) => {
   return new TextDecoder().decode(plain);
 };
 
+const getChannelAccessToken = async (
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  channelId: string,
+  clientId: string,
+  clientSecret: string
+) => {
+  const { data: channelData, error: fetchError } = await supabase
+    .from("youtube_channels")
+    .select("access_token, refresh_token, token_expires_at")
+    .eq("user_id", userId)
+    .eq("channel_id", channelId)
+    .single();
+
+  if (fetchError || !channelData?.access_token) {
+    throw new Error("Channel not found");
+  }
+
+  let accessToken = await decryptToken(channelData.access_token);
+  if (channelData.token_expires_at && new Date(channelData.token_expires_at) < new Date()) {
+    if (!channelData.refresh_token) {
+      throw new Error("Refresh token missing");
+    }
+
+    const refreshToken = await decryptToken(channelData.refresh_token);
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      throw new Error("Failed to refresh token");
+    }
+
+    const tokens = await tokenResponse.json();
+    accessToken = tokens.access_token;
+    const encryptedAccessToken = await encryptToken(tokens.access_token);
+
+    await supabase
+      .from("youtube_channels")
+      .update({
+        access_token: encryptedAccessToken,
+        token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+      })
+      .eq("user_id", userId)
+      .eq("channel_id", channelId);
+  }
+
+  return accessToken;
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -325,62 +382,14 @@ serve(async (req) => {
         });
       }
       
-      const { data: channelData, error: fetchError } = await supabase
-        .from("youtube_channels")
-        .select("access_token, refresh_token, token_expires_at")
-        .eq("user_id", userId)
-        .eq("channel_id", channelId)
-        .single();
-      
-      if (fetchError || !channelData) {
-        return new Response(JSON.stringify({ error: "Channel not found" }), {
+      let accessToken = "";
+      try {
+        accessToken = await getChannelAccessToken(supabase, userId, channelId, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Channel not found" }), {
           status: 404,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      }
-      
-      let accessToken = await decryptToken(channelData.access_token);
-      
-      // Check if token needs refresh
-      if (channelData.token_expires_at && new Date(channelData.token_expires_at) < new Date()) {
-        if (!channelData.refresh_token) {
-          return new Response(JSON.stringify({ error: "Refresh token missing" }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        const refreshToken = await decryptToken(channelData.refresh_token);
-        const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            client_id: GOOGLE_CLIENT_ID,
-            client_secret: GOOGLE_CLIENT_SECRET,
-            refresh_token: refreshToken,
-            grant_type: "refresh_token",
-          }),
-        });
-
-        if (!tokenResponse.ok) {
-          return new Response(JSON.stringify({ error: "Failed to refresh token" }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        const tokens = await tokenResponse.json();
-        accessToken = tokens.access_token;
-        const encryptedAccessToken = await encryptToken(tokens.access_token);
-
-        await supabase
-          .from("youtube_channels")
-          .update({
-            access_token: encryptedAccessToken,
-            token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
-          })
-          .eq("user_id", userId)
-          .eq("channel_id", channelId);
       }
       
       // Fetch analytics from YouTube Analytics API
@@ -408,6 +417,73 @@ serve(async (req) => {
       const analytics = await analyticsResponse.json();
       
       return new Response(JSON.stringify({ analytics }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "channel-context") {
+      const { channelId, userId } = body ?? {};
+      if (!userId || authData.user.id !== userId) {
+        return new Response(JSON.stringify({ error: "User mismatch" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let accessToken = "";
+      try {
+        accessToken = await getChannelAccessToken(supabase, userId, channelId, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Channel not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const channelResponse = await fetch(
+        "https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&mine=true",
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      if (!channelResponse.ok) {
+        const error = await channelResponse.text();
+        console.error("Channel context error:", error);
+        return new Response(JSON.stringify({ error: "Failed to fetch channel context" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const channelData = await channelResponse.json();
+      const channel = channelData.items?.[0];
+      const description = channel?.snippet?.description ?? "";
+      const title = channel?.snippet?.title ?? "";
+      const uploadsPlaylist = channel?.contentDetails?.relatedPlaylists?.uploads;
+      let recentVideos: Array<{ title: string }> = [];
+
+      if (uploadsPlaylist) {
+        const uploadsResponse = await fetch(
+          `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylist}&maxResults=5`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        );
+
+        if (uploadsResponse.ok) {
+          const uploads = await uploadsResponse.json();
+          recentVideos = (uploads.items || [])
+            .map((item: any) => item?.snippet?.title)
+            .filter((videoTitle: string) => Boolean(videoTitle))
+            .map((videoTitle: string) => ({ title: videoTitle }));
+        }
+      }
+
+      return new Response(JSON.stringify({
+        channel: { title, description },
+        recentVideos,
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

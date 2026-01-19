@@ -158,7 +158,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
       </button>
 
       <aside
-        className={`fixed lg:sticky lg:top-0 lg:h-screen inset-y-0 left-0 z-50 w-64 glass-strong border-r border-border transform transition-transform duration-200 ${
+        className={`fixed lg:sticky lg:top-0 h-svh inset-y-0 left-0 z-50 w-64 glass-strong border-r border-border transform transition-transform duration-200 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0 lg:w-20"
         }`}
       >
@@ -179,7 +179,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+          <nav className="flex-1 p-4 space-y-1 overflow-y-auto sidebar-scroll">
             <TooltipProvider>
               {navigation.map((item) => {
                 const locked = isLocked(item);

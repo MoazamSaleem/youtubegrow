@@ -51,21 +51,65 @@ const KeywordsResearch = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [copiedKeyword, setCopiedKeyword] = useState<string | null>(null);
   const [channelName, setChannelName] = useState<string | null>(null);
+  const [channelDescription, setChannelDescription] = useState<string>("");
+  const [recentTitles, setRecentTitles] = useState<string[]>([]);
   const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
+
+  const getSessionWithRefresh = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return null;
+  };
+
+  const fetchChannelContext = async (id: string) => {
+    if (!user) return;
+    const session = await getSessionWithRefresh();
+    if (!session?.access_token) return;
+
+    const { data, error } = await supabase.functions.invoke<{
+      channel?: { title?: string; description?: string };
+      recentVideos?: Array<{ title?: string }>;
+    }>("youtube-oauth", {
+      body: { action: "channel-context", channelId: id, userId: user.id },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (error) {
+      console.error("Channel context error:", error);
+      return;
+    }
+
+    setChannelDescription(data?.channel?.description || "");
+    setRecentTitles((data?.recentVideos || []).map((v) => v.title || "").filter(Boolean));
+  };
 
   useEffect(() => {
     if (!user) return;
     const loadChannel = async () => {
       const { data } = await supabase
         .from("youtube_channels")
-        .select("channel_name, is_primary")
+        .select("channel_id, channel_name, is_primary")
         .eq("user_id", user.id);
       if (data && data.length > 0) {
         const primary = data.find((c) => c.is_primary) || data[0];
         setChannelName(primary.channel_name || null);
+        if (primary.channel_id) {
+          await fetchChannelContext(primary.channel_id);
+        }
       }
     };
     loadChannel();
@@ -74,10 +118,14 @@ const KeywordsResearch = () => {
   useEffect(() => {
     if (!channelName || autoRunRef.current || keywords.length > 0) return;
     autoRunRef.current = true;
-    setSearchQuery(channelName);
-    setNiche(channelName);
-    void handleSearch(channelName, channelName);
-  }, [channelName, keywords.length]);
+    const autoQuery = recentTitles[0] || channelName;
+    const autoNiche = channelDescription
+      ? channelDescription.split(".")[0]?.slice(0, 120)
+      : channelName;
+    setSearchQuery(autoQuery);
+    setNiche(autoNiche);
+    void handleSearch(autoQuery, autoNiche);
+  }, [channelName, channelDescription, recentTitles, keywords.length]);
 
   const handleSearch = async (queryOverride?: string, nicheOverride?: string) => {
     const query = queryOverride ?? searchQuery;

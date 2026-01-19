@@ -41,21 +41,65 @@ const TopicIdeas = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [channelName, setChannelName] = useState<string | null>(null);
+  const [channelSnippet, setChannelSnippet] = useState<string>("");
+  const [recentTitles, setRecentTitles] = useState<string[]>([]);
   const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
+
+  const getSessionWithRefresh = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return null;
+  };
+
+  const fetchChannelContext = async (id: string) => {
+    if (!user) return;
+    const session = await getSessionWithRefresh();
+    if (!session?.access_token) return;
+
+    const { data, error } = await supabase.functions.invoke<{
+      channel?: { title?: string; description?: string };
+      recentVideos?: Array<{ title?: string }>;
+    }>("youtube-oauth", {
+      body: { action: "channel-context", channelId: id, userId: user.id },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (error) {
+      console.error("Channel context error:", error);
+      return;
+    }
+
+    setChannelSnippet(data?.channel?.description || "");
+    setRecentTitles((data?.recentVideos || []).map((v) => v.title || "").filter(Boolean));
+  };
 
   useEffect(() => {
     if (!user) return;
     const loadChannel = async () => {
       const { data } = await supabase
         .from("youtube_channels")
-        .select("channel_name, is_primary")
+        .select("channel_id, channel_name, is_primary")
         .eq("user_id", user.id);
       if (data && data.length > 0) {
         const primary = data.find((c) => c.is_primary) || data[0];
         setChannelName(primary.channel_name || null);
+        if (primary.channel_id) {
+          await fetchChannelContext(primary.channel_id);
+        }
       }
     };
     loadChannel();
@@ -64,9 +108,18 @@ const TopicIdeas = () => {
   useEffect(() => {
     if (!channelName || autoRunRef.current || topics.length > 0) return;
     autoRunRef.current = true;
+    const descriptionBlock = [
+      channelSnippet,
+      recentTitles.length > 0 ? `Recent videos: ${recentTitles.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     setChannelNiche(channelName);
+    if (descriptionBlock) {
+      setChannelDescription(descriptionBlock);
+    }
     void handleGenerate(channelName);
-  }, [channelName, topics.length]);
+  }, [channelName, channelSnippet, recentTitles, topics.length]);
 
   const handleGenerate = async (nicheOverride?: string) => {
     const nicheValue = nicheOverride ?? channelNiche;
