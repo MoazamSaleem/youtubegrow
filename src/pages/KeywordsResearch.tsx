@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -50,12 +50,39 @@ const KeywordsResearch = () => {
   const [summary, setSummary] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [copiedKeyword, setCopiedKeyword] = useState<string | null>(null);
+  const [channelName, setChannelName] = useState<string | null>(null);
+  const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
+  useEffect(() => {
+    if (!user) return;
+    const loadChannel = async () => {
+      const { data } = await supabase
+        .from("youtube_channels")
+        .select("channel_name, is_primary")
+        .eq("user_id", user.id);
+      if (data && data.length > 0) {
+        const primary = data.find((c) => c.is_primary) || data[0];
+        setChannelName(primary.channel_name || null);
+      }
+    };
+    loadChannel();
+  }, [user]);
+
+  useEffect(() => {
+    if (!channelName || autoRunRef.current || keywords.length > 0) return;
+    autoRunRef.current = true;
+    setSearchQuery(channelName);
+    setNiche(channelName);
+    void handleSearch(channelName, channelName);
+  }, [channelName, keywords.length]);
+
+  const handleSearch = async (queryOverride?: string, nicheOverride?: string) => {
+    const query = queryOverride ?? searchQuery;
+    const nicheValue = nicheOverride ?? niche;
+    if (!query.trim()) {
       toast({ title: "Please enter a search query", variant: "destructive" });
       return;
     }
@@ -64,8 +91,8 @@ const KeywordsResearch = () => {
     try {
       const { data, error } = await supabase.functions.invoke("research-keywords", {
         body: {
-          query: searchQuery,
-          niche,
+          query,
+          niche: nicheValue,
           count: Math.min(limits.keywordsPerDay, 10),
         },
       });
@@ -179,7 +206,7 @@ const KeywordsResearch = () => {
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="flex-1">
                 <Input
-                  placeholder="Enter a keyword or topic to research..."
+                  placeholder={channelName ? "Search for more keywords..." : "Enter a keyword or topic to research..."}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}

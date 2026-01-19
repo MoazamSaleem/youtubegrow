@@ -22,7 +22,7 @@ verify_jwt = true
 
 [functions.youtube-oauth]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 
 [functions.account-actions]
 enabled = true

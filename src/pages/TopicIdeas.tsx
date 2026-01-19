@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -40,12 +40,37 @@ const TopicIdeas = () => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [channelName, setChannelName] = useState<string | null>(null);
+  const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
 
-  const handleGenerate = async () => {
-    if (!channelNiche.trim()) {
+  useEffect(() => {
+    if (!user) return;
+    const loadChannel = async () => {
+      const { data } = await supabase
+        .from("youtube_channels")
+        .select("channel_name, is_primary")
+        .eq("user_id", user.id);
+      if (data && data.length > 0) {
+        const primary = data.find((c) => c.is_primary) || data[0];
+        setChannelName(primary.channel_name || null);
+      }
+    };
+    loadChannel();
+  }, [user]);
+
+  useEffect(() => {
+    if (!channelName || autoRunRef.current || topics.length > 0) return;
+    autoRunRef.current = true;
+    setChannelNiche(channelName);
+    void handleGenerate(channelName);
+  }, [channelName, topics.length]);
+
+  const handleGenerate = async (nicheOverride?: string) => {
+    const nicheValue = nicheOverride ?? channelNiche;
+    if (!nicheValue.trim()) {
       toast({ title: "Please enter your channel niche", variant: "destructive" });
       return;
     }
@@ -54,7 +79,7 @@ const TopicIdeas = () => {
     try {
       const { data, error } = await supabase.functions.invoke("generate-topics", {
         body: {
-          channelNiche,
+          channelNiche: nicheValue,
           channelDescription,
           targetAudience,
           count: Math.min(limits.topicsPerDay, 5),
@@ -153,10 +178,10 @@ const TopicIdeas = () => {
             <div className="grid gap-4">
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Channel Niche <span className="text-destructive">*</span>
+                  Channel Niche {channelName ? "(auto-filled)" : <span className="text-destructive">*</span>}
                 </label>
                 <Input
-                  placeholder="e.g., Tech Reviews, Gaming, Cooking, Fitness..."
+                  placeholder={channelName ? "Search a different niche..." : "e.g., Tech Reviews, Gaming, Cooking, Fitness..."}
                   value={channelNiche}
                   onChange={(e) => setChannelNiche(e.target.value)}
                 />

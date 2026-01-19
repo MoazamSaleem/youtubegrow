@@ -230,8 +230,7 @@ const ChannelAnalysis = () => {
           subscriberCount: selectedChannel.subscriber_count,
           viewCount: selectedChannel.view_count,
           videoCount: selectedChannel.video_count,
-          niche,
-          goals,
+          ...(channels.length === 0 ? { niche, goals } : {}),
         },
       });
 
@@ -417,25 +416,26 @@ const ChannelAnalysis = () => {
                   ))}
                 </div>
 
-                {/* Optional Context */}
-                <div className="grid sm:grid-cols-2 gap-4 mb-6">
-                  <div className="space-y-2">
-                    <Label>Channel Niche (optional)</Label>
-                    <Input
-                      placeholder="e.g., Tech Reviews, Gaming, Cooking"
-                      value={niche}
-                      onChange={(e) => setNiche(e.target.value)}
-                    />
+                {channels.length === 0 && (
+                  <div className="grid sm:grid-cols-2 gap-4 mb-6">
+                    <div className="space-y-2">
+                      <Label>Channel Niche (optional)</Label>
+                      <Input
+                        placeholder="e.g., Tech Reviews, Gaming, Cooking"
+                        value={niche}
+                        onChange={(e) => setNiche(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Growth Goals (optional)</Label>
+                      <Input
+                        placeholder="e.g., Reach 10K subs, Get monetized"
+                        value={goals}
+                        onChange={(e) => setGoals(e.target.value)}
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Growth Goals (optional)</Label>
-                    <Input
-                      placeholder="e.g., Reach 10K subs, Get monetized"
-                      value={goals}
-                      onChange={(e) => setGoals(e.target.value)}
-                    />
-                  </div>
-                </div>
+                )}
 
                 {/* Analyze Button */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

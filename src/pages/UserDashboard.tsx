@@ -34,6 +34,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+type AnalyticsRow = [string, string, string, string, string, string, string];
+
 const UserDashboard = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -41,6 +43,9 @@ const UserDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [timeFilter, setTimeFilter] = useState<"live" | "daily" | "weekly" | "monthly">("weekly");
   const [channels, setChannels] = useState<any[]>([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [analyticsRows, setAnalyticsRows] = useState<AnalyticsRow[]>([]);
   const [usage, setUsage] = useState({
     keywords_used: 0,
     topics_generated: 0,
@@ -74,6 +79,102 @@ const UserDashboard = () => {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (user && channels.length > 0) {
+      fetchAnalytics();
+    }
+  }, [user, channels, timeFilter]);
+
+  const getSessionWithRefresh = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return null;
+  };
+
+  const getTimeRange = () => {
+    const daysMap: Record<typeof timeFilter, number> = {
+      live: 1,
+      daily: 7,
+      weekly: 28,
+      monthly: 90,
+    };
+    const days = daysMap[timeFilter];
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(end.getDate() - (days - 1));
+    const endDate = end.toISOString().split("T")[0];
+    const startDate = start.toISOString().split("T")[0];
+    return { startDate, endDate, days };
+  };
+
+  const formatPeriodLabel = () => {
+    switch (timeFilter) {
+      case "live":
+        return "Last 24 hours";
+      case "daily":
+        return "Last 7 days";
+      case "weekly":
+        return "Last 28 days";
+      case "monthly":
+        return "Last 90 days";
+      default:
+        return "Last 7 days";
+    }
+  };
+
+  const fetchAnalytics = async () => {
+    if (!user || channels.length === 0) return;
+
+    const primary = channels.find((c) => c.is_primary) ?? channels[0];
+    if (!primary?.channel_id) return;
+
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+
+    try {
+      const session = await getSessionWithRefresh();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
+      const { startDate, endDate } = getTimeRange();
+      const { data, error } = await supabase.functions.invoke<{ analytics?: { rows?: AnalyticsRow[] } }>("youtube-oauth", {
+        body: {
+          action: "analytics",
+          channelId: primary.channel_id,
+          userId: user.id,
+          startDate,
+          endDate,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+      });
+
+      if (error) {
+        throw new Error(error.message || "Failed to load analytics");
+      }
+
+      const rows = data?.analytics?.rows ?? [];
+      setAnalyticsRows(Array.isArray(rows) ? rows : []);
+    } catch (error: any) {
+      console.error("Analytics error:", error);
+      setAnalyticsRows([]);
+      setAnalyticsError(error.message || "Failed to load analytics");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
   const fetchChannels = async () => {
     if (!user) return;
     const { data } = await supabase
@@ -95,21 +196,59 @@ const UserDashboard = () => {
     if (data) setUsage(data);
   };
 
-  const stats = [
-    { label: "Total Views", value: "2.4M", change: "+12.5%", positive: true, icon: Eye },
-    { label: "Watch Time", value: "156K hrs", change: "+8.3%", positive: true, icon: Clock },
-    { label: "Subscribers", value: "45.2K", change: "-2.1%", positive: false, icon: Users },
-    { label: "Revenue", value: "$12,450", change: "+15.7%", positive: true, icon: DollarSign },
-  ];
+  const formatNumber = (value: number, options?: Intl.NumberFormatOptions) => {
+    return new Intl.NumberFormat("en-US", options).format(value);
+  };
 
-  const chartData = [
-    { name: "Mon", views: 24000, watchTime: 4800 },
-    { name: "Tue", views: 28000, watchTime: 5600 },
-    { name: "Wed", views: 32000, watchTime: 6400 },
-    { name: "Thu", views: 27000, watchTime: 5400 },
-    { name: "Fri", views: 35000, watchTime: 7000 },
-    { name: "Sat", views: 42000, watchTime: 8400 },
-    { name: "Sun", views: 38000, watchTime: 7600 },
+  const formatCompact = (value: number) => {
+    return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  };
+
+  const formatPercentChange = (start: number, end: number) => {
+    if (!Number.isFinite(start) || start === 0) {
+      return { value: "0%", positive: end >= 0 };
+    }
+    const change = ((end - start) / Math.abs(start)) * 100;
+    const rounded = Math.round(change * 10) / 10;
+    return { value: `${rounded >= 0 ? "+" : ""}${rounded}%`, positive: rounded >= 0 };
+  };
+
+  const chartData = analyticsRows.map((row) => ({
+    name: row[0],
+    views: Number(row[1] ?? 0),
+    watchTime: Number(row[2] ?? 0),
+    subscribersGained: Number(row[3] ?? 0),
+    subscribersLost: Number(row[4] ?? 0),
+    averageViewDuration: Number(row[5] ?? 0),
+    revenue: Number(row[6] ?? 0),
+  }));
+
+  const totals = chartData.reduce(
+    (acc, row) => {
+      acc.views += row.views;
+      acc.watchTime += row.watchTime;
+      acc.subscribersNet += row.subscribersGained - row.subscribersLost;
+      acc.revenue += row.revenue;
+      acc.count += 1;
+      return acc;
+    },
+    { views: 0, watchTime: 0, subscribersNet: 0, revenue: 0, count: 0 }
+  );
+
+  const first = chartData[0];
+  const last = chartData[chartData.length - 1];
+  const viewsChange = first && last ? formatPercentChange(first.views, last.views) : { value: "0%", positive: true };
+  const watchTimeChange = first && last ? formatPercentChange(first.watchTime, last.watchTime) : { value: "0%", positive: true };
+  const subscribersChange = first && last
+    ? formatPercentChange(first.subscribersGained - first.subscribersLost, last.subscribersGained - last.subscribersLost)
+    : { value: "0%", positive: true };
+  const revenueChange = first && last ? formatPercentChange(first.revenue, last.revenue) : { value: "0%", positive: true };
+
+  const stats = [
+    { label: "Total Views", value: formatCompact(totals.views), change: viewsChange.value, positive: viewsChange.positive, icon: Eye },
+    { label: "Watch Time", value: `${formatCompact(totals.watchTime / 60)} hrs`, change: watchTimeChange.value, positive: watchTimeChange.positive, icon: Clock },
+    { label: "Subscribers", value: formatCompact(totals.subscribersNet), change: subscribersChange.value, positive: subscribersChange.positive, icon: Users },
+    { label: "Revenue", value: `$${formatNumber(totals.revenue, { maximumFractionDigits: 0 })}`, change: revenueChange.value, positive: revenueChange.positive, icon: DollarSign },
   ];
 
   if (loading) {
@@ -211,9 +350,15 @@ const UserDashboard = () => {
               <div className="flex items-center justify-between mb-6">
                 <h3 className="font-display font-semibold">Views Over Time</h3>
                 <button className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1">
-                  Last 7 days <ChevronDown className="h-4 w-4" />
+                  {formatPeriodLabel()} <ChevronDown className="h-4 w-4" />
                 </button>
               </div>
+              {analyticsError && (
+                <p className="text-sm text-destructive mb-4">{analyticsError}</p>
+              )}
+              {analyticsLoading && (
+                <p className="text-xs text-muted-foreground mb-4">Loading analytics…</p>
+              )}
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData}>
@@ -255,9 +400,12 @@ const UserDashboard = () => {
               <div className="flex items-center justify-between mb-6">
                 <h3 className="font-display font-semibold">Watch Time</h3>
                 <button className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1">
-                  Last 7 days <ChevronDown className="h-4 w-4" />
+                  {formatPeriodLabel()} <ChevronDown className="h-4 w-4" />
                 </button>
               </div>
+              {analyticsLoading && (
+                <p className="text-xs text-muted-foreground mt-2">Loading analytics…</p>
+              )}
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData}>

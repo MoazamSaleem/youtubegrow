@@ -68,6 +68,7 @@ serve(async (req) => {
     const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET");
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
     
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       return new Response(JSON.stringify({ 
@@ -78,11 +79,37 @@ serve(async (req) => {
       });
     }
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
       return new Response(JSON.stringify({
-        error: "Supabase service role not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+        error: "Supabase keys not configured. Please set SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY.",
       }), {
         status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const authClient = createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY,
+      {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
+    );
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: authData, error: authError } = await authClient.auth.getUser(token);
+    if (authError || !authData?.user) {
+      return new Response(JSON.stringify({ error: "Invalid or expired session" }), {
+        status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -122,6 +149,12 @@ serve(async (req) => {
     if (action === "callback") {
       // Handle OAuth callback
       const { code, redirectUri, userId } = body ?? {};
+      if (!userId || authData.user.id !== userId) {
+        return new Response(JSON.stringify({ error: "User mismatch" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       
       // Exchange code for tokens
       const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -224,6 +257,12 @@ serve(async (req) => {
     if (action === "refresh") {
       // Refresh access token
       const { channelId, userId } = body ?? {};
+      if (!userId || authData.user.id !== userId) {
+        return new Response(JSON.stringify({ error: "User mismatch" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       
       const { data: channelData, error: fetchError } = await supabase
         .from("youtube_channels")
@@ -279,6 +318,12 @@ serve(async (req) => {
     if (action === "analytics") {
       // Fetch analytics data
       const { channelId, userId, startDate, endDate } = body ?? {};
+      if (!userId || authData.user.id !== userId) {
+        return new Response(JSON.stringify({ error: "User mismatch" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       
       const { data: channelData, error: fetchError } = await supabase
         .from("youtube_channels")
@@ -343,7 +388,7 @@ serve(async (req) => {
       analyticsUrl.searchParams.set("ids", `channel==${channelId}`);
       analyticsUrl.searchParams.set("startDate", startDate || "2024-01-01");
       analyticsUrl.searchParams.set("endDate", endDate || new Date().toISOString().split("T")[0]);
-      analyticsUrl.searchParams.set("metrics", "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration");
+      analyticsUrl.searchParams.set("metrics", "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration,estimatedRevenue");
       analyticsUrl.searchParams.set("dimensions", "day");
       analyticsUrl.searchParams.set("sort", "day");
       
