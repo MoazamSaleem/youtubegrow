@@ -266,7 +266,7 @@ const TopicIdeas = () => {
               <Button
                 variant="hero"
                 size="lg"
-                onClick={handleGenerate}
+                onClick={() => handleGenerate()}
                 disabled={isGenerating || !channelNiche.trim()}
                 className="w-full sm:w-auto"
               >

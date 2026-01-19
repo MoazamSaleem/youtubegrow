@@ -162,7 +162,7 @@ serve(async (req) => {
       limit: 5,
     });
     
-    const activeSubscription = subscriptions.data.find((sub) => sub.status === "active" || sub.status === "trialing") ?? null;
+    const activeSubscription = subscriptions.data.find((sub: { status: string }) => sub.status === "active" || sub.status === "trialing") ?? null;
     const hasActiveSub = !!activeSubscription;
     let productId = null;
     let plan = previousPlan;

@@ -272,7 +272,7 @@ const KeywordsResearch = () => {
               <Button
                 variant="hero"
                 size="lg"
-                onClick={handleSearch}
+                onClick={() => handleSearch()}
                 disabled={isSearching || !searchQuery.trim()}
                 className="h-12"
               >

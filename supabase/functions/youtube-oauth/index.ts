@@ -44,13 +44,20 @@ const decryptToken = async (encrypted: string) => {
   return new TextDecoder().decode(plain);
 };
 
+interface ChannelTokenData {
+  access_token: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+}
+
+// deno-lint-ignore no-explicit-any
 const getChannelAccessToken = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   userId: string,
   channelId: string,
   clientId: string,
   clientSecret: string
-) => {
+): Promise<string> => {
   const { data: channelData, error: fetchError } = await supabase
     .from("youtube_channels")
     .select("access_token, refresh_token, token_expires_at")
@@ -58,17 +65,19 @@ const getChannelAccessToken = async (
     .eq("channel_id", channelId)
     .single();
 
-  if (fetchError || !channelData?.access_token) {
+  const typedData = channelData as ChannelTokenData | null;
+
+  if (fetchError || !typedData?.access_token) {
     throw new Error("Channel not found");
   }
 
-  let accessToken = await decryptToken(channelData.access_token);
-  if (channelData.token_expires_at && new Date(channelData.token_expires_at) < new Date()) {
-    if (!channelData.refresh_token) {
+  let accessToken = await decryptToken(typedData.access_token);
+  if (typedData.token_expires_at && new Date(typedData.token_expires_at) < new Date()) {
+    if (!typedData.refresh_token) {
       throw new Error("Refresh token missing");
     }
 
-    const refreshToken = await decryptToken(channelData.refresh_token);
+    const refreshToken = await decryptToken(typedData.refresh_token);
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

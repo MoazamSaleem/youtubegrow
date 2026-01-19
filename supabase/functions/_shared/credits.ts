@@ -21,6 +21,12 @@ interface CreditCheckResult {
   cost?: number;
 }
 
+interface DeductCreditsResult {
+  success: boolean;
+  new_balance: number;
+  current_balance: number;
+}
+
 export async function checkAndDeductCredits(
   userId: string,
   queryType: QueryType,
@@ -36,22 +42,22 @@ export async function checkAndDeductCredits(
   console.log(`[CREDITS] Checking credits for user ${userId}, type: ${queryType}, complexity: ${complexity}, cost: ${cost}`);
 
   try {
-    // Get current balance
-    const { data: tokenData, error: fetchError } = await supabaseAdmin
-      .from("user_tokens")
-      .select("ai_credits_balance")
-      .eq("user_id", userId)
-      .maybeSingle();
+    // Use atomic database function to prevent race conditions
+    const { data, error } = await supabaseAdmin.rpc('deduct_credits', {
+      p_user_id: userId,
+      p_amount: cost
+    });
 
-    if (fetchError) {
-      console.error("[CREDITS] Error fetching balance:", fetchError);
-      return { success: false, error: "Failed to check credits balance" };
+    if (error) {
+      console.error("[CREDITS] Error calling deduct_credits:", error);
+      return { success: false, error: "Failed to deduct credits" };
     }
 
-    const currentBalance = tokenData?.ai_credits_balance || 0;
-    console.log(`[CREDITS] Current balance: ${currentBalance}, required: ${cost}`);
-
-    if (currentBalance < cost) {
+    const result = (data as DeductCreditsResult[] | null)?.[0];
+    
+    if (!result || !result.success) {
+      const currentBalance = result?.current_balance || 0;
+      console.log(`[CREDITS] Insufficient credits. Balance: ${currentBalance}, required: ${cost}`);
       return { 
         success: false, 
         error: `Insufficient credits. You have ${currentBalance} credits, but this action requires ${cost} credits.`,
@@ -60,21 +66,8 @@ export async function checkAndDeductCredits(
       };
     }
 
-    // Deduct credits
-    const newBalance = currentBalance - cost;
-    const { error: updateError } = await supabaseAdmin
-      .from("user_tokens")
-      .update({
-        ai_credits_balance: newBalance,
-        ai_credits_used: (tokenData as any)?.ai_credits_used || 0 + cost,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", userId);
-
-    if (updateError) {
-      console.error("[CREDITS] Error updating balance:", updateError);
-      return { success: false, error: "Failed to deduct credits" };
-    }
+    const newBalance = result.new_balance;
+    console.log(`[CREDITS] Deducted ${cost} credits atomically. New balance: ${newBalance}`);
 
     // Log to ai_credits_usage
     await supabaseAdmin.from("ai_credits_usage").insert({
@@ -92,8 +85,6 @@ export async function checkAndDeductCredits(
       description: `${queryType.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase())} - ${complexity}`,
       balance_after: newBalance,
     });
-
-    console.log(`[CREDITS] Deducted ${cost} credits. New balance: ${newBalance}`);
 
     return { success: true, currentBalance: newBalance, cost };
   } catch (error) {
