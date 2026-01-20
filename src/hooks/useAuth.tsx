@@ -119,16 +119,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => authSubscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!user || !subscription) return;
-    if (pendingSyncAttempted.current === user.id) return;
-    if (subscription.plan === "free") return;
-    if (subscription.status === "active" || subscription.status === "trialing") return;
-
-    pendingSyncAttempted.current = user.id;
-    refreshSubscription();
-  }, [user, subscription, refreshSubscription]);
-
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -201,6 +191,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshInFlight.current = run;
     await run;
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !subscription) return;
+    if (pendingSyncAttempted.current === user.id) return;
+    if (subscription.plan === "free") return;
+    if (subscription.status === "active" || subscription.status === "trialing") return;
+
+    pendingSyncAttempted.current = user.id;
+    refreshSubscription();
+  }, [user, subscription, refreshSubscription]);
 
   return (
     <AuthContext.Provider
