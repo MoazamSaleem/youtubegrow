@@ -182,7 +182,7 @@ Based on these metrics and general YouTube best practices, provide a detailed st
       body: JSON.stringify({
         prompt: ANALYSIS_PROMPT_ID,
         input: prompt,
-        response_format: { type: "json_object" },
+        text: { format: { type: "json_object" } },
       }),
     });
 
