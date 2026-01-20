@@ -240,6 +240,10 @@ const ChannelAnalysis = () => {
       if (!session?.access_token) {
         throw new Error("Your session expired. Please sign in again.");
       }
+      console.info("[ChannelAnalysis] Session ok", {
+        hasToken: true,
+        expiresAt: session.expires_at,
+      });
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-channel`,
