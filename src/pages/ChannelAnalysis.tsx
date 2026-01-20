@@ -189,16 +189,15 @@ const ChannelAnalysis = () => {
 
   const getSessionWithRefresh = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
-      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
-      if (!shouldRefresh) return session;
+    const expiresAt = session?.expires_at ? session.expires_at * 1000 : 0;
+    const shouldRefresh = !session?.access_token || (expiresAt > 0 && expiresAt - Date.now() < 60_000);
+
+    if (shouldRefresh) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed.session?.access_token) return refreshed.session;
     }
 
-    const { data: refreshed } = await supabase.auth.refreshSession();
-    if (refreshed.session?.access_token) return refreshed.session;
-
-    return null;
+    return session ?? null;
   };
 
   const canAnalyze = () => {
@@ -242,24 +241,32 @@ const ChannelAnalysis = () => {
         throw new Error("Your session expired. Please sign in again.");
       }
 
-      const { data, error } = await supabase.functions.invoke("analyze-channel", {
-        body: {
-          channelId: selectedChannel.channel_id,
-          channelName: selectedChannel.channel_name,
-          subscriberCount: selectedChannel.subscriber_count,
-          viewCount: selectedChannel.view_count,
-          videoCount: selectedChannel.video_count,
-          ...(channels.length === 0 ? { niche, goals } : {}),
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-channel`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            channelId: selectedChannel.channel_id,
+            channelName: selectedChannel.channel_name,
+            subscriberCount: selectedChannel.subscriber_count,
+            viewCount: selectedChannel.view_count,
+            videoCount: selectedChannel.video_count,
+            ...(channels.length === 0 ? { niche, goals } : {}),
+          }),
+        }
+      );
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to analyze channel");
+      }
 
+      const data = await response.json();
       setAnalysis(data.analysis);
       setLastAnalysisDate(new Date().toISOString().split("T")[0]);
       
