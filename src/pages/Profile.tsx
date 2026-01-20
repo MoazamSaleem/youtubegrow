@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { UpgradeModal } from "@/components/dashboard/UpgradeModal";
+import { SubscriptionPlan, getPlanDisplayName } from "@/lib/planLimits";
 import {
   User,
   Award,
@@ -87,7 +89,7 @@ const RARITY_BORDER: Record<string, string> = {
 };
 
 const Profile = () => {
-  const { user, profile: authProfile, signOut } = useAuth();
+  const { user, profile: authProfile, signOut, subscription } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -97,6 +99,10 @@ const Profile = () => {
   const [accountActionLoading, setAccountActionLoading] = useState(false);
   const [allBadges, setAllBadges] = useState<BadgeData[]>([]);
   const [userBadges, setUserBadges] = useState<UserBadge[]>([]);
+  const [aiCredits, setAiCredits] = useState(0);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [selectedFeature, setSelectedFeature] = useState<string>("");
+  const [requiredPlanForFeature, setRequiredPlanForFeature] = useState<SubscriptionPlan>("basic");
   const [profileData, setProfileData] = useState<ProfileData>({
     display_name: null,
     show_on_leaderboard: true,
@@ -108,6 +114,32 @@ const Profile = () => {
 
   useEffect(() => {
     if (user) fetchData();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel("profile_user_tokens_changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_tokens",
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload: any) => {
+          if (payload.new?.ai_credits_balance !== undefined) {
+            setAiCredits(payload.new.ai_credits_balance || 0);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const fetchData = async () => {
@@ -136,7 +168,7 @@ const Profile = () => {
       // Fetch profile settings from user_tokens
       const { data: tokens } = await supabase
         .from("user_tokens")
-        .select("display_name, show_on_leaderboard, displayed_badges")
+        .select("display_name, show_on_leaderboard, displayed_badges, ai_credits_balance")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -146,6 +178,7 @@ const Profile = () => {
           show_on_leaderboard: tokens.show_on_leaderboard,
           displayed_badges: tokens.displayed_badges || [],
         });
+        setAiCredits(tokens.ai_credits_balance || 0);
       }
     } catch (error) {
       console.error("Error fetching profile data:", error);
@@ -367,6 +400,7 @@ const Profile = () => {
   };
 
   const earnedBadgeIds = new Set(userBadges.map((b) => b.badge_id));
+  const currentPlan = (subscription?.plan || "free") as SubscriptionPlan;
 
   if (loading) {
     return (
@@ -391,6 +425,60 @@ const Profile = () => {
               <h1 className="font-display text-2xl sm:text-3xl font-bold">Profile & Badges</h1>
             </div>
             <p className="text-muted-foreground">Customize your profile and showcase your achievements.</p>
+          </motion.div>
+
+          {/* Plan & Credits */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08 }}
+            className="grid gap-4 md:grid-cols-2 mb-8"
+          >
+            <div className="glass rounded-xl p-6 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+                <Coins className="h-6 w-6 text-white" />
+              </div>
+              <div className="flex-1">
+                <p className="text-xs text-muted-foreground">AI Credits</p>
+                <p className="text-2xl font-bold">{aiCredits.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground mt-1">Use credits for AI chat, scripts, and analysis</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => navigate("/dashboard/credits")}>
+                View Shop
+              </Button>
+            </div>
+
+            <div className="glass rounded-xl p-6 flex flex-col gap-3 bg-gradient-to-br from-primary/10 to-accent/10">
+              <div className="flex items-center gap-2">
+                <Crown className="h-5 w-5 text-warning" />
+                <span className="font-semibold text-sm">
+                  {getPlanDisplayName(currentPlan)} Plan
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {currentPlan === "free"
+                  ? "Unlock AI analysis, competitors & more"
+                  : currentPlan === "basic"
+                    ? "Get Script Writer, Thumbnails & AI Chat"
+                    : currentPlan === "pro"
+                      ? "Go unlimited with Advanced plan"
+                      : "You have the top plan"}
+              </p>
+              {currentPlan !== "advanced" && (
+                <Button
+                  variant="premium"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedFeature("");
+                    setRequiredPlanForFeature("basic");
+                    setUpgradeModalOpen(true);
+                  }}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Upgrade Plan
+                </Button>
+              )}
+            </div>
           </motion.div>
 
           {/* Profile Card */}
@@ -656,6 +744,14 @@ const Profile = () => {
           </motion.div>
         </div>
       </main>
+
+      <UpgradeModal
+        open={upgradeModalOpen}
+        onOpenChange={setUpgradeModalOpen}
+        currentPlan={currentPlan}
+        targetFeature={selectedFeature}
+        requiredPlan={requiredPlanForFeature}
+      />
     </div>
   );
 };

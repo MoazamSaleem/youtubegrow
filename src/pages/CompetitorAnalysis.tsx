@@ -215,7 +215,7 @@ const CompetitorAnalysisPage = () => {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="max-w-2xl mx-auto text-center py-16"
+              className="w-full text-center py-16"
             >
               <div className="inline-flex p-6 rounded-3xl glass mb-8">
                 <Users className="h-16 w-16 text-accent" />

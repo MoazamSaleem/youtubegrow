@@ -210,7 +210,7 @@ const ThumbnailGenerator = () => {
             transition={{ duration: 0.5 }}
           >
             {!canGenerate ? (
-              <Card className="border-dashed max-w-2xl mx-auto">
+              <Card className="border-dashed w-full">
                 <CardContent className="flex flex-col items-center justify-center py-12 sm:py-16">
                   <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
                     <Lock className="w-8 h-8 text-muted-foreground" />

@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { PLAN_LIMITS, getPlanDisplayName, SubscriptionPlan } from "@/lib/planLimits";
-import { supabase } from "@/integrations/supabase/client";
 import { UpgradeModal } from "./UpgradeModal";
 import {
   Tooltip,
@@ -30,8 +29,8 @@ import {
   Target,
   Shield,
   User,
-  Coins,
-  ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 interface NavItem {
@@ -49,56 +48,13 @@ interface DashboardSidebarProps {
 }
 
 export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSidebarProps) {
-  const { user, profile, subscription, isAdmin, signOut } = useAuth();
+  const { profile, subscription, isAdmin, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const currentPlan = (subscription?.plan || "free") as SubscriptionPlan;
-  const [aiCredits, setAiCredits] = useState<number>(0);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [selectedFeature, setSelectedFeature] = useState<string>("");
   const [requiredPlanForFeature, setRequiredPlanForFeature] = useState<SubscriptionPlan>("basic");
-
-  // Fetch AI credits balance
-  useEffect(() => {
-    const fetchCredits = async () => {
-      if (!user) return;
-      
-      const { data } = await supabase
-        .from("user_tokens")
-        .select("ai_credits_balance")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      
-      if (data) {
-        setAiCredits(data.ai_credits_balance || 0);
-      }
-    };
-
-    fetchCredits();
-
-    // Subscribe to realtime changes
-    const channel = supabase
-      .channel('user_tokens_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_tokens',
-          filter: `user_id=eq.${user?.id}`,
-        },
-        (payload: any) => {
-          if (payload.new?.ai_credits_balance !== undefined) {
-            setAiCredits(payload.new.ai_credits_balance);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user]);
 
   const navigation: NavItem[] = [
     { name: "Overview", icon: BarChart3, href: "/dashboard", description: "Your channel dashboard" },
@@ -176,6 +132,15 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
                 </span>
               )}
             </Link>
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="ml-auto hidden lg:inline-flex items-center justify-center h-9 w-9 rounded-lg hover:bg-secondary transition-colors"
+              aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+              title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            >
+              {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
           </div>
 
           {/* Navigation */}
@@ -255,63 +220,6 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
               </Link>
             )}
           </nav>
-
-          {/* AI Credits Display */}
-          {sidebarOpen && (
-            <div className="px-4 pb-2">
-              <Link 
-                to="/dashboard/credits"
-                className="glass rounded-xl p-3 flex items-center gap-3 hover:bg-secondary/50 transition-colors"
-              >
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
-                  <Coins className="h-5 w-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-xs text-muted-foreground">AI Credits</p>
-                  <p className="font-bold text-lg leading-tight">
-                    {aiCredits.toLocaleString()}
-                  </p>
-                </div>
-                <Sparkles className="h-4 w-4 text-primary" />
-              </Link>
-            </div>
-          )}
-
-          {/* Upgrade Banner */}
-          {sidebarOpen && currentPlan !== "advanced" && (
-            <div className="p-4 border-t border-border">
-              <div className="glass rounded-xl p-4 bg-gradient-to-br from-primary/10 to-accent/10">
-                <div className="flex items-center gap-2 mb-2">
-                  <Crown className="h-5 w-5 text-warning" />
-                  <span className="font-semibold text-sm">Upgrade Plan</span>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">
-                  {currentPlan === "free" 
-                    ? "Unlock AI analysis, competitors & more"
-                    : currentPlan === "basic"
-                      ? "Get Script Writer, Thumbnails & AI Chat"
-                      : "Go unlimited with Advanced plan"}
-                </p>
-                <div className="text-xs text-muted-foreground mb-3">
-                  <span className="font-medium text-foreground">
-                    {currentPlan === "free" ? "From $7/mo" : currentPlan === "basic" ? "From $15/mo" : "$25/mo"}
-                  </span>
-                </div>
-                <Button 
-                  variant="premium" 
-                  size="sm" 
-                  className="w-full"
-                  onClick={() => {
-                    setSelectedFeature("");
-                    setUpgradeModalOpen(true);
-                  }}
-                >
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  See What You'll Unlock
-                </Button>
-              </div>
-            </div>
-          )}
 
           {/* User */}
           <div className="p-4 border-t border-border">

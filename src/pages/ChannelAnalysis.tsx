@@ -329,7 +329,7 @@ const ChannelAnalysis = () => {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="max-w-2xl mx-auto text-center py-16"
+              className="w-full text-center py-16"
             >
               <div className="inline-flex p-6 rounded-3xl glass mb-8">
                 <Lock className="h-16 w-16 text-muted-foreground" />
@@ -353,7 +353,7 @@ const ChannelAnalysis = () => {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="max-w-2xl mx-auto text-center py-16"
+              className="w-full text-center py-16"
             >
               <div className="inline-flex p-6 rounded-3xl glass mb-8">
                 <Youtube className="h-16 w-16 text-destructive" />

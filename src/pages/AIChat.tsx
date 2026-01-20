@@ -349,7 +349,7 @@ const AIChat = () => {
         <div className="flex-1 flex flex-col overflow-hidden">
           {messages.length === 0 ? (
             <div className="flex-1 flex items-center justify-center p-4 lg:p-8">
-              <div className="text-center max-w-2xl mx-auto">
+              <div className="text-center w-full">
                 <motion.div
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -422,7 +422,7 @@ const AIChat = () => {
             </div>
           ) : (
             <ScrollArea className="flex-1 p-4 lg:p-6">
-              <div className="max-w-3xl mx-auto space-y-6">
+              <div className="w-full space-y-6">
                 <AnimatePresence initial={false}>
                   {messages.map((message, index) => (
                     <motion.div
@@ -466,7 +466,7 @@ const AIChat = () => {
 
           {/* Input Area */}
           <div className="border-t border-border p-4 glass-strong">
-            <div className="max-w-3xl mx-auto">
+            <div className="w-full">
               <div className="flex gap-3">
                 <Input
                   ref={inputRef}

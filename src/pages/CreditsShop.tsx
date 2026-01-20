@@ -210,7 +210,7 @@ const CreditsShop = () => {
       <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       <main className="flex-1 p-4 lg:p-8 overflow-auto">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full">
           {/* Header */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
             <div className="flex items-center gap-3 mb-4">
