@@ -44,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const refreshInFlight = useRef<Promise<void> | null>(null);
+  const pendingSyncAttempted = useRef<string | null>(null);
 
   const fetchUserData = async (userId: string) => {
     try {
@@ -89,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
+        pendingSyncAttempted.current = null;
 
         // Defer data fetching with setTimeout to prevent deadlock
         if (session?.user) {
@@ -116,6 +118,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => authSubscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user || !subscription) return;
+    if (pendingSyncAttempted.current === user.id) return;
+    if (subscription.plan === "free") return;
+    if (subscription.status === "active" || subscription.status === "trialing") return;
+
+    pendingSyncAttempted.current = user.id;
+    refreshSubscription();
+  }, [user, subscription, refreshSubscription]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
