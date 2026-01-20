@@ -22,6 +22,7 @@ import {
   ArrowLeft, 
   ArrowRight,
   Check, 
+  X,
   Crown, 
   Zap, 
   Star, 
@@ -297,20 +298,78 @@ const SignUp = () => {
     }
   };
 
+  // Features exactly matching the reference image
+  const planFeatures: Record<SubscriptionPlan, { included: string[]; excluded: string[] }> = {
+    free: {
+      included: [
+        "Link 1 channel",
+        "View basic analytics",
+        "20 keywords/day",
+        "2 topic suggestions/day",
+      ],
+      excluded: [
+        "AI channel analysis",
+        "Competitor analysis",
+        "Script writer",
+        "Thumbnail generator",
+      ],
+    },
+    basic: {
+      included: [
+        "Link 1 channel",
+        "View basic analytics",
+        "50 keywords/day",
+        "5 topic suggestions/day",
+        "AI analysis weekly",
+        "Competitor analysis weekly",
+        "Growth tasks & milestones",
+        "1,000 AI Credits",
+      ],
+      excluded: [
+        "Script writer",
+        "Thumbnail generator",
+      ],
+    },
+    pro: {
+      included: [
+        "Link up to 3 channels",
+        "Advanced analytics",
+        "150 keywords/day",
+        "10 topic suggestions/day",
+        "AI analysis weekly",
+        "Competitor analysis weekly",
+        "Script writer",
+        "5 thumbnails/day",
+        "YouTube Strategist AI",
+        "Growth tasks & milestones",
+        "10,000 AI Credits",
+      ],
+      excluded: [],
+    },
+    advanced: {
+      included: [
+        "Link up to 10 channels",
+        "Advanced analytics",
+        "Unlimited keywords",
+        "20 topic suggestions/day",
+        "Unlimited AI analysis",
+        "Daily competitor analysis",
+        "Script writer",
+        "Unlimited thumbnails",
+        "YouTube Strategist AI",
+        "Growth tasks & milestones",
+        "25,000 AI Credits",
+      ],
+      excluded: [],
+    },
+  };
+
   const getFeatures = (plan: SubscriptionPlan) => {
-    if (plan !== "free") {
-      return STRIPE_PLANS[plan].features;
-    }
-    const limits = PLAN_LIMITS[plan];
-    return [
-      `${limits.maxChannels} channel${limits.maxChannels > 1 ? "s" : ""}`,
-      `${limits.keywordsPerDay === -1 ? "Unlimited" : limits.keywordsPerDay} keywords/day`,
-      `${limits.topicsPerDay} topics/day`,
-      limits.hasScriptWriter ? "Script Writer" : null,
-      limits.thumbnailsPerDay > 0 ? `${limits.thumbnailsPerDay === -1 ? "Unlimited" : limits.thumbnailsPerDay} thumbnails/day` : null,
-      limits.hasYoutubeStrategist ? "AI Strategist" : null,
-      limits.aiStrategistCredits > 0 ? `${limits.aiStrategistCredits.toLocaleString()} AI Credits` : null,
-    ].filter(Boolean);
+    return planFeatures[plan].included;
+  };
+
+  const getExcludedFeatures = (plan: SubscriptionPlan) => {
+    return planFeatures[plan].excluded;
   };
 
   // Filter plans based on eligibility
@@ -373,10 +432,13 @@ const SignUp = () => {
               {/* Plan Cards */}
               <div className={`grid sm:grid-cols-2 ${availablePlans.length === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4 mb-8`}>
                 {availablePlans.map((config) => {
-                  const limits = PLAN_LIMITS[config.key];
                   const isSelected = selectedPlan === config.key;
-                  const features = getFeatures(config.key);
+                  const includedFeatures = getFeatures(config.key);
+                  const excludedFeatures = getExcludedFeatures(config.key);
                   const planName = config.key.charAt(0).toUpperCase() + config.key.slice(1);
+                  const buttonText = config.key === "free" ? "Start Free Trial" : 
+                                   config.key === "basic" ? "Get Started" :
+                                   config.key === "pro" ? "Get Pro" : "Go Advanced";
 
                   return (
                     <motion.div
@@ -397,7 +459,7 @@ const SignUp = () => {
                       )}
 
                       {config.key === "free" && (
-                        <Badge variant="outline" className="absolute -top-3 left-1/2 -translate-x-1/2 border-amber-500/50 text-amber-500 text-xs">
+                        <Badge variant="outline" className="absolute -top-3 left-1/2 -translate-x-1/2 border-amber-500/50 text-amber-400 text-xs">
                           First Time Only
                         </Badge>
                       )}
@@ -414,14 +476,30 @@ const SignUp = () => {
                         <span className="text-muted-foreground text-sm">/month</span>
                       </div>
 
-                      <ul className="space-y-2">
-                        {features.slice(0, 5).map((feature, i) => (
+                      <ul className="space-y-2 mb-4">
+                        {includedFeatures.map((feature, i) => (
                           <li key={i} className="flex items-center gap-2 text-sm">
-                            <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
+                            <Check className="h-4 w-4 text-primary flex-shrink-0" />
                             <span className="text-muted-foreground">{feature}</span>
                           </li>
                         ))}
+                        {excludedFeatures.map((feature, i) => (
+                          <li key={`excluded-${i}`} className="flex items-center gap-2 text-sm">
+                            <X className="h-4 w-4 text-muted-foreground/50 flex-shrink-0" />
+                            <span className="text-muted-foreground/50">{feature}</span>
+                          </li>
+                        ))}
                       </ul>
+
+                      <div className={`text-center py-2 rounded-lg text-sm font-medium ${
+                        isSelected 
+                          ? "bg-primary text-primary-foreground" 
+                          : config.key === "free" 
+                            ? "border border-border text-foreground" 
+                            : "bg-primary/10 text-primary"
+                      }`}>
+                        {buttonText}
+                      </div>
 
                       {isSelected && (
                         <div className="absolute top-3 right-3">

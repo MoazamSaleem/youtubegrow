@@ -25,6 +25,13 @@ import CreditsShop from "./pages/CreditsShop";
 import CreditsHistory from "./pages/CreditsHistory";
 import ThumbnailGenerator from "./pages/ThumbnailGenerator";
 import YouTubeCallback from "./pages/YouTubeCallback";
+import About from "./pages/About";
+import Blog from "./pages/Blog";
+import Careers from "./pages/Careers";
+import Contact from "./pages/Contact";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import CookiePolicy from "./pages/CookiePolicy";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -58,6 +65,13 @@ const App = () => (
               <Route path="/dashboard/thumbnails" element={<ThumbnailGenerator />} />
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/youtube-callback" element={<YouTubeCallback />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/blog" element={<Blog />} />
+              <Route path="/careers" element={<Careers />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/cookies" element={<CookiePolicy />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

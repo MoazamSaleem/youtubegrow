@@ -12,21 +12,20 @@ const Footer = () => {
 
   const links = {
     product: [
-      { name: "Features", href: "#features" },
-      { name: "Pricing", href: "#pricing" },
-      { name: "How it Works", href: "#how-it-works" },
-      { name: "API", href: "#" },
+      { name: "Features", href: "/#features" },
+      { name: "Pricing", href: "/#pricing" },
+      { name: "How it Works", href: "/#how-it-works" },
     ],
     company: [
-      { name: "About", href: "#" },
-      { name: "Blog", href: "#" },
-      { name: "Careers", href: "#" },
-      { name: "Contact", href: "#" },
+      { name: "About", href: "/about" },
+      { name: "Blog", href: "/blog" },
+      { name: "Careers", href: "/careers" },
+      { name: "Contact", href: "/contact" },
     ],
     legal: [
-      { name: "Privacy", href: "#" },
-      { name: "Terms", href: "#" },
-      { name: "Cookie Policy", href: "#" },
+      { name: "Privacy", href: "/privacy" },
+      { name: "Terms", href: "/terms" },
+      { name: "Cookie Policy", href: "/cookies" },
     ],
   };
 
