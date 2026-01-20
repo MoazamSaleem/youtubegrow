@@ -161,9 +161,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         // First check Stripe and sync server-side subscription
         const { data: stripeData, error } = await supabase.functions.invoke("check-subscription");
-        if (!error && stripeData?.subscription) {
-          setSubscription(stripeData.subscription as Subscription);
-          return;
+        if (!error && stripeData) {
+          // The check-subscription function syncs the subscription in DB, so fetch the updated local data
+          console.log("[useAuth] check-subscription returned:", stripeData);
         }
         if (error) {
           console.warn("Subscription check failed, falling back:", error.message ?? error);
@@ -172,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.warn("Subscription check failed, falling back:", error);
       }
 
-      // Fallback to local subscription data
+      // Always fetch the latest subscription data from DB (which was synced by check-subscription)
       const { data } = await supabase
         .from("subscriptions")
         .select("*")

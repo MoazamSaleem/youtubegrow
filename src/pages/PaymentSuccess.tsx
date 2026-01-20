@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,57 +10,128 @@ import {
   ArrowRight, 
   Youtube, 
   Sparkles,
-  Loader2 
+  Loader2,
+  RefreshCw
 } from "lucide-react";
+import { toast } from "sonner";
 
 const PaymentSuccess = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, session, refreshSubscription } = useAuth();
+  const { user, session, refreshSubscription, subscription } = useAuth();
   const [checking, setChecking] = useState(true);
   const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [planName, setPlanName] = useState<string>("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncAttempts, setSyncAttempts] = useState(0);
 
   const needsEmailConfirmation = searchParams.get("confirm") === "1";
 
+  const syncSubscription = useCallback(async () => {
+    if (!user || !session) return false;
+    
+    setSyncing(true);
+    try {
+      // Call check-subscription to sync from Stripe
+      await refreshSubscription();
+      
+      // Fetch the updated subscription from DB
+      const { data: subData } = await supabase
+        .from("subscriptions")
+        .select("plan, status")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      if (subData?.plan && subData.plan !== "free" && subData.status === "active") {
+        setPlanName(subData.plan.charAt(0).toUpperCase() + subData.plan.slice(1));
+        setSyncing(false);
+        return true;
+      }
+      
+      // Check pending status - payment may still be processing
+      if (subData?.status === "pending") {
+        console.log("Subscription still pending, will retry...");
+      }
+      
+      setSyncing(false);
+      return false;
+    } catch (error) {
+      console.error("Error syncing subscription:", error);
+      setSyncing(false);
+      return false;
+    }
+  }, [user, session, refreshSubscription]);
+
   useEffect(() => {
     const checkStatus = async () => {
-      // If user is logged in and has confirmed email
+      // Wait for auth to be ready
+      if (!user) {
+        // Check if we have a session that needs refresh
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (!currentSession) {
+          setChecking(false);
+          return;
+        }
+      }
+      
       if (user && session) {
         const isConfirmed = !!user.email_confirmed_at;
         setEmailConfirmed(isConfirmed);
         
         if (isConfirmed) {
-          // Sync subscription from Stripe
-          await refreshSubscription();
-        }
-        
-        // Get plan name from subscription
-        const { data: subData } = await supabase
-          .from("subscriptions")
-          .select("plan")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        
-        if (subData?.plan) {
-          setPlanName(subData.plan.charAt(0).toUpperCase() + subData.plan.slice(1));
+          // Email is confirmed, sync subscription from Stripe
+          const synced = await syncSubscription();
+          
+          // If not synced yet, try a few more times with delay
+          if (!synced && syncAttempts < 3) {
+            setTimeout(() => {
+              setSyncAttempts(prev => prev + 1);
+            }, 2000);
+          }
+        } else {
+          // Get plan name from pending subscription
+          const { data: subData } = await supabase
+            .from("subscriptions")
+            .select("plan")
+            .eq("user_id", user.id)
+            .maybeSingle();
+          
+          if (subData?.plan && subData.plan !== "free") {
+            setPlanName(subData.plan.charAt(0).toUpperCase() + subData.plan.slice(1));
+          }
         }
       }
       setChecking(false);
     };
 
     checkStatus();
-  }, [user, session, refreshSubscription]);
+  }, [user, session, syncSubscription, syncAttempts]);
 
-  // Auto-redirect if email is confirmed
+  // Retry sync when syncAttempts changes
   useEffect(() => {
-    if (!checking && emailConfirmed && user) {
+    if (syncAttempts > 0 && syncAttempts < 3 && emailConfirmed && user) {
+      syncSubscription();
+    }
+  }, [syncAttempts, emailConfirmed, user, syncSubscription]);
+
+  // Auto-redirect if email is confirmed and subscription is active
+  useEffect(() => {
+    if (!checking && emailConfirmed && user && subscription?.status === "active") {
       const timer = setTimeout(() => {
         navigate("/dashboard");
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [checking, emailConfirmed, user, navigate]);
+  }, [checking, emailConfirmed, user, subscription, navigate]);
+
+  const handleManualSync = async () => {
+    const synced = await syncSubscription();
+    if (synced) {
+      toast.success("Subscription activated successfully!");
+    } else {
+      toast.info("Still processing... Please wait a moment and try again.");
+    }
+  };
 
   if (checking) {
     return (
@@ -127,13 +198,18 @@ const PaymentSuccess = () => {
                   variant="outline"
                   onClick={async () => {
                     if (user?.email) {
-                      await supabase.auth.resend({
+                      const { error } = await supabase.auth.resend({
                         type: 'signup',
                         email: user.email,
                         options: {
-                          emailRedirectTo: `${window.location.origin}/dashboard`,
+                          emailRedirectTo: `${window.location.origin}/payment-success`,
                         }
                       });
+                      if (error) {
+                        toast.error("Failed to resend email. Please try again.");
+                      } else {
+                        toast.success("Confirmation email sent!");
+                      }
                     }
                   }}
                 >
@@ -153,27 +229,56 @@ const PaymentSuccess = () => {
           ) : (
             <>
               {/* Email Confirmed or Not Required */}
-              <p className="text-muted-foreground mb-6">
-                {emailConfirmed 
-                  ? "Your account is ready! Redirecting to dashboard..."
-                  : "You can now access all features of your plan."}
-              </p>
-
-              {emailConfirmed ? (
-                <div className="flex items-center justify-center gap-2 text-primary">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span>Redirecting...</span>
-                </div>
+              {subscription?.status === "active" ? (
+                <>
+                  <p className="text-muted-foreground mb-6">
+                    Your account is ready! Redirecting to dashboard...
+                  </p>
+                  <div className="flex items-center justify-center gap-2 text-primary">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span>Redirecting...</span>
+                  </div>
+                </>
               ) : (
-                <Button
-                  variant="hero"
-                  size="lg"
-                  onClick={() => navigate("/dashboard")}
-                  className="w-full"
-                >
-                  Go to Dashboard
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
+                <>
+                  <p className="text-muted-foreground mb-6">
+                    {syncing 
+                      ? "Activating your subscription..."
+                      : "Click below to activate your subscription."}
+                  </p>
+                  
+                  <div className="space-y-3">
+                    <Button
+                      variant="hero"
+                      size="lg"
+                      onClick={handleManualSync}
+                      disabled={syncing}
+                      className="w-full"
+                    >
+                      {syncing ? (
+                        <>
+                          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                          Activating...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="mr-2 h-5 w-5" />
+                          Activate Subscription
+                        </>
+                      )}
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      onClick={() => navigate("/dashboard")}
+                      className="w-full"
+                    >
+                      Go to Dashboard
+                      <ArrowRight className="ml-2 h-5 w-5" />
+                    </Button>
+                  </div>
+                </>
               )}
             </>
           )}
@@ -181,9 +286,9 @@ const PaymentSuccess = () => {
 
         <p className="text-center text-sm text-muted-foreground mt-6">
           Need help?{" "}
-          <a href="mailto:support@tubegrow.com" className="text-primary hover:underline">
+          <Link to="/contact" className="text-primary hover:underline">
             Contact Support
-          </a>
+          </Link>
         </p>
       </motion.div>
     </div>
