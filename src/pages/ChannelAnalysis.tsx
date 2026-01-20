@@ -145,6 +145,12 @@ const ChannelAnalysis = () => {
     }
   }, [selectedChannelParam, channels]);
 
+  useEffect(() => {
+    if (!user || !selectedChannel?.channel_id) return;
+    setAnalysis(null);
+    fetchSavedAnalysis(selectedChannel.channel_id);
+  }, [user, selectedChannel?.channel_id]);
+
   const fetchChannels = async () => {
     if (!user) return;
     setChannelsLoading(true);
@@ -168,6 +174,29 @@ const ChannelAnalysis = () => {
       setSelectedChannel(fromParam || primary);
     }
     setChannelsLoading(false);
+  };
+
+  const fetchSavedAnalysis = async (channelId: string) => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("channel_analysis_results")
+      .select("analysis, updated_at")
+      .eq("user_id", user.id)
+      .eq("channel_id", channelId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error loading saved analysis:", error);
+      return;
+    }
+
+    if (data?.analysis) {
+      setAnalysis(data.analysis as ChannelAnalysisResult);
+      if (data.updated_at) {
+        setLastAnalysisDate(data.updated_at.split("T")[0]);
+      }
+    }
   };
 
   const fetchLastAnalysis = async () => {
@@ -273,7 +302,17 @@ const ChannelAnalysis = () => {
       }
 
       const data = await response.json();
-      setAnalysis(data.analysis);
+      const analysisResult = data.analysis as ChannelAnalysisResult;
+      setAnalysis(analysisResult);
+      await supabase.from("channel_analysis_results").upsert(
+        {
+          user_id: user.id,
+          channel_id: selectedChannel.channel_id,
+          analysis: analysisResult,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,channel_id" }
+      );
       setLastAnalysisDate(new Date().toISOString().split("T")[0]);
       
       toast({
