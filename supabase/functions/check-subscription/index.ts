@@ -195,7 +195,7 @@ serve(async (req) => {
       if (isNewSubscription || isPlanUpgrade) {
         logStep("New subscription or plan change detected", { isNewSubscription, isPlanUpgrade, from: previousPlan, to: plan });
         
-        // Update subscription in database
+        // Update subscription in database (without sensitive Stripe IDs)
         const { error: upsertError } = await supabaseAdmin
           .from("subscriptions")
           .upsert({
@@ -205,10 +205,15 @@ serve(async (req) => {
             current_period_end: subscriptionEnd,
             current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
             billing_cycle: subscription.items.data[0].price.recurring?.interval === "year" ? "yearly" : "monthly",
-            stripe_customer_id: customerId,
-            stripe_subscription_id: subscription.id,
             updated_at: new Date().toISOString(),
           }, { onConflict: "user_id" });
+
+        // Store Stripe IDs in secure table using helper function
+        await supabaseAdmin.rpc('upsert_stripe_data', {
+          p_user_id: user.id,
+          p_stripe_customer_id: customerId,
+          p_stripe_subscription_id: subscription.id
+        });
 
         if (upsertError) {
           logStep("Error updating subscription", { error: upsertError.message });
