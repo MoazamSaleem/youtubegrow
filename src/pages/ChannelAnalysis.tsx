@@ -187,6 +187,20 @@ const ChannelAnalysis = () => {
     }
   };
 
+  const getSessionWithRefresh = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return null;
+  };
+
   const canAnalyze = () => {
     if (planLimits.channelAnalysisFrequency === "unlimited") return true;
     if (planLimits.channelAnalysisFrequency === "never") return false;
@@ -223,6 +237,11 @@ const ChannelAnalysis = () => {
     setAnalysis(null);
 
     try {
+      const session = await getSessionWithRefresh();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const { data, error } = await supabase.functions.invoke("analyze-channel", {
         body: {
           channelId: selectedChannel.channel_id,
@@ -231,6 +250,10 @@ const ChannelAnalysis = () => {
           viewCount: selectedChannel.view_count,
           videoCount: selectedChannel.video_count,
           ...(channels.length === 0 ? { niche, goals } : {}),
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
       });
 
@@ -300,7 +323,7 @@ const ChannelAnalysis = () => {
     <div className="min-h-screen bg-background flex">
       <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
-      <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "lg:ml-64" : "ml-0"}`}>
+      <main className="flex-1 transition-all duration-300">
         {/* Header */}
         <header className="sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
           <div className="flex items-center gap-4">

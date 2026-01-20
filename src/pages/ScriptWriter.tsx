@@ -198,7 +198,7 @@ Tips: ${script.tips.join(", ")}
     <div className="min-h-screen bg-background flex">
       <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
-      <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "lg:ml-64" : "ml-0"}`}>
+      <main className="flex-1 transition-all duration-300">
         {/* Header */}
         <header className="sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
           <div className="flex items-center gap-4">
