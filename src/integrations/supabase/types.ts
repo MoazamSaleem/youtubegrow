@@ -383,6 +383,33 @@ export type Database = {
           },
         ]
       }
+      subscription_secrets: {
+        Row: {
+          created_at: string
+          id: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       subscriptions: {
         Row: {
           billing_cycle: string
@@ -393,8 +420,6 @@ export type Database = {
           id: string
           plan: Database["public"]["Enums"]["subscription_plan"]
           status: string
-          stripe_customer_id: string | null
-          stripe_subscription_id: string | null
           trial_ends_at: string | null
           trial_started_at: string | null
           updated_at: string
@@ -409,8 +434,6 @@ export type Database = {
           id?: string
           plan?: Database["public"]["Enums"]["subscription_plan"]
           status?: string
-          stripe_customer_id?: string | null
-          stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           trial_started_at?: string | null
           updated_at?: string
@@ -425,8 +448,6 @@ export type Database = {
           id?: string
           plan?: Database["public"]["Enums"]["subscription_plan"]
           status?: string
-          stripe_customer_id?: string | null
-          stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           trial_started_at?: string | null
           updated_at?: string
@@ -800,12 +821,25 @@ export type Database = {
           success: boolean
         }[]
       }
+      get_stripe_customer_id: { Args: { p_user_id: string }; Returns: string }
+      get_stripe_subscription_id: {
+        Args: { p_user_id: string }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      upsert_stripe_data: {
+        Args: {
+          p_stripe_customer_id?: string
+          p_stripe_subscription_id?: string
+          p_user_id: string
+        }
+        Returns: undefined
       }
     }
     Enums: {
