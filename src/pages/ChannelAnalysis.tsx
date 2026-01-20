@@ -118,9 +118,10 @@ const ChannelAnalysis = () => {
   const [lastAnalysisDate, setLastAnalysisDate] = useState<string | null>(null);
   const [channelsLoading, setChannelsLoading] = useState(true);
   const selectedChannelParam = searchParams.get("channelId");
+  const isTestUser = user?.email?.toLowerCase() === "moazamm.dev@gmail.com";
 
   const currentPlan = subscription?.plan || "free";
-  const hasAccess = canAccessFeature(currentPlan, "channelAnalysisFrequency");
+  const hasAccess = isTestUser || canAccessFeature(currentPlan, "channelAnalysisFrequency");
   const planLimits = getPlanLimits(currentPlan);
 
   useEffect(() => {
@@ -201,6 +202,7 @@ const ChannelAnalysis = () => {
   };
 
   const canAnalyze = () => {
+    if (isTestUser) return true;
     if (planLimits.channelAnalysisFrequency === "unlimited") return true;
     if (planLimits.channelAnalysisFrequency === "never") return false;
     if (planLimits.channelAnalysisFrequency === "weekly") {

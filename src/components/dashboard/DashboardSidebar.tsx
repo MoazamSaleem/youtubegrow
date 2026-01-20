@@ -48,13 +48,14 @@ interface DashboardSidebarProps {
 }
 
 export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSidebarProps) {
-  const { profile, subscription, isAdmin, signOut } = useAuth();
+  const { user, profile, subscription, isAdmin, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const currentPlan = (subscription?.plan || "free") as SubscriptionPlan;
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [selectedFeature, setSelectedFeature] = useState<string>("");
   const [requiredPlanForFeature, setRequiredPlanForFeature] = useState<SubscriptionPlan>("basic");
+  const isTestUser = user?.email?.toLowerCase() === "moazamm.dev@gmail.com";
 
   const navigation: NavItem[] = [
     { name: "Overview", icon: BarChart3, href: "/dashboard", description: "Your channel dashboard" },
@@ -72,6 +73,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
   ];
 
   const isLocked = (item: NavItem): boolean => {
+    if (isTestUser && item.href === "/dashboard/analysis") return false;
     if (!item.requiredPlan) return false;
     return !item.requiredPlan.includes(currentPlan);
   };
