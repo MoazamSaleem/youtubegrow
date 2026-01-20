@@ -62,10 +62,11 @@ serve(async (req) => {
       });
     }
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    
-    if (!OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is not configured");
+    const ANALYSIS_AI_API = Deno.env.get("ANALYSIS_AI_API");
+    const ANALYSIS_PROMPT_ID = "pmpt_696fc5616c588197b7b38f535142620800476e9ce7c84153";
+
+    if (!ANALYSIS_AI_API) {
+      console.error("ANALYSIS_AI_API is not configured");
       await refundCredits(userId, creditCheck.cost!, "AI service not configured - refund");
       return new Response(JSON.stringify({ error: "AI service not configured" }), {
         status: 500,
@@ -157,21 +158,16 @@ Based on these metrics and general YouTube best practices, provide a detailed st
   }
 }`;
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${ANALYSIS_AI_API}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { 
-            role: "system", 
-            content: "You are an expert YouTube growth strategist and channel analyst. You provide actionable, data-driven insights to help creators grow their channels. Always respond with valid JSON. Be specific, practical, and encouraging in your recommendations." 
-          },
-          { role: "user", content: prompt },
-        ],
+        prompt: ANALYSIS_PROMPT_ID,
+        input: prompt,
+        response_format: { type: "json_object" },
       }),
     });
 
@@ -193,7 +189,11 @@ Based on these metrics and general YouTube best practices, provide a detailed st
     }
 
     const data = await response.json();
-    const content = data.choices[0]?.message?.content;
+    const content =
+      data.output_text ||
+      data.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+      ).find(Boolean);
     
     if (!content) {
       throw new Error("No content received from AI");
