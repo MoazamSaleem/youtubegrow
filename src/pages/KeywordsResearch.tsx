@@ -237,24 +237,32 @@ const KeywordsResearch = () => {
         throw new Error("Your session expired. Please sign in again.");
       }
 
-      const { data, error } = await supabase.functions.invoke("research-keywords", {
-        body: {
-          query: effectiveQuery,
-          niche: trimmedNiche,
-          count: Math.min(
-            limits.keywordsPerDay === -1 ? 15 : Math.max(1, limits.keywordsPerDay),
-            15
-          ),
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/research-keywords`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: effectiveQuery,
+            niche: trimmedNiche,
+            count: Math.min(
+              limits.keywordsPerDay === -1 ? 15 : Math.max(1, limits.keywordsPerDay),
+              15
+            ),
+          }),
+        }
+      );
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to research keywords");
+      }
 
+      const data = await response.json();
       setKeywords(data.keywords || []);
       setSummary(data.summary || "");
 
