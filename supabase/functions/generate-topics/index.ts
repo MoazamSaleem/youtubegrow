@@ -71,10 +71,11 @@ serve(async (req) => {
       });
     }
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    const TOPICS_AI_API = Deno.env.get("ANALYSIS_AI_API");
+    const TOPICS_PROMPT_ID = "pmpt_697103d685108194a3edc19439377cfc0cc1cefa95a01e1b";
     
-    if (!OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is not configured");
+    if (!TOPICS_AI_API) {
+      console.error("ANALYSIS_AI_API is not configured");
       await refundCredits(userId, creditCheck.cost!, "AI service not configured - refund");
       return new Response(JSON.stringify({ error: "AI service not configured" }), {
         status: 500,
@@ -82,56 +83,27 @@ serve(async (req) => {
       });
     }
 
-    const systemPrompt = `You are a YouTube content strategist specializing in viral video topics. Your job is to generate creative, engaging, and trend-aware video topic ideas.
+    const promptInput = [
+      `Channel Niche: ${channelNiche || "General"}`,
+      `Channel Description: ${channelDescription || "Not specified"}`,
+      `Target Audience: ${targetAudience || "General audience"}`,
+      `Count: ${validCount}`,
+    ].join("\n");
 
-Guidelines:
-- Generate topics that are specific and actionable
-- Consider current trends and evergreen content
-- Include a mix of educational, entertaining, and engaging topics
-- Make titles attention-grabbing but not clickbait
-- Consider SEO and searchability
-
-For each topic, provide:
-1. A compelling video title
-2. A brief description of what the video should cover
-3. Why this topic would perform well
-4. Estimated difficulty (easy, medium, hard)`;
-
-    const userPrompt = `Generate ${validCount} YouTube video topic ideas for a channel with the following details:
-
-Channel Niche: ${channelNiche || "General"}
-Channel Description: ${channelDescription || "Not specified"}
-Target Audience: ${targetAudience || "General audience"}
-
-Please return the topics in this JSON format:
-{
-  "topics": [
-    {
-      "title": "Video title",
-      "description": "What the video should cover",
-      "whyItWorks": "Why this would perform well",
-      "difficulty": "easy/medium/hard"
-    }
-  ]
-}`;
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${TOPICS_AI_API}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
+        prompt: { id: TOPICS_PROMPT_ID },
+        input: promptInput,
       }),
     });
 
     if (!response.ok) {
-      await refundCredits(userId, creditCheck.cost!, "OpenAI API error - refund");
+      await refundCredits(userId, creditCheck.cost!, "Topics AI error - refund");
       
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
@@ -140,24 +112,42 @@ Please return the topics in this JSON format:
         });
       }
       const errorText = await response.text();
-      console.error("OpenAI API error:", response.status, errorText);
+      console.error("Topics AI error:", response.status, errorText);
       throw new Error("Failed to generate topics");
     }
 
     const data = await response.json();
-    const content = data.choices[0]?.message?.content;
+    const content =
+      data.output_text ||
+      data.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+      ).find(Boolean);
     
     if (!content) {
       throw new Error("No content received from AI");
     }
 
-    // Parse the JSON from the response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Failed to parse topics response");
-    }
-    
-    const topics = JSON.parse(jsonMatch[0]);
+    const parseTopicsPayload = (text: string) => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        const fencedJson = text.match(/```json\s*([\s\S]*?)\s*```/i);
+        if (fencedJson?.[1]) {
+          return JSON.parse(fencedJson[1]);
+        }
+        const fenced = text.match(/```\s*([\s\S]*?)\s*```/);
+        if (fenced?.[1]) {
+          return JSON.parse(fenced[1]);
+        }
+        const loose = text.match(/\{[\s\S]*\}/);
+        if (loose?.[0]) {
+          return JSON.parse(loose[0]);
+        }
+        throw new Error("Failed to parse topics response");
+      }
+    };
+
+    const topics = parseTopicsPayload(content);
 
     return new Response(JSON.stringify(topics), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
