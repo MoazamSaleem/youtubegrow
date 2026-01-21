@@ -189,7 +189,13 @@ serve(async (req) => {
       }
     };
 
-    const keywords = parseKeywordsPayload(content);
+    let keywords;
+    try {
+      keywords = parseKeywordsPayload(content);
+    } catch (error) {
+      console.error("Keywords parse error. Raw content:", content);
+      throw error;
+    }
 
     return new Response(JSON.stringify(keywords), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
