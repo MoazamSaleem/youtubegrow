@@ -166,12 +166,21 @@ const ChannelAnalysis = () => {
       console.error("Error fetching channels:", error);
     } else if (data && data.length > 0) {
       setChannels(data);
-      // Auto-select primary or first channel
-      const fromParam = selectedChannelParam
-        ? data.find((channel) => channel.channel_id === selectedChannelParam)
-        : null;
-      const primary = data.find((channel) => channel.is_primary) || data[0];
-      setSelectedChannel(fromParam || primary);
+      setSelectedChannel((prev) => {
+        const fromParam = selectedChannelParam
+          ? data.find((channel) => channel.channel_id === selectedChannelParam)
+          : null;
+        if (fromParam) return fromParam;
+        if (prev) {
+          const existing = data.find((channel) => channel.id === prev.id);
+          if (existing) return existing;
+        }
+        const primary = data.find((channel) => channel.is_primary) || data[0];
+        return primary ?? null;
+      });
+    } else {
+      setChannels([]);
+      setSelectedChannel(null);
     }
     setChannelsLoading(false);
   };
