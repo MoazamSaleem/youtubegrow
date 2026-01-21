@@ -137,28 +137,32 @@ serve(async (req) => {
     }
 
     const parseScriptPayload = (text: string) => {
+      const normalized = text.replace(/\r\n/g, "\n").trim();
       try {
-        return JSON.parse(text);
+        return JSON.parse(normalized);
       } catch {
-        const fencedJson = text.match(/```json\s*([\s\S]*?)\s*```/i);
+        const fencedJson = normalized.match(/```json\s*([\s\S]*?)\s*```/i);
         if (fencedJson?.[1]) {
           return JSON.parse(fencedJson[1]);
         }
-        const fenced = text.match(/```\s*([\s\S]*?)\s*```/);
+        const fenced = normalized.match(/```\s*([\s\S]*?)\s*```/);
         if (fenced?.[1]) {
           return JSON.parse(fenced[1]);
         }
       }
 
-      const hook = text.match(/\[HOOK[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[HOOK[^\]]*\]\s*/i, "").trim() || "";
-      const introduction = text.match(/\[INTRO[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[INTRO[^\]]*\]\s*/i, "").trim() || "";
-      const conclusion = text.match(/\[(FINAL SUMMARY \+ CLOSING|CONCLUSION)[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[[^\]]*\]\s*/i, "").trim() || "";
-      const callToAction = text.match(/\[CALL TO ACTION[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[CALL TO ACTION[^\]]*\]\s*/i, "").trim() || "";
+      const block = (pattern: RegExp) =>
+        normalized.match(pattern)?.[0]?.replace(/^\[[^\]]*\]\s*/i, "").trim() || "";
 
-      const sectionRegex = /\[SECTION\s*\d+:[^\]]*\][\s\S]*?(?=\n\[SECTION|\n\[CALL TO ACTION|\n\[FINAL SUMMARY|\n\[CONCLUSION|\n\[END\]|\n$)/gi;
-      const sections = Array.from(text.matchAll(sectionRegex)).map((match) => {
+      const hook = block(/\[HOOK[^\]]*\][\s\S]*?(?=\n\[|$)/i);
+      const introduction = block(/\[(INTRO|INTRODUCTION)[^\]]*\][\s\S]*?(?=\n\[|$)/i);
+      const conclusion = block(/\[(FINAL SUMMARY \+ CLOSING|CONCLUSION)[^\]]*\][\s\S]*?(?=\n\[|$)/i);
+      const callToAction = block(/\[CALL TO ACTION[^\]]*\][\s\S]*?(?=\n\[|$)/i);
+
+      const sectionRegex = /\[SECTION[^\]]*\][\s\S]*?(?=\n\[SECTION|\n\[CALL TO ACTION|\n\[FINAL SUMMARY|\n\[CONCLUSION|\n\[END\]|\n$)/gi;
+      const sections = Array.from(normalized.matchAll(sectionRegex)).map((match) => {
         const block = match[0];
-        const titleMatch = block.match(/\[SECTION\s*\d+:\s*([^\]]+)\]/i);
+        const titleMatch = block.match(/\[SECTION\s*\d*:\s*([^\]]+)\]/i);
         const title = titleMatch?.[1]?.trim() || "Main Section";
         const content = block.replace(/\[SECTION[^\]]*\]\s*/i, "").trim();
         return {
@@ -168,12 +172,17 @@ serve(async (req) => {
         };
       });
 
-      const titleLine = text.match(/^[^\n]{8,120}$/m)?.[0]?.trim();
+      const fallbackSection = normalized ? [{
+        timestamp: "",
+        title: "Full Script",
+        content: normalized,
+      }] : [];
+      const titleLine = normalized.match(/^[^\n]{8,120}$/m)?.[0]?.trim();
       return {
         title: titleLine || topic,
         hook,
         introduction,
-        sections,
+        sections: sections.length > 0 ? sections : fallbackSection,
         conclusion,
         callToAction,
         estimatedDuration: duration || "8-10",
