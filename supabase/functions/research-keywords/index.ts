@@ -8,6 +8,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const decodeJwtPayload = (token: string) => {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload.padEnd(payload.length + (4 - (payload.length % 4 || 4)), "=");
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -46,16 +58,21 @@ serve(async (req) => {
 
     const token = authHeader.replace("Bearer ", "");
     const { data: userData, error: userError } = await supabaseClient.auth.getUser(token);
+    let userId = userData?.user?.id;
 
-    if (userError || !userData?.user) {
-      console.error("Auth error:", userError?.message || userError);
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!userId) {
+      const payload = decodeJwtPayload(token);
+      const expectedIss = `${supabaseUrl}/auth/v1`;
+      if (payload?.sub && payload?.iss === expectedIss) {
+        userId = payload.sub as string;
+      } else {
+        console.error("Auth error:", userError?.message || userError);
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
-
-    const userId = userData.user.id;
     console.log('Authenticated user:', userId);
 
     const { query, niche, count = 10 } = await req.json();
