@@ -249,6 +249,7 @@ const KeywordsResearch = () => {
           body: JSON.stringify({
             query: effectiveQuery,
             niche: trimmedNiche,
+            analysis: channelAnalysis,
             count: Math.min(
               limits.keywordsPerDay === -1 ? 15 : Math.max(1, limits.keywordsPerDay),
               15

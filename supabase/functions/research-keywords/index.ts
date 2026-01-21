@@ -75,7 +75,7 @@ serve(async (req) => {
     }
     console.log('Authenticated user:', userId);
 
-    const { query, niche, count = 10 } = await req.json();
+    const { query, niche, analysis, count = 10 } = await req.json();
     
     // Input validation
     if (!query || typeof query !== 'string' || query.length > 200) {
@@ -115,9 +115,11 @@ serve(async (req) => {
       });
     }
 
+    const analysisText = analysis ? JSON.stringify(analysis).slice(0, 4000) : "";
     const promptInput = [
       `Query: ${query}`,
       niche ? `Niche: ${niche}` : undefined,
+      analysisText ? `Channel analysis: ${analysisText}` : undefined,
       `Count: ${validCount}`,
     ].filter(Boolean).join("\n");
 
