@@ -134,11 +134,20 @@ const KeywordsResearch = () => {
 
     setIsSearching(true);
     try {
+      const session = await getSessionWithRefresh();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const { data, error } = await supabase.functions.invoke("research-keywords", {
         body: {
           query: effectiveQuery,
           niche: trimmedNiche,
           count: Math.min(limits.keywordsPerDay, 10),
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
       });
 

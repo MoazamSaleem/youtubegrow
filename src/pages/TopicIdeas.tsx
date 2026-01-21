@@ -130,12 +130,21 @@ const TopicIdeas = () => {
 
     setIsGenerating(true);
     try {
+      const session = await getSessionWithRefresh();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const { data, error } = await supabase.functions.invoke("generate-topics", {
         body: {
           channelNiche: nicheValue,
           channelDescription,
           targetAudience,
           count: Math.min(limits.topicsPerDay, 5),
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
       });
 
