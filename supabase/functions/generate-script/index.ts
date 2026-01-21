@@ -75,10 +75,11 @@ serve(async (req) => {
       });
     }
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    const SCRIPT_AI_API = Deno.env.get("ANALYSIS_AI_API");
+    const SCRIPT_PROMPT_ID = "pmpt_697104a1f81081959648d3217603f4280678275f8ef01952";
     
-    if (!OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is not configured");
+    if (!SCRIPT_AI_API) {
+      console.error("ANALYSIS_AI_API is not configured");
       await refundCredits(userId, creditCheck.cost!, "AI service not configured - refund");
       return new Response(JSON.stringify({ error: "AI service not configured" }), {
         status: 500,
@@ -86,58 +87,29 @@ serve(async (req) => {
       });
     }
 
-    const prompt = `Generate a compelling YouTube video script for the following:
+    const promptInput = [
+      `Topic: ${topic}`,
+      `Target Audience: ${targetAudience || "General YouTube viewers"}`,
+      `Tone: ${tone || "Engaging and informative"}`,
+      `Estimated Duration: ${duration || "8-10"} minutes`,
+      includeHook ? "Include a strong hook in the first 10 seconds" : undefined,
+      includeCTA ? "Include call-to-action for likes, comments, and subscriptions" : undefined,
+    ].filter(Boolean).join("\n");
 
-Topic: ${topic}
-Target Audience: ${targetAudience || "General YouTube viewers"}
-Tone: ${tone || "Engaging and informative"}
-Estimated Duration: ${duration || "8-10"} minutes
-${includeHook ? "Include a strong hook in the first 10 seconds" : ""}
-${includeCTA ? "Include call-to-action for likes, comments, and subscriptions" : ""}
-
-Generate a complete script with the following structure:
-1. Hook (first 10-15 seconds to grab attention)
-2. Introduction (introduce yourself and the topic)
-3. Main Content (broken into clear sections with timestamps)
-4. Summary/Conclusion
-5. Call to Action
-
-Use the following JSON format:
-{
-  "title": "Suggested video title",
-  "hook": "The attention-grabbing opening line",
-  "introduction": "Brief intro section",
-  "sections": [
-    {
-      "timestamp": "0:00",
-      "title": "Section title",
-      "content": "Section script content",
-      "notes": "Optional director notes or suggestions"
-    }
-  ],
-  "conclusion": "Closing remarks",
-  "callToAction": "CTA script",
-  "estimatedDuration": "X:XX",
-  "tips": ["Tip 1", "Tip 2"]
-}`;
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${SCRIPT_AI_API}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "You are an expert YouTube scriptwriter who creates engaging, well-structured video scripts that maximize viewer retention and engagement. Always respond with valid JSON." },
-          { role: "user", content: prompt },
-        ],
+        prompt: { id: SCRIPT_PROMPT_ID },
+        input: promptInput,
       }),
     });
 
     if (!response.ok) {
-      await refundCredits(userId, creditCheck.cost!, "OpenAI API error - refund");
+      await refundCredits(userId, creditCheck.cost!, "Script AI error - refund");
       
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
@@ -146,7 +118,7 @@ Use the following JSON format:
         });
       }
       const errorText = await response.text();
-      console.error("OpenAI API error:", response.status, errorText);
+      console.error("Script AI error:", response.status, errorText);
       return new Response(JSON.stringify({ error: "Failed to generate script" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -154,7 +126,11 @@ Use the following JSON format:
     }
 
     const data = await response.json();
-    const content = data.choices[0]?.message?.content;
+    const content =
+      data.output_text ||
+      data.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+      ).find(Boolean);
     
     if (!content) {
       throw new Error("No content received from AI");
