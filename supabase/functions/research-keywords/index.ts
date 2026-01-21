@@ -169,13 +169,27 @@ serve(async (req) => {
       throw new Error("No content received from AI");
     }
 
-    // Parse the JSON from the response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Failed to parse keywords response");
-    }
-    
-    const keywords = JSON.parse(jsonMatch[0]);
+    const parseKeywordsPayload = (text: string) => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        const fencedJson = text.match(/```json\s*([\s\S]*?)\s*```/i);
+        if (fencedJson?.[1]) {
+          return JSON.parse(fencedJson[1]);
+        }
+        const fenced = text.match(/```\s*([\s\S]*?)\s*```/);
+        if (fenced?.[1]) {
+          return JSON.parse(fenced[1]);
+        }
+        const loose = text.match(/\{[\s\S]*\}/);
+        if (loose?.[0]) {
+          return JSON.parse(loose[0]);
+        }
+        throw new Error("Failed to parse keywords response");
+      }
+    };
+
+    const keywords = parseKeywordsPayload(content);
 
     return new Response(JSON.stringify(keywords), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
