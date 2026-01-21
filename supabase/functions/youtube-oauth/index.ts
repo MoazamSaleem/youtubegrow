@@ -411,10 +411,24 @@ serve(async (req) => {
       try {
         accessToken = await getChannelAccessToken(supabase, userId, channelId, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
       } catch (error) {
-        return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Channel not found" }), {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        const message = error instanceof Error ? error.message : "Channel not found";
+        const isAuthIssue = [
+          "Refresh token missing",
+          "Failed to refresh token",
+          "Invalid encrypted token format",
+          "OAUTH_ENCRYPTION_KEY_BASE64",
+        ].some((needle) => message.includes(needle));
+        return new Response(
+          JSON.stringify({
+            error: isAuthIssue
+              ? "YouTube authorization expired. Please reconnect your channel."
+              : message,
+          }),
+          {
+            status: isAuthIssue ? 401 : 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
       
       // Fetch analytics from YouTube Analytics API
@@ -459,10 +473,24 @@ serve(async (req) => {
       try {
         accessToken = await getChannelAccessToken(supabase, userId, channelId, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
       } catch (error) {
-        return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Channel not found" }), {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        const message = error instanceof Error ? error.message : "Channel not found";
+        const isAuthIssue = [
+          "Refresh token missing",
+          "Failed to refresh token",
+          "Invalid encrypted token format",
+          "OAUTH_ENCRYPTION_KEY_BASE64",
+        ].some((needle) => message.includes(needle));
+        return new Response(
+          JSON.stringify({
+            error: isAuthIssue
+              ? "YouTube authorization expired. Please reconnect your channel."
+              : message,
+          }),
+          {
+            status: isAuthIssue ? 401 : 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
 
       const channelResponse = await fetch(
