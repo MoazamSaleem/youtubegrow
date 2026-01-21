@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -53,7 +53,7 @@ const KeywordsResearch = () => {
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelDescription, setChannelDescription] = useState<string>("");
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
-  const autoRunRef = useRef(false);
+  const [channelNiche, setChannelNiche] = useState<string>("");
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
@@ -93,8 +93,14 @@ const KeywordsResearch = () => {
       return;
     }
 
-    setChannelDescription(data?.channel?.description || "");
+    const description = data?.channel?.description || "";
+    setChannelDescription(description);
     setRecentTitles((data?.recentVideos || []).map((v) => v.title || "").filter(Boolean));
+    const derivedNiche = description ? description.split(".")[0]?.slice(0, 120) : "";
+    if (derivedNiche) {
+      setChannelNiche(derivedNiche);
+      setNiche((prev) => (prev ? prev : derivedNiche));
+    }
   };
 
   useEffect(() => {
@@ -115,23 +121,14 @@ const KeywordsResearch = () => {
     loadChannel();
   }, [user]);
 
-  useEffect(() => {
-    if (!channelName || autoRunRef.current || keywords.length > 0) return;
-    autoRunRef.current = true;
-    const autoQuery = recentTitles[0] || channelName;
-    const autoNiche = channelDescription
-      ? channelDescription.split(".")[0]?.slice(0, 120)
-      : channelName;
-    setSearchQuery(autoQuery);
-    setNiche(autoNiche);
-    void handleSearch(autoQuery, autoNiche);
-  }, [channelName, channelDescription, recentTitles, keywords.length]);
-
   const handleSearch = async (queryOverride?: string, nicheOverride?: string) => {
-    const query = queryOverride ?? searchQuery;
-    const nicheValue = nicheOverride ?? niche;
-    if (!query.trim()) {
-      toast({ title: "Please enter a search query", variant: "destructive" });
+    const queryValue = queryOverride ?? searchQuery;
+    const nicheValue = (nicheOverride ?? niche).trim() ? (nicheOverride ?? niche) : channelNiche;
+    const trimmedQuery = queryValue.trim();
+    const trimmedNiche = nicheValue.trim();
+    const effectiveQuery = trimmedQuery || trimmedNiche;
+    if (!effectiveQuery) {
+      toast({ title: "Please enter a topic or niche", variant: "destructive" });
       return;
     }
 
@@ -139,8 +136,8 @@ const KeywordsResearch = () => {
     try {
       const { data, error } = await supabase.functions.invoke("research-keywords", {
         body: {
-          query,
-          niche: nicheValue,
+          query: effectiveQuery,
+          niche: trimmedNiche,
           count: Math.min(limits.keywordsPerDay, 10),
         },
       });
