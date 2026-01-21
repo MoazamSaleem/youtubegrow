@@ -146,6 +146,12 @@ const ChannelAnalysis = () => {
   }, [selectedChannelParam, channels]);
 
   useEffect(() => {
+    if (!selectedChannel?.channel_id) return;
+    if (selectedChannelParam === selectedChannel.channel_id) return;
+    navigate(`/dashboard/analysis?channelId=${selectedChannel.channel_id}`, { replace: true });
+  }, [selectedChannel?.channel_id, selectedChannelParam, navigate]);
+
+  useEffect(() => {
     if (!user || !selectedChannel?.channel_id) return;
     setAnalysis(null);
     fetchSavedAnalysis(selectedChannel.channel_id);

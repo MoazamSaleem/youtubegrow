@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -39,6 +39,17 @@ interface Keyword {
   suggestedUse: string;
 }
 
+interface ChannelAnalysisSummary {
+  overallHealth?: { summary?: string };
+  contentStrategy?: {
+    contentPillars?: string[];
+    trendingTopics?: string[];
+  };
+  audienceInsights?: {
+    likelyDemographic?: string;
+  };
+}
+
 const KeywordsResearch = () => {
   const navigate = useNavigate();
   const { user, subscription, loading } = useAuth();
@@ -54,6 +65,8 @@ const KeywordsResearch = () => {
   const [channelDescription, setChannelDescription] = useState<string>("");
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
   const [channelNiche, setChannelNiche] = useState<string>("");
+  const [channelAnalysis, setChannelAnalysis] = useState<ChannelAnalysisSummary | null>(null);
+  const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
@@ -103,6 +116,46 @@ const KeywordsResearch = () => {
     }
   };
 
+  const fetchChannelAnalysis = async (channelId: string) => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("channel_analysis_results")
+      .select("analysis")
+      .eq("user_id", user.id)
+      .eq("channel_id", channelId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Channel analysis fetch error:", error);
+      return;
+    }
+
+    setChannelAnalysis((data?.analysis as ChannelAnalysisSummary) ?? null);
+  };
+
+  const buildAutoQuery = () => {
+    const trending = channelAnalysis?.contentStrategy?.trendingTopics?.filter(Boolean) ?? [];
+    const pillars = channelAnalysis?.contentStrategy?.contentPillars?.filter(Boolean) ?? [];
+    const fallback = recentTitles[0] || channelName || "";
+    return trending[0] || pillars[0] || fallback;
+  };
+
+  const buildAutoNiche = () => {
+    const parts = [
+      channelAnalysis?.overallHealth?.summary,
+      channelAnalysis?.audienceInsights?.likelyDemographic
+        ? `Audience: ${channelAnalysis.audienceInsights.likelyDemographic}`
+        : undefined,
+      channelAnalysis?.contentStrategy?.contentPillars?.length
+        ? `Pillars: ${channelAnalysis.contentStrategy.contentPillars.join(", ")}`
+        : undefined,
+    ].filter(Boolean) as string[];
+
+    const nicheValue = parts.join(" | ").trim();
+    if (!nicheValue) return channelNiche || channelDescription.split(".")[0]?.slice(0, 120) || "";
+    return nicheValue.slice(0, 200);
+  };
+
   useEffect(() => {
     if (!user) return;
     const loadChannel = async () => {
@@ -114,21 +167,66 @@ const KeywordsResearch = () => {
         const primary = data.find((c) => c.is_primary) || data[0];
         setChannelName(primary.channel_name || null);
         if (primary.channel_id) {
-          await fetchChannelContext(primary.channel_id);
+          await Promise.all([
+            fetchChannelContext(primary.channel_id),
+            fetchChannelAnalysis(primary.channel_id),
+          ]);
         }
       }
     };
     loadChannel();
   }, [user]);
 
-  const handleSearch = async (queryOverride?: string, nicheOverride?: string) => {
+  useEffect(() => {
+    if (!user) return;
+    const cacheKey = `keywords_cache:${user.id}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (!cached) return;
+      const parsed = JSON.parse(cached) as { keywords?: Keyword[]; summary?: string };
+      if (parsed.keywords && parsed.keywords.length > 0) {
+        setKeywords(parsed.keywords);
+        setSummary(parsed.summary || "");
+      }
+    } catch (error) {
+      console.warn("Failed to load cached keywords:", error);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const cacheKey = `keywords_cache:${user.id}`;
+    if (keywords.length === 0) {
+      localStorage.removeItem(cacheKey);
+      return;
+    }
+    localStorage.setItem(
+      cacheKey,
+      JSON.stringify({ keywords, summary })
+    );
+  }, [user, keywords, summary]);
+
+  useEffect(() => {
+    if (!channelName || autoRunRef.current || keywords.length > 0) return;
+    const autoQuery = buildAutoQuery();
+    if (!autoQuery) return;
+    autoRunRef.current = true;
+    const autoNiche = buildAutoNiche();
+    if (!searchQuery) setSearchQuery(autoQuery);
+    if (!niche) setNiche(autoNiche);
+    void handleSearch(autoQuery, autoNiche, true);
+  }, [channelName, channelAnalysis, recentTitles, keywords.length]);
+
+  const handleSearch = async (queryOverride?: string, nicheOverride?: string, autoRun = false) => {
     const queryValue = queryOverride ?? searchQuery;
     const nicheValue = (nicheOverride ?? niche).trim() ? (nicheOverride ?? niche) : channelNiche;
     const trimmedQuery = queryValue.trim();
     const trimmedNiche = nicheValue.trim();
     const effectiveQuery = trimmedQuery || trimmedNiche;
     if (!effectiveQuery) {
-      toast({ title: "Please enter a topic or niche", variant: "destructive" });
+      if (!autoRun) {
+        toast({ title: "Please enter a topic or niche", variant: "destructive" });
+      }
       return;
     }
 
@@ -143,7 +241,10 @@ const KeywordsResearch = () => {
         body: {
           query: effectiveQuery,
           niche: trimmedNiche,
-          count: Math.min(limits.keywordsPerDay, 10),
+          count: Math.min(
+            limits.keywordsPerDay === -1 ? 15 : Math.max(1, limits.keywordsPerDay),
+            15
+          ),
         },
         headers: {
           Authorization: `Bearer ${session.access_token}`,

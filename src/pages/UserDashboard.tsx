@@ -525,7 +525,15 @@ const UserDashboard = () => {
                   </p>
                 </div>
               </div>
-              <Button variant="hero" size="lg">
+              <Button
+                variant="hero"
+                size="lg"
+                onClick={() => {
+                  const primary = channels.find((c) => c.is_primary) ?? channels[0];
+                  const channelId = primary?.channel_id;
+                  navigate(channelId ? `/dashboard/analysis?channelId=${channelId}` : "/dashboard/analysis");
+                }}
+              >
                 <Sparkles className="h-5 w-5 mr-2" />
                 Analyze My Channel
               </Button>
