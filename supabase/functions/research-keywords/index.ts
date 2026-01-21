@@ -71,10 +71,12 @@ serve(async (req) => {
       });
     }
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    const KEYWORDS_AI_API = Deno.env.get("KEYWORDS_SEARCH_AI");
+    const KEYWORDS_PROMPT_ID = "pmpt_6970b50a6950819098a5e397fbbede7104f6cbb1c8b31a6c";
+    const KEYWORDS_PROMPT_VERSION = "V1";
     
-    if (!OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is not configured");
+    if (!KEYWORDS_AI_API) {
+      console.error("KEYWORDS_SEARCH_AI is not configured");
       await refundCredits(userId, creditCheck.cost!, "AI service not configured - refund");
       return new Response(JSON.stringify({ error: "AI service not configured" }), {
         status: 500,
@@ -82,49 +84,26 @@ serve(async (req) => {
       });
     }
 
-    const systemPrompt = `You are a YouTube SEO expert specializing in keyword research. Your job is to analyze search queries and suggest related keywords that can help videos rank better and get discovered.
+    const promptInput = [
+      `Query: ${query}`,
+      niche ? `Niche: ${niche}` : undefined,
+      `Count: ${validCount}`,
+    ].filter(Boolean).join("\n");
 
-Guidelines:
-- Suggest keywords with varying search volumes and competition levels
-- Include long-tail keywords that are easier to rank for
-- Consider trending topics and seasonal variations
-- Provide actionable insights for each keyword
-- Focus on keywords that indicate viewer intent`;
-
-    const userPrompt = `Research YouTube keywords related to: "${query}"
-${niche ? `Channel Niche: ${niche}` : ""}
-
-Please analyze and provide ${validCount} keyword suggestions in this JSON format:
-{
-  "keywords": [
-    {
-      "keyword": "keyword phrase",
-      "searchVolume": "low/medium/high",
-      "competition": "low/medium/high",
-      "relevance": 1-10,
-      "suggestedUse": "title/tags/description"
-    }
-  ],
-  "summary": "Brief analysis summary"
-}`;
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${KEYWORDS_AI_API}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
+        prompt: { id: KEYWORDS_PROMPT_ID, version: KEYWORDS_PROMPT_VERSION },
+        input: promptInput,
       }),
     });
 
     if (!response.ok) {
-      await refundCredits(userId, creditCheck.cost!, "OpenAI API error - refund");
+      await refundCredits(userId, creditCheck.cost!, "Keywords AI error - refund");
       
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
@@ -133,12 +112,16 @@ Please analyze and provide ${validCount} keyword suggestions in this JSON format
         });
       }
       const errorText = await response.text();
-      console.error("OpenAI API error:", response.status, errorText);
+      console.error("Keywords AI error:", response.status, errorText);
       throw new Error("Failed to research keywords");
     }
 
     const data = await response.json();
-    const content = data.choices[0]?.message?.content;
+    const content =
+      data.output_text ||
+      data.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+      ).find(Boolean);
     
     if (!content) {
       throw new Error("No content received from AI");
