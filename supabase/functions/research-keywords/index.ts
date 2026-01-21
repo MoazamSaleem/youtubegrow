@@ -105,7 +105,6 @@ serve(async (req) => {
 
     const KEYWORDS_AI_API = Deno.env.get("ANALYSIS_AI_API");
     const KEYWORDS_PROMPT_ID = "pmpt_6970b50a6950819098a5e397fbbede7104f6cbb1c8b31a6c";
-    const KEYWORDS_PROMPT_VERSION = "v3";
     
     if (!KEYWORDS_AI_API) {
       console.error("ANALYSIS_AI_API is not configured");
@@ -129,7 +128,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        prompt: { id: KEYWORDS_PROMPT_ID, version: KEYWORDS_PROMPT_VERSION },
+        prompt: { id: KEYWORDS_PROMPT_ID },
         input: promptInput,
       }),
     });
