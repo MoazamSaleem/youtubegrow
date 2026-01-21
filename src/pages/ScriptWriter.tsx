@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
@@ -53,12 +53,14 @@ interface GeneratedScript {
 const ScriptWriter = () => {
   const { user, subscription, loading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [script, setScript] = useState<GeneratedScript | null>(null);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set([0]));
+  const autoGenerateRef = useRef(false);
 
   const [formData, setFormData] = useState({
     topic: "",
@@ -101,8 +103,20 @@ const ScriptWriter = () => {
     }
   }, [user]);
 
-  const handleGenerate = async () => {
-    if (!formData.topic.trim()) {
+  useEffect(() => {
+    const topicParam = searchParams.get("topic");
+    const auto = searchParams.get("auto");
+    if (!topicParam || auto !== "1") return;
+    if (autoGenerateRef.current) return;
+    autoGenerateRef.current = true;
+    const decoded = decodeURIComponent(topicParam);
+    handleGenerate(decoded);
+    navigate("/dashboard/scripts", { replace: true });
+  }, [searchParams, navigate]);
+
+  const handleGenerate = async (topicOverride?: string) => {
+    const topicValue = topicOverride ?? formData.topic;
+    if (!topicValue.trim()) {
       toast({
         title: "Topic required",
         description: "Please enter a video topic",
@@ -120,6 +134,9 @@ const ScriptWriter = () => {
       return;
     }
 
+    if (topicOverride) {
+      setFormData((prev) => ({ ...prev, topic: topicValue }));
+    }
     setIsGenerating(true);
     setScript(null);
 
@@ -138,7 +155,7 @@ const ScriptWriter = () => {
             apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(formData),
+          body: JSON.stringify({ ...formData, topic: topicValue }),
         }
       );
 

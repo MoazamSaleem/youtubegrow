@@ -40,7 +40,6 @@ const TopicIdeas = () => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [scriptGeneratingId, setScriptGeneratingId] = useState<number | null>(null);
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelSnippet, setChannelSnippet] = useState<string>("");
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
@@ -212,8 +211,7 @@ const TopicIdeas = () => {
     }
   };
 
-  const handleGenerateScript = async (topic: Topic, index: number) => {
-    if (!user) return;
+  const handleGenerateScript = (topic: Topic) => {
     if (!canGenerateScript) {
       toast({
         title: "Upgrade Required",
@@ -222,69 +220,8 @@ const TopicIdeas = () => {
       });
       return;
     }
-    setScriptGeneratingId(index);
-
-    try {
-      const session = await getSessionWithRefresh();
-      if (!session?.access_token) {
-        throw new Error("Your session expired. Please sign in again.");
-      }
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-script`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            topic: topic.title,
-            targetAudience,
-            tone: "engaging",
-            duration: "8-10",
-            includeHook: true,
-            includeCTA: true,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate script");
-      }
-
-      const data = await response.json();
-      localStorage.setItem(
-        `script_writer_generated:${user.id}`,
-        JSON.stringify({
-          script: data.script,
-          formData: {
-            topic: topic.title,
-            targetAudience,
-            tone: "engaging",
-            duration: "8-10",
-            includeHook: true,
-            includeCTA: true,
-          },
-        })
-      );
-
-      toast({
-        title: "Script generated",
-        description: "Opening Script Writer with your script",
-      });
-      navigate("/dashboard/scripts");
-    } catch (error: any) {
-      toast({
-        title: "Script generation failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setScriptGeneratingId(null);
-    }
+    const encoded = encodeURIComponent(topic.title);
+    navigate(`/dashboard/scripts?topic=${encoded}&auto=1`);
   };
 
   const copyToClipboard = (text: string, index: number) => {
@@ -465,20 +402,10 @@ const TopicIdeas = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleGenerateScript(topic, index)}
-                      disabled={scriptGeneratingId === index}
+                      onClick={() => handleGenerateScript(topic)}
                     >
-                      {scriptGeneratingId === index ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Generating Script...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4 w-4 mr-2" />
-                          Generate Script
-                        </>
-                      )}
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Generate Script
                     </Button>
                   </div>
                 </motion.div>
