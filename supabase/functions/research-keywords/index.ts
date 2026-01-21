@@ -23,24 +23,39 @@ serve(async (req) => {
       });
     }
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-    const token = authHeader.replace('Bearer ', '');
-    const { data: claimsData, error: claimsError } = await supabaseClient.auth.getClaims(token);
-    
-    if (claimsError || !claimsData?.claims) {
-      console.error('Auth error:', claimsError);
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    if (!supabaseUrl || (!supabaseAnonKey && !supabaseServiceKey)) {
+      console.error("Supabase keys are not configured");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const userId = claimsData.claims.sub as string;
+    const supabaseClient = createClient(
+      supabaseUrl,
+      supabaseServiceKey || supabaseAnonKey,
+      {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
+    );
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: userData, error: userError } = await supabaseClient.auth.getUser(token);
+
+    if (userError || !userData?.user) {
+      console.error("Auth error:", userError?.message || userError);
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const userId = userData.user.id;
     console.log('Authenticated user:', userId);
 
     const { query, niche, count = 10 } = await req.json();
