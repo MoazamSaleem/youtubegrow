@@ -481,7 +481,7 @@ Tips: ${script.tips.join(", ")}
                       {/* Sections */}
                       <div className="space-y-3">
                         <span className="text-sm font-medium text-muted-foreground">Main Content</span>
-                        {script.sections.map((section, index) => (
+                      {(script.sections || []).map((section, index) => (
                           <div key={index} className="glass rounded-xl overflow-hidden">
                             <button
                               onClick={() => toggleSection(index)}
