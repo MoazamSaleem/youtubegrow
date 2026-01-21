@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
+import { supabase } from "@/integrations/supabase/client";
 import {
   FileText,
   Menu,
@@ -77,6 +78,29 @@ const ScriptWriter = () => {
     }
   }, [user, loading, navigate]);
 
+  useEffect(() => {
+    if (!user) return;
+    const key = `script_writer_generated:${user.id}`;
+    const cached = localStorage.getItem(key);
+    if (!cached) return;
+    try {
+      const parsed = JSON.parse(cached) as {
+        script?: GeneratedScript;
+        formData?: typeof formData;
+      };
+      if (parsed.formData) {
+        setFormData((prev) => ({ ...prev, ...parsed.formData }));
+      }
+      if (parsed.script) {
+        setScript(parsed.script);
+        setExpandedSections(new Set([0]));
+      }
+      localStorage.removeItem(key);
+    } catch (error) {
+      console.warn("Failed to load generated script:", error);
+    }
+  }, [user]);
+
   const handleGenerate = async () => {
     if (!formData.topic.trim()) {
       toast({
@@ -100,13 +124,19 @@ const ScriptWriter = () => {
     setScript(null);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-script`,
         {
           method: "POST",
           headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify(formData),
         }

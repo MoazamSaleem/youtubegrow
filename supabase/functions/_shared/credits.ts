@@ -137,3 +137,64 @@ export async function refundCredits(
     return false;
   }
 }
+
+export async function deductCreditsWithAmount(
+  userId: string,
+  amount: number,
+  queryType: QueryType,
+  description: string,
+  complexity: QueryComplexity = "standard"
+): Promise<CreditCheckResult> {
+  if (amount <= 0) {
+    return { success: true, cost: 0 };
+  }
+
+  const supabaseAdmin = createClient(
+    Deno.env.get("SUPABASE_URL") ?? "",
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    { auth: { persistSession: false } }
+  );
+
+  try {
+    const { data, error } = await supabaseAdmin.rpc('deduct_credits', {
+      p_user_id: userId,
+      p_amount: amount
+    });
+
+    if (error) {
+      console.error("[CREDITS] Error calling deduct_credits:", error);
+      return { success: false, error: "Failed to deduct credits" };
+    }
+
+    const result = (data as DeductCreditsResult[] | null)?.[0];
+    if (!result || !result.success) {
+      const currentBalance = result?.current_balance || 0;
+      return {
+        success: false,
+        error: `Insufficient credits. You have ${currentBalance} credits, but this action requires ${amount} credits.`,
+        currentBalance,
+        cost: amount
+      };
+    }
+
+    await supabaseAdmin.from("ai_credits_usage").insert({
+      user_id: userId,
+      credits_used: amount,
+      query_type: queryType,
+      query_complexity: complexity,
+    });
+
+    await supabaseAdmin.from("credits_history").insert({
+      user_id: userId,
+      amount: -amount,
+      type: "usage",
+      description: description,
+      balance_after: result.new_balance,
+    });
+
+    return { success: true, currentBalance: result.new_balance, cost: amount };
+  } catch (error) {
+    console.error("[CREDITS] Unexpected error:", error);
+    return { success: false, error: "An unexpected error occurred" };
+  }
+}

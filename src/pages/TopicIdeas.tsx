@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { getPlanLimits } from "@/lib/planLimits";
+import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Lightbulb,
@@ -40,6 +40,7 @@ const TopicIdeas = () => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [scriptGeneratingId, setScriptGeneratingId] = useState<number | null>(null);
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelSnippet, setChannelSnippet] = useState<string>("");
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
@@ -47,6 +48,7 @@ const TopicIdeas = () => {
 
   const currentPlan = subscription?.plan || "free";
   const limits = getPlanLimits(currentPlan);
+  const canGenerateScript = canAccessFeature(currentPlan, "hasScriptWriter");
 
   const getSessionWithRefresh = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -104,6 +106,39 @@ const TopicIdeas = () => {
     };
     loadChannel();
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const cacheKey = `topics_cache:${user.id}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (!cached) return;
+      const parsed = JSON.parse(cached) as { topics?: Topic[]; savedAt?: number };
+      const savedAt = typeof parsed.savedAt === "number" ? parsed.savedAt : 0;
+      if (!savedAt || Date.now() - savedAt > 24 * 60 * 60 * 1000) {
+        localStorage.removeItem(cacheKey);
+        return;
+      }
+      if (parsed.topics && parsed.topics.length > 0) {
+        setTopics(parsed.topics);
+      }
+    } catch (error) {
+      console.warn("Failed to load cached topics:", error);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const cacheKey = `topics_cache:${user.id}`;
+    if (topics.length === 0) {
+      localStorage.removeItem(cacheKey);
+      return;
+    }
+    localStorage.setItem(
+      cacheKey,
+      JSON.stringify({ topics, savedAt: Date.now() })
+    );
+  }, [user, topics]);
 
   useEffect(() => {
     if (!channelName || autoRunRef.current || topics.length > 0) return;
@@ -174,6 +209,81 @@ const TopicIdeas = () => {
       });
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateScript = async (topic: Topic, index: number) => {
+    if (!user) return;
+    if (!canGenerateScript) {
+      toast({
+        title: "Upgrade Required",
+        description: "Script Writer is available on Pro and Advanced plans",
+        variant: "destructive",
+      });
+      return;
+    }
+    setScriptGeneratingId(index);
+
+    try {
+      const session = await getSessionWithRefresh();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-script`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            topic: topic.title,
+            targetAudience,
+            tone: "engaging",
+            duration: "8-10",
+            includeHook: true,
+            includeCTA: true,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to generate script");
+      }
+
+      const data = await response.json();
+      localStorage.setItem(
+        `script_writer_generated:${user.id}`,
+        JSON.stringify({
+          script: data.script,
+          formData: {
+            topic: topic.title,
+            targetAudience,
+            tone: "engaging",
+            duration: "8-10",
+            includeHook: true,
+            includeCTA: true,
+          },
+        })
+      );
+
+      toast({
+        title: "Script generated",
+        description: "Opening Script Writer with your script",
+      });
+      navigate("/dashboard/scripts");
+    } catch (error: any) {
+      toast({
+        title: "Script generation failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setScriptGeneratingId(null);
     }
   };
 
@@ -349,6 +459,27 @@ const TopicIdeas = () => {
                       <span className="font-medium text-primary">Why it works:</span>{" "}
                       {topic.whyItWorks}
                     </p>
+                  </div>
+
+                  <div className="mt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleGenerateScript(topic, index)}
+                      disabled={scriptGeneratingId === index}
+                    >
+                      {scriptGeneratingId === index ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Generating Script...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4 mr-2" />
+                          Generate Script
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </motion.div>
               ))}

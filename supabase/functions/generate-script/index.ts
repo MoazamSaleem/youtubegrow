@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { checkAndDeductCredits, refundCredits } from "../_shared/credits.ts";
+import { deductCreditsWithAmount, refundCredits } from "../_shared/credits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,8 +60,14 @@ serve(async (req) => {
       });
     }
 
-    // Check and deduct credits (scripts are more expensive)
-    const creditCheck = await checkAndDeductCredits(userId, "generate-script", "standard");
+    const baseCost = 30;
+    const creditCheck = await deductCreditsWithAmount(
+      userId,
+      baseCost,
+      "generate-script",
+      "Generate Script - base",
+      "basic"
+    );
     if (!creditCheck.success) {
       return new Response(JSON.stringify({ error: creditCheck.error }), {
         status: 402,
@@ -162,7 +168,41 @@ Use the following JSON format:
     
     const script = JSON.parse(jsonMatch[0]);
 
-    return new Response(JSON.stringify({ script }), {
+    const scriptText = [
+      script.hook,
+      script.introduction,
+      ...(Array.isArray(script.sections) ? script.sections.map((section: { content?: string }) => section.content) : []),
+      script.conclusion,
+      script.callToAction,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const shortLimit = 2500;
+    const extraChunkSize = 1000;
+    const extraChunkCost = 10;
+    const extraChunks = Math.max(0, Math.ceil((scriptText.length - shortLimit) / extraChunkSize));
+    const totalCost = baseCost + extraChunks * extraChunkCost;
+    const additionalCost = totalCost - baseCost;
+
+    if (additionalCost > 0) {
+      const additional = await deductCreditsWithAmount(
+        userId,
+        additionalCost,
+        "generate-script",
+        `Generate Script - length (${scriptText.length} chars)`,
+        "standard"
+      );
+      if (!additional.success) {
+        await refundCredits(userId, baseCost, "Insufficient credits for script length - refund");
+        return new Response(JSON.stringify({ error: additional.error || "Insufficient credits" }), {
+          status: 402,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    return new Response(JSON.stringify({ script, creditsUsed: totalCost }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {

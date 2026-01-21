@@ -32,6 +32,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface NavItem {
   name: string;
@@ -225,6 +226,10 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
 
           {/* User */}
           <div className="p-4 border-t border-border">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs text-muted-foreground">Theme</span>
+              <ThemeToggle />
+            </div>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center">
                 <span className="font-semibold text-primary-foreground">
