@@ -211,6 +211,7 @@ serve(async (req) => {
       const scopes = [
         "https://www.googleapis.com/auth/youtube.readonly",
         "https://www.googleapis.com/auth/yt-analytics.readonly",
+        "https://www.googleapis.com/auth/yt-analytics-monetary.readonly",
       ].join(" ");
       
       const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -432,25 +433,44 @@ serve(async (req) => {
       }
       
       // Fetch analytics from YouTube Analytics API
-      const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
-      analyticsUrl.searchParams.set("ids", `channel==${channelId}`);
-      analyticsUrl.searchParams.set("startDate", startDate || "2024-01-01");
-      analyticsUrl.searchParams.set("endDate", endDate || new Date().toISOString().split("T")[0]);
-      analyticsUrl.searchParams.set("metrics", "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration,estimatedRevenue");
-      analyticsUrl.searchParams.set("dimensions", "day");
-      analyticsUrl.searchParams.set("sort", "day");
+      const buildAnalyticsUrl = (metrics: string) => {
+        const url = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
+        url.searchParams.set("ids", `channel==${channelId}`);
+        url.searchParams.set("startDate", startDate || "2024-01-01");
+        url.searchParams.set("endDate", endDate || new Date().toISOString().split("T")[0]);
+        url.searchParams.set("metrics", metrics);
+        url.searchParams.set("dimensions", "day");
+        url.searchParams.set("sort", "day");
+        return url;
+      };
+
+      let analyticsUrl = buildAnalyticsUrl(
+        "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration,estimatedRevenue"
+      );
       
-      const analyticsResponse = await fetch(analyticsUrl.toString(), {
+      let analyticsResponse = await fetch(analyticsUrl.toString(), {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       
       if (!analyticsResponse.ok) {
         const error = await analyticsResponse.text();
         console.error("Analytics fetch error:", error);
-        return new Response(JSON.stringify({ error: "Failed to fetch analytics" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        const isUnauthorized = error.includes("Insufficient permission") || error.includes("unauthorized");
+        if (isUnauthorized) {
+          analyticsUrl = buildAnalyticsUrl(
+            "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration"
+          );
+          analyticsResponse = await fetch(analyticsUrl.toString(), {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+        }
+
+        if (!analyticsResponse.ok) {
+          return new Response(JSON.stringify({ error: "Failed to fetch analytics" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
       
       const analytics = await analyticsResponse.json();
