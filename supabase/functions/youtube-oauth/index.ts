@@ -121,13 +121,29 @@ serve(async (req) => {
     let body: any = null;
     if (req.method !== "GET") {
       try {
-        body = await req.json();
+        const raw = await req.text();
+        if (raw) {
+          try {
+            body = JSON.parse(raw);
+          } catch {
+            body = null;
+          }
+        }
       } catch {
         body = null;
       }
     }
     if (!action && body?.action) {
       action = body.action;
+    }
+    if (!action && body && typeof body === "object") {
+      if (body.code && body.redirectUri && body.userId) {
+        action = "callback";
+      } else if (body.redirectUri && body.state) {
+        action = "auth-url";
+      } else if (body.channelId && body.userId) {
+        action = body.startDate || body.endDate ? "analytics" : "channel-context";
+      }
     }
     
     const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID");
