@@ -568,7 +568,7 @@ Tips: ${script.tips.join(", ")}
                       </div>
 
                       {/* Tips */}
-                      {script.tips.length > 0 && (
+                      {(script.tips || []).length > 0 && (
                         <div className="space-y-2">
                           <span className="text-sm font-medium text-muted-foreground">Pro Tips</span>
                           <div className="flex flex-wrap gap-2">
