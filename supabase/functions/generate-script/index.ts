@@ -136,13 +136,52 @@ serve(async (req) => {
       throw new Error("No content received from AI");
     }
 
-    // Parse the JSON from the response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Failed to parse script response");
-    }
-    
-    const script = JSON.parse(jsonMatch[0]);
+    const parseScriptPayload = (text: string) => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        const fencedJson = text.match(/```json\s*([\s\S]*?)\s*```/i);
+        if (fencedJson?.[1]) {
+          return JSON.parse(fencedJson[1]);
+        }
+        const fenced = text.match(/```\s*([\s\S]*?)\s*```/);
+        if (fenced?.[1]) {
+          return JSON.parse(fenced[1]);
+        }
+      }
+
+      const hook = text.match(/\[HOOK[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[HOOK[^\]]*\]\s*/i, "").trim() || "";
+      const introduction = text.match(/\[INTRO[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[INTRO[^\]]*\]\s*/i, "").trim() || "";
+      const conclusion = text.match(/\[(FINAL SUMMARY \+ CLOSING|CONCLUSION)[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[[^\]]*\]\s*/i, "").trim() || "";
+      const callToAction = text.match(/\[CALL TO ACTION[^\]]*\][\s\S]*?(?=\n\[|$)/i)?.[0]?.replace(/^\[CALL TO ACTION[^\]]*\]\s*/i, "").trim() || "";
+
+      const sectionRegex = /\[SECTION\s*\d+:[^\]]*\][\s\S]*?(?=\n\[SECTION|\n\[CALL TO ACTION|\n\[FINAL SUMMARY|\n\[CONCLUSION|\n\[END\]|\n$)/gi;
+      const sections = Array.from(text.matchAll(sectionRegex)).map((match) => {
+        const block = match[0];
+        const titleMatch = block.match(/\[SECTION\s*\d+:\s*([^\]]+)\]/i);
+        const title = titleMatch?.[1]?.trim() || "Main Section";
+        const content = block.replace(/\[SECTION[^\]]*\]\s*/i, "").trim();
+        return {
+          timestamp: "",
+          title,
+          content,
+        };
+      });
+
+      const titleLine = text.match(/^[^\n]{8,120}$/m)?.[0]?.trim();
+      return {
+        title: titleLine || topic,
+        hook,
+        introduction,
+        sections,
+        conclusion,
+        callToAction,
+        estimatedDuration: duration || "8-10",
+        tips: [],
+      };
+    };
+
+    const script = parseScriptPayload(content);
 
     const scriptText = [
       script.hook,
