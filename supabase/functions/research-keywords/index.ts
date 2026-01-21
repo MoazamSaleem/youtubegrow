@@ -105,6 +105,7 @@ serve(async (req) => {
 
     const KEYWORDS_AI_API = Deno.env.get("KEYWORDS_SEARCH_AI");
     const KEYWORDS_PROMPT_ID = "pmpt_6970b50a6950819098a5e397fbbede7104f6cbb1c8b31a6c";
+    const KEYWORDS_PROMPT_VERSION = "v3";
     
     if (!KEYWORDS_AI_API) {
       console.error("KEYWORDS_SEARCH_AI is not configured");
@@ -128,23 +129,34 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        prompt: { id: KEYWORDS_PROMPT_ID },
+        prompt: { id: KEYWORDS_PROMPT_ID, version: KEYWORDS_PROMPT_VERSION },
         input: promptInput,
       }),
     });
 
     if (!response.ok) {
       await refundCredits(userId, creditCheck.cost!, "Keywords AI error - refund");
-      
+
+      const errorText = await response.text();
+      console.error("Keywords AI error:", response.status, errorText);
+
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
           status: 429,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const errorText = await response.text();
-      console.error("Keywords AI error:", response.status, errorText);
-      throw new Error("Failed to research keywords");
+
+      return new Response(
+        JSON.stringify({
+          error: "Failed to research keywords",
+          details: errorText,
+        }),
+        {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     const data = await response.json();
