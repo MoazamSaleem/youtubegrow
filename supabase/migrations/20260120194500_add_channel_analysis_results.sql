@@ -12,17 +12,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS channel_analysis_results_user_channel_idx
 
 ALTER TABLE public.channel_analysis_results ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can read own channel analyses"
-  ON public.channel_analysis_results
-  FOR SELECT
-  USING (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'channel_analysis_results'
+      AND policyname = 'Users can read own channel analyses'
+  ) THEN
+    CREATE POLICY "Users can read own channel analyses"
+      ON public.channel_analysis_results
+      FOR SELECT
+      USING (auth.uid() = user_id);
+  END IF;
 
-CREATE POLICY "Users can insert own channel analyses"
-  ON public.channel_analysis_results
-  FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'channel_analysis_results'
+      AND policyname = 'Users can insert own channel analyses'
+  ) THEN
+    CREATE POLICY "Users can insert own channel analyses"
+      ON public.channel_analysis_results
+      FOR INSERT
+      WITH CHECK (auth.uid() = user_id);
+  END IF;
 
-CREATE POLICY "Users can update own channel analyses"
-  ON public.channel_analysis_results
-  FOR UPDATE
-  USING (auth.uid() = user_id);
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'channel_analysis_results'
+      AND policyname = 'Users can update own channel analyses'
+  ) THEN
+    CREATE POLICY "Users can update own channel analyses"
+      ON public.channel_analysis_results
+      FOR UPDATE
+      USING (auth.uid() = user_id);
+  END IF;
+END $$;

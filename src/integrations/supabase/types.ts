@@ -230,6 +230,38 @@ export type Database = {
           },
         ]
       }
+      competitor_analysis_results: {
+        Row: {
+          analysis: Json
+          competitor_channel_url: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          analysis: Json
+          competitor_channel_url: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          analysis?: Json
+          competitor_channel_url?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_analysis_results_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       growth_tasks: {
         Row: {
           category: string

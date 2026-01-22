@@ -90,6 +90,21 @@ serve(async (req) => {
       `Count: ${validCount}`,
     ].join("\n");
 
+    const { data: competitorAnalyses } = await supabaseClient
+      .from("competitor_analysis_results")
+      .select("analysis")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true });
+
+    const competitorText = competitorAnalyses?.length
+      ? JSON.stringify(competitorAnalyses.map((item) => item.analysis)).slice(0, 3000)
+      : "";
+
+    const promptInputWithCompetitor = [
+      promptInput,
+      competitorText ? `Competitor analysis: ${competitorText}` : undefined,
+    ].filter(Boolean).join("\n");
+
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -98,7 +113,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         prompt: { id: TOPICS_PROMPT_ID },
-        input: promptInput,
+        input: promptInputWithCompetitor,
       }),
     });
 

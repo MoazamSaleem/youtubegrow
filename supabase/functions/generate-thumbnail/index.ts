@@ -121,10 +121,21 @@ serve(async (req) => {
 
     const styleDescription = stylePrompts[style] || stylePrompts.vibrant;
     
+    const { data: competitorAnalyses } = await supabase
+      .from("competitor_analysis_results")
+      .select("analysis")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true });
+
+    const competitorText = competitorAnalyses?.length
+      ? JSON.stringify(competitorAnalyses.map((item) => item.analysis)).slice(0, 3000)
+      : "";
+
     const promptInput = [
       `Topic: ${topic}`,
       `Style: ${styleDescription}`,
       channelNiche ? `Channel niche: ${channelNiche}` : undefined,
+      competitorText ? `Competitor analysis: ${competitorText}` : undefined,
       "Aspect ratio: 16:9",
       "No text in image",
       "High CTR, bold visual elements",

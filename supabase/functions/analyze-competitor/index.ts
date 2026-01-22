@@ -76,10 +76,11 @@ serve(async (req) => {
       });
     }
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    const ANALYSIS_AI_API = Deno.env.get("ANALYSIS_AI_API");
+    const COMPETITOR_PROMPT_ID = "pmpt_6972551ed7708193ab07f154318107dd03d2302601cc78ba";
     
-    if (!OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is not configured");
+    if (!ANALYSIS_AI_API) {
+      console.error("ANALYSIS_AI_API is not configured");
       await refundCredits(userId, creditCheck.cost!, "AI service not configured - refund");
       return new Response(JSON.stringify({ error: "AI service not configured" }), {
         status: 500,
@@ -87,70 +88,23 @@ serve(async (req) => {
       });
     }
 
-    const prompt = `Perform a strategic competitor analysis for a YouTube channel in the ${niche || "general content"} niche.
+    const promptInput = [
+      `Competitor Channel Link: ${competitorChannelUrl}`,
+      niche ? `Niche: ${niche}` : undefined,
+      yourChannelInfo ? `Your Channel Context: ${yourChannelInfo}` : undefined,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-Competitor Channel Link to Analyze: ${competitorChannelUrl}
-${yourChannelInfo ? `My Channel Context: ${yourChannelInfo}` : ""}
-
-Provide a comprehensive analysis in the following JSON format:
-{
-  "channelOverview": {
-    "estimatedNiche": "Their specific niche",
-    "contentStyle": "Description of their content approach",
-    "targetAudience": "Who they're targeting",
-    "uniqueSellingPoint": "What makes them stand out"
-  },
-  "contentStrategy": {
-    "uploadFrequency": "How often they post",
-    "videoFormats": ["Format 1", "Format 2"],
-    "averageLength": "Typical video duration",
-    "topPerformingTopics": ["Topic 1", "Topic 2", "Topic 3"]
-  },
-  "strengths": [
-    {
-      "area": "Strength area",
-      "description": "Why this is effective",
-      "howToAdapt": "How you can apply this"
-    }
-  ],
-  "weaknesses": [
-    {
-      "area": "Weakness area",
-      "description": "What's lacking",
-      "yourOpportunity": "How you can capitalize"
-    }
-  ],
-  "contentGaps": [
-    {
-      "topic": "Untapped topic",
-      "potential": "Why this could work",
-      "difficulty": "Easy/Medium/Hard"
-    }
-  ],
-  "actionableInsights": [
-    {
-      "priority": "High/Medium/Low",
-      "action": "Specific action to take",
-      "expectedImpact": "What results to expect"
-    }
-  ],
-  "titleFormulas": ["Title pattern they use successfully"],
-  "thumbnailStyle": "Description of their thumbnail approach",
-  "engagementTactics": ["How they engage their audience"]
-}`;
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${ANALYSIS_AI_API}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "You are an expert YouTube strategy consultant specializing in competitive analysis. You provide actionable insights based on publicly observable patterns and strategies. Always respond with valid JSON." },
-          { role: "user", content: prompt },
-        ],
+        prompt: { id: COMPETITOR_PROMPT_ID },
+        input: promptInput,
       }),
     });
 
@@ -172,19 +126,49 @@ Provide a comprehensive analysis in the following JSON format:
     }
 
     const data = await response.json();
-    const content = data.choices[0]?.message?.content;
+    const content =
+      data.output_text ||
+      data.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+      ).find(Boolean);
     
     if (!content) {
       throw new Error("No content received from AI");
     }
 
-    // Parse the JSON from the response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Failed to parse analysis response");
+    const parseAnalysisPayload = (text: string) => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        const fencedJson = text.match(/```json\s*([\s\S]*?)\s*```/i);
+        if (fencedJson?.[1]) {
+          return JSON.parse(fencedJson[1]);
+        }
+        const fenced = text.match(/```\s*([\s\S]*?)\s*```/);
+        if (fenced?.[1]) {
+          return JSON.parse(fenced[1]);
+        }
+        const loose = text.match(/\{[\s\S]*\}/);
+        if (loose?.[0]) {
+          return JSON.parse(loose[0]);
+        }
+        throw new Error("Failed to parse analysis response");
+      }
+    };
+
+    const analysis = parseAnalysisPayload(content);
+
+    const { error: saveError } = await supabaseClient
+      .from("competitor_analysis_results")
+      .insert({
+        user_id: userId,
+        competitor_channel_url: competitorChannelUrl,
+        analysis,
+      });
+
+    if (saveError) {
+      console.error("Failed to save competitor analysis:", saveError);
     }
-    
-    const analysis = JSON.parse(jsonMatch[0]);
 
     return new Response(JSON.stringify({ analysis }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

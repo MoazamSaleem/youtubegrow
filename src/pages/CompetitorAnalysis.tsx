@@ -21,6 +21,8 @@ import {
   TrendingDown,
   Lightbulb,
   CheckCircle2,
+  PencilLine,
+  Trash2,
   AlertCircle,
   Sparkles,
   Search,
@@ -83,6 +85,7 @@ const CompetitorAnalysisPage = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [analysis, setAnalysis] = useState<CompetitorAnalysis | null>(null);
   const [savedCompetitors, setSavedCompetitors] = useState<SavedCompetitor[]>([]);
+  const [editingCompetitorId, setEditingCompetitorId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     competitorChannelUrl: "",
@@ -204,7 +207,7 @@ const CompetitorAnalysisPage = () => {
       return;
     }
 
-    if (savedCompetitors.length >= saveLimit) {
+    if (!editingCompetitorId && savedCompetitors.length >= saveLimit) {
       toast({
         title: "Competitor limit reached",
         description: `You can save up to ${saveLimit} competitors on your plan.`,
@@ -214,7 +217,11 @@ const CompetitorAnalysisPage = () => {
     }
 
     const normalizedUrl = formData.competitorChannelUrl.trim();
-    if (savedCompetitors.some((item) => item.channel_url === normalizedUrl)) {
+    if (
+      savedCompetitors.some(
+        (item) => item.channel_url === normalizedUrl && item.id !== editingCompetitorId
+      )
+    ) {
       toast({
         title: "Already saved",
         description: "This competitor is already in your list.",
@@ -223,10 +230,15 @@ const CompetitorAnalysisPage = () => {
     }
 
     setIsSaving(true);
-    const { error } = await supabase.from("competitor_channels").insert({
-      user_id: user?.id,
-      channel_url: normalizedUrl,
-    });
+    const { error } = editingCompetitorId
+      ? await supabase
+          .from("competitor_channels")
+          .update({ channel_url: normalizedUrl })
+          .eq("id", editingCompetitorId)
+      : await supabase.from("competitor_channels").insert({
+          user_id: user?.id,
+          channel_url: normalizedUrl,
+        });
 
     if (error) {
       console.error("Failed to save competitor:", error);
@@ -240,10 +252,39 @@ const CompetitorAnalysisPage = () => {
     }
 
     await fetchSavedCompetitors();
+    setEditingCompetitorId(null);
     setIsSaving(false);
     toast({
-      title: "Competitor saved",
-      description: "Saved to your competitor list.",
+      title: editingCompetitorId ? "Competitor updated" : "Competitor saved",
+      description: editingCompetitorId
+        ? "Competitor link updated."
+        : "Saved to your competitor list.",
+    });
+  };
+
+  const handleDeleteCompetitor = async (competitorId: string) => {
+    const { error } = await supabase
+      .from("competitor_channels")
+      .delete()
+      .eq("id", competitorId);
+
+    if (error) {
+      console.error("Failed to delete competitor:", error);
+      toast({
+        title: "Delete failed",
+        description: "Unable to delete competitor right now.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (editingCompetitorId === competitorId) {
+      setEditingCompetitorId(null);
+    }
+    await fetchSavedCompetitors();
+    toast({
+      title: "Competitor deleted",
+      description: "Removed from your saved list.",
     });
   };
 
@@ -385,6 +426,11 @@ const CompetitorAnalysisPage = () => {
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Saving...
                       </>
+                    ) : editingCompetitorId ? (
+                      <>
+                        <PencilLine className="h-4 w-4 mr-2" />
+                        Replace Competitor
+                      </>
                     ) : (
                       <>
                         <CheckCircle2 className="h-4 w-4 mr-2" />
@@ -443,14 +489,36 @@ const CompetitorAnalysisPage = () => {
                           >
                             {competitor.channel_url}
                           </button>
-                          <a
-                            href={competitor.channel_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center text-xs text-primary"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCompetitorId(competitor.id);
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  competitorChannelUrl: competitor.channel_url,
+                                }));
+                              }}
+                              className="inline-flex items-center text-xs text-primary"
+                            >
+                              <PencilLine className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCompetitor(competitor.id)}
+                              className="inline-flex items-center text-xs text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                            <a
+                              href={competitor.channel_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center text-xs text-primary"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </div>
                         </div>
                       ))}
                     </div>
