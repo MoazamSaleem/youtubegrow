@@ -97,6 +97,28 @@ const CompetitorAnalysisPage = () => {
   const hasAccess = canAccessFeature(currentPlan, "competitorAnalysisFrequency");
   const saveLimit = currentPlan === "pro" ? 3 : currentPlan === "advanced" ? 5 : 0;
   const hasSaveAccess = saveLimit > 0;
+  const emptyAnalysis: CompetitorAnalysis = {
+    channelOverview: {
+      estimatedNiche: "Not available",
+      contentStyle: "Not available",
+      targetAudience: "Not available",
+      uniqueSellingPoint: "Not available",
+    },
+    contentStrategy: {
+      uploadFrequency: "Not available",
+      videoFormats: [],
+      averageLength: "Not available",
+      topPerformingTopics: [],
+    },
+    strengths: [],
+    weaknesses: [],
+    contentGaps: [],
+    actionableInsights: [],
+    titleFormulas: [],
+    thumbnailStyle: "Not available",
+    engagementTactics: [],
+  };
+  const safeAnalysis = analysis ?? emptyAnalysis;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -549,19 +571,19 @@ const CompetitorAnalysisPage = () => {
                     <div className="grid md:grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase tracking-wider">Niche</span>
-                        <p className="font-medium">{analysis.channelOverview.estimatedNiche}</p>
+                      <p className="font-medium">{safeAnalysis.channelOverview.estimatedNiche}</p>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase tracking-wider">Target Audience</span>
-                        <p className="font-medium">{analysis.channelOverview.targetAudience}</p>
+                      <p className="font-medium">{safeAnalysis.channelOverview.targetAudience}</p>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase tracking-wider">Content Style</span>
-                        <p className="font-medium">{analysis.channelOverview.contentStyle}</p>
+                      <p className="font-medium">{safeAnalysis.channelOverview.contentStyle}</p>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase tracking-wider">USP</span>
-                        <p className="font-medium">{analysis.channelOverview.uniqueSellingPoint}</p>
+                      <p className="font-medium">{safeAnalysis.channelOverview.uniqueSellingPoint}</p>
                       </div>
                     </div>
                   </div>
@@ -572,16 +594,16 @@ const CompetitorAnalysisPage = () => {
                     <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                       <div className="p-4 rounded-xl bg-secondary/50">
                         <span className="text-xs text-muted-foreground block mb-1">Upload Frequency</span>
-                        <span className="font-display font-bold">{analysis.contentStrategy.uploadFrequency}</span>
+                        <span className="font-display font-bold">{safeAnalysis.contentStrategy.uploadFrequency}</span>
                       </div>
                       <div className="p-4 rounded-xl bg-secondary/50">
                         <span className="text-xs text-muted-foreground block mb-1">Average Length</span>
-                        <span className="font-display font-bold">{analysis.contentStrategy.averageLength}</span>
+                        <span className="font-display font-bold">{safeAnalysis.contentStrategy.averageLength}</span>
                       </div>
                       <div className="p-4 rounded-xl bg-secondary/50 col-span-2">
                         <span className="text-xs text-muted-foreground block mb-2">Video Formats</span>
                         <div className="flex flex-wrap gap-2">
-                          {analysis.contentStrategy.videoFormats.map((format, i) => (
+                          {safeAnalysis.contentStrategy.videoFormats.map((format, i) => (
                             <Badge key={i} variant="secondary">{format}</Badge>
                           ))}
                         </div>
@@ -590,7 +612,7 @@ const CompetitorAnalysisPage = () => {
                     <div className="space-y-2">
                       <span className="text-xs text-muted-foreground uppercase tracking-wider">Top Performing Topics</span>
                       <div className="flex flex-wrap gap-2">
-                        {analysis.contentStrategy.topPerformingTopics.map((topic, i) => (
+                        {safeAnalysis.contentStrategy.topPerformingTopics.map((topic, i) => (
                           <Badge key={i} variant="outline" className="text-primary border-primary/30">
                             {topic}
                           </Badge>
@@ -607,7 +629,7 @@ const CompetitorAnalysisPage = () => {
                         Strengths
                       </h2>
                       <div className="space-y-4">
-                        {analysis.strengths.map((item, i) => (
+                        {safeAnalysis.strengths.map((item, i) => (
                           <div key={i} className="p-4 rounded-xl bg-success/10 border border-success/20">
                             <div className="flex items-start gap-2">
                               <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
@@ -633,7 +655,7 @@ const CompetitorAnalysisPage = () => {
                         Weaknesses (Your Opportunities)
                       </h2>
                       <div className="space-y-4">
-                        {analysis.weaknesses.map((item, i) => (
+                        {safeAnalysis.weaknesses.map((item, i) => (
                           <div key={i} className="p-4 rounded-xl bg-warning/10 border border-warning/20">
                             <div className="flex items-start gap-2">
                               <AlertCircle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
@@ -661,7 +683,7 @@ const CompetitorAnalysisPage = () => {
                       Content Gaps to Exploit
                     </h2>
                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {analysis.contentGaps.map((gap, i) => (
+                      {safeAnalysis.contentGaps.map((gap, i) => (
                         <div key={i} className="p-4 rounded-xl bg-secondary/50 border border-border">
                           <div className="flex items-start justify-between mb-2">
                             <span className="font-medium">{gap.topic}</span>
@@ -679,7 +701,7 @@ const CompetitorAnalysisPage = () => {
                   <div className="glass rounded-2xl p-6">
                     <h2 className="font-display text-xl font-bold mb-4">Actionable Insights</h2>
                     <div className="space-y-3">
-                      {analysis.actionableInsights.map((insight, i) => (
+                      {safeAnalysis.actionableInsights.map((insight, i) => (
                         <div key={i} className="flex items-start gap-4 p-4 rounded-xl bg-secondary/50">
                           <Badge className={getPriorityColor(insight.priority)}>
                             {insight.priority}
@@ -700,7 +722,7 @@ const CompetitorAnalysisPage = () => {
                     <div className="glass rounded-2xl p-6">
                       <h2 className="font-display text-lg font-bold mb-3">Title Formulas</h2>
                       <ul className="space-y-2">
-                        {analysis.titleFormulas.map((formula, i) => (
+                        {safeAnalysis.titleFormulas.map((formula, i) => (
                           <li key={i} className="flex items-start gap-2 text-sm">
                             <span className="text-primary">•</span>
                             {formula}
@@ -712,7 +734,7 @@ const CompetitorAnalysisPage = () => {
                     <div className="glass rounded-2xl p-6">
                       <h2 className="font-display text-lg font-bold mb-3">Engagement Tactics</h2>
                       <ul className="space-y-2">
-                        {analysis.engagementTactics.map((tactic, i) => (
+                        {safeAnalysis.engagementTactics.map((tactic, i) => (
                           <li key={i} className="flex items-start gap-2 text-sm">
                             <span className="text-accent">•</span>
                             {tactic}
