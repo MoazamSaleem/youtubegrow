@@ -110,7 +110,7 @@ const ScriptWriter = () => {
   }, [searchParams, navigate]);
 
   const handleGenerate = async (topicOverride?: string) => {
-    const topicValue = topicOverride ?? formData.topic;
+    const topicValue = String(topicOverride ?? formData.topic ?? "");
     if (!topicValue.trim()) {
       toast({
         title: "Topic required",
@@ -380,7 +380,7 @@ Estimated Duration: ${data.estimatedDuration}${tips}
 
                   <Button
                     onClick={handleGenerate}
-                    disabled={isGenerating || !formData.topic.trim()}
+                    disabled={isGenerating || !String(formData.topic ?? "").trim()}
                     className="w-full"
                     size="lg"
                   >
