@@ -193,32 +193,46 @@ const ScriptWriter = () => {
   const copyFullScript = async () => {
     if (!script) return;
 
-    const fullText = `
-# ${script.title}
-
-## Hook
-${script.hook}
-
-## Introduction
-${script.introduction}
-
-${script.sections.map((s) => `## [${s.timestamp}] ${s.title}\n${s.content}\n${s.notes ? `\n*Notes: ${s.notes}*` : ""}`).join("\n\n")}
-
-## Conclusion
-${script.conclusion}
-
-## Call to Action
-${script.callToAction}
-
----
-Estimated Duration: ${script.estimatedDuration}
-Tips: ${script.tips.join(", ")}
-    `.trim();
+    const fullText = buildDocumentedScript(script);
 
     await navigator.clipboard.writeText(fullText);
     setCopiedSection("full");
     setTimeout(() => setCopiedSection(null), 2000);
     toast({ title: "Full script copied!" });
+  };
+
+  const buildDocumentedScript = (data: GeneratedScript) => {
+    const sections = (data.sections || [])
+      .map((section) => {
+        const timestamp = section.timestamp ? ` [${section.timestamp}]` : "";
+        const notes = section.notes ? `\nNotes: ${section.notes}` : "";
+        return `## ${section.title}${timestamp}\n${section.content}${notes}`;
+      })
+      .join("\n\n");
+
+    const tips = (data.tips || []).length > 0 ? `\nTips: ${(data.tips || []).join(", ")}` : "";
+
+    return `
+# ${data.title}
+
+## Hook
+${data.hook}
+
+## Introduction
+${data.introduction}
+
+## Main Content
+${sections}
+
+## Conclusion
+${data.conclusion}
+
+## Call to Action
+${data.callToAction}
+
+---
+Estimated Duration: ${data.estimatedDuration}${tips}
+    `.trim();
   };
 
   const toggleSection = (index: number) => {
@@ -425,6 +439,13 @@ Tips: ${script.tips.join(", ")}
                 ) : script ? (
                   <ScrollArea className="h-[600px]">
                     <div className="p-6 space-y-6">
+                      <div className="glass rounded-xl p-4 border border-border">
+                        <h3 className="font-display text-lg font-semibold mb-3">Full Script</h3>
+                        <pre className="whitespace-pre-wrap text-sm text-muted-foreground">
+                          {buildDocumentedScript(script)}
+                        </pre>
+                      </div>
+
                       {/* Header */}
                       <div className="flex items-start justify-between gap-4">
                         <div>
