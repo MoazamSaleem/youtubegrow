@@ -118,7 +118,26 @@ const CompetitorAnalysisPage = () => {
     thumbnailStyle: "Not available",
     engagementTactics: [],
   };
-  const safeAnalysis = analysis ?? emptyAnalysis;
+  const safeAnalysis: CompetitorAnalysis = {
+    ...emptyAnalysis,
+    ...analysis,
+    channelOverview: {
+      ...emptyAnalysis.channelOverview,
+      ...(analysis?.channelOverview ?? {}),
+    },
+    contentStrategy: {
+      ...emptyAnalysis.contentStrategy,
+      ...(analysis?.contentStrategy ?? {}),
+      videoFormats: analysis?.contentStrategy?.videoFormats ?? [],
+      topPerformingTopics: analysis?.contentStrategy?.topPerformingTopics ?? [],
+    },
+    strengths: analysis?.strengths ?? [],
+    weaknesses: analysis?.weaknesses ?? [],
+    contentGaps: analysis?.contentGaps ?? [],
+    actionableInsights: analysis?.actionableInsights ?? [],
+    titleFormulas: analysis?.titleFormulas ?? [],
+    engagementTactics: analysis?.engagementTactics ?? [],
+  };
 
   useEffect(() => {
     if (!loading && !user) {
