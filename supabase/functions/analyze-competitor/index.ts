@@ -110,7 +110,10 @@ serve(async (req) => {
     let channelMeta: { title?: string; author?: string; authorUrl?: string } = {};
     try {
       const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(competitorChannelUrl)}&format=json`;
-      const metaResponse = await fetch(oembedUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const metaResponse = await fetch(oembedUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (metaResponse.ok) {
         const meta = await metaResponse.json();
         channelMeta = {
