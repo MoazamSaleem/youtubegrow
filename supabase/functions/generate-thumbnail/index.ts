@@ -99,18 +99,8 @@ serve(async (req) => {
       });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const THUMBNAIL_AI_API = Deno.env.get("ANALYSIS_AI_API");
     const THUMBNAIL_PROMPT_ID = "pmpt_69724b66d1e88197a387d3a65c2fd0c40e4cdde79801def6";
-    if (!LOVABLE_API_KEY) {
-      console.error("LOVABLE_API_KEY is not configured");
-      await refundCredits(user.id, creditCheck.cost!, "AI service not configured - refund");
-      return new Response(
-        JSON.stringify({ error: "AI service not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     if (!THUMBNAIL_AI_API) {
       console.error("ANALYSIS_AI_API is not configured");
       await refundCredits(user.id, creditCheck.cost!, "AI service not configured - refund");
@@ -181,38 +171,34 @@ serve(async (req) => {
 
     console.log("Generating thumbnail with prompt:", thumbnailPrompt);
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const imageResponse = await fetch("https://api.openai.com/v1/images", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${THUMBNAIL_AI_API}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-image-preview",
-        messages: [
-          {
-            role: "user",
-            content: thumbnailPrompt,
-          },
-        ],
-        modalities: ["image", "text"],
+        model: "gpt-image-1.5",
+        prompt: thumbnailPrompt,
+        size: "1792x1024",
+        response_format: "b64_json",
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+    if (!imageResponse.ok) {
+      const errorText = await imageResponse.text();
+      console.error("OpenAI image error:", imageResponse.status, errorText);
       
       // Refund credits on error
       await refundCredits(user.id, creditCheck.cost!, "AI gateway error - refund");
       
-      if (response.status === 429) {
+      if (imageResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (response.status === 402) {
+      if (imageResponse.status === 402) {
         return new Response(
           JSON.stringify({ error: "AI credits exhausted. Please add more credits." }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -225,9 +211,10 @@ serve(async (req) => {
       );
     }
 
-    const data = await response.json();
-    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-    const textResponse = data.choices?.[0]?.message?.content;
+    const data = await imageResponse.json();
+    const b64Image = data.data?.[0]?.b64_json;
+    const imageUrl = b64Image ? `data:image/png;base64,${b64Image}` : undefined;
+    const textResponse = thumbnailPrompt;
 
     if (!imageUrl) {
       console.error("No image in response:", data);

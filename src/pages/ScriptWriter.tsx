@@ -109,8 +109,10 @@ const ScriptWriter = () => {
     navigate("/dashboard/scripts", { replace: true });
   }, [searchParams, navigate]);
 
-  const handleGenerate = async (topicOverride?: string) => {
-    const topicValue = String(topicOverride ?? formData.topic ?? "");
+  const handleGenerate = async (topicOverride?: unknown) => {
+    const topicValue = typeof topicOverride === "string"
+      ? topicOverride
+      : String(formData.topic ?? "");
     if (!topicValue.trim()) {
       toast({
         title: "Topic required",
@@ -379,7 +381,7 @@ Estimated Duration: ${data.estimatedDuration}${tips}
                   </div>
 
                   <Button
-                    onClick={handleGenerate}
+                    onClick={() => handleGenerate()}
                     disabled={isGenerating || !String(formData.topic ?? "").trim()}
                     className="w-full"
                     size="lg"
@@ -423,7 +425,8 @@ Estimated Duration: ${data.estimatedDuration}${tips}
                   </div>
                 ) : script ? (
                   <ScrollArea className="h-[600px]">
-                    <div className="p-6 space-y-6">                      {/* Header */}
+                    <div className="p-6 space-y-6">
+                      {/* Header */}
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <h2 className="font-display text-2xl font-bold mb-2">{script.title}</h2>
@@ -460,10 +463,7 @@ Estimated Duration: ${data.estimatedDuration}${tips}
                             </p>
                           </div>
                         ))}
-                      </div>}
-                          </div>
-                        </div>
-                      )}
+                      </div>
                     </div>
                   </ScrollArea>
                 ) : null}
