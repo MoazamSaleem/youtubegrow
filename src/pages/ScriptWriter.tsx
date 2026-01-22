@@ -202,20 +202,10 @@ const ScriptWriter = () => {
     return `
 # ${data.title}
 
-## Hook
-${data.hook}
-
-## Introduction
-${data.introduction}
-
 ## Main Content
-${sections}
-
-## Conclusion
-${data.conclusion}
-
-## Call to Action
-${data.callToAction}
+${sections || data.hook || data.introduction || data.conclusion || data.callToAction
+      ? sections || [data.hook, data.introduction, data.conclusion, data.callToAction].filter(Boolean).join("\n\n")
+      : ""}
 
 ---
 Estimated Duration: ${data.estimatedDuration}${tips}
@@ -224,12 +214,6 @@ Estimated Duration: ${data.estimatedDuration}${tips}
 
   const getDocumentedBlocks = (data: GeneratedScript) => {
     const blocks: Array<{ title: string; subtitle?: string; content: string }> = [];
-    if (data.hook) {
-      blocks.push({ title: "Hook", content: data.hook });
-    }
-    if (data.introduction) {
-      blocks.push({ title: "Introduction", content: data.introduction });
-    }
     (data.sections || []).forEach((section) => {
       blocks.push({
         title: section.title || "Main Section",
@@ -237,11 +221,13 @@ Estimated Duration: ${data.estimatedDuration}${tips}
         content: section.content || "",
       });
     });
-    if (data.conclusion) {
-      blocks.push({ title: "Conclusion", content: data.conclusion });
-    }
-    if (data.callToAction) {
-      blocks.push({ title: "Call to Action", content: data.callToAction });
+    if (blocks.length === 0) {
+      const fallback = [data.hook, data.introduction, data.conclusion, data.callToAction]
+        .filter(Boolean)
+        .join("\n\n");
+      if (fallback) {
+        blocks.push({ title: "Full Script", content: fallback });
+      }
     }
     return blocks;
   };

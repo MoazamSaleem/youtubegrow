@@ -100,8 +100,19 @@ serve(async (req) => {
     }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const THUMBNAIL_AI_API = Deno.env.get("ANALYSIS_AI_API");
+    const THUMBNAIL_PROMPT_ID = "pmpt_69724b66d1e88197a387d3a65c2fd0c40e4cdde79801def6";
     if (!LOVABLE_API_KEY) {
       console.error("LOVABLE_API_KEY is not configured");
+      await refundCredits(user.id, creditCheck.cost!, "AI service not configured - refund");
+      return new Response(
+        JSON.stringify({ error: "AI service not configured" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!THUMBNAIL_AI_API) {
+      console.error("ANALYSIS_AI_API is not configured");
       await refundCredits(user.id, creditCheck.cost!, "AI service not configured - refund");
       return new Response(
         JSON.stringify({ error: "AI service not configured" }),
@@ -120,13 +131,53 @@ serve(async (req) => {
 
     const styleDescription = stylePrompts[style] || stylePrompts.vibrant;
     
-    const thumbnailPrompt = `Create a YouTube thumbnail for a video about: "${topic}". 
-Style: ${styleDescription}. 
-${channelNiche ? `Channel niche: ${channelNiche}.` : ""}
-The thumbnail should be 16:9 aspect ratio, eye-catching, designed to maximize click-through rate.
-Include bold visual elements that convey the topic at a glance.
-NO text or words in the image - only visual elements.
-Ultra high resolution, professional quality YouTube thumbnail.`;
+    const promptInput = [
+      `Topic: ${topic}`,
+      `Style: ${styleDescription}`,
+      channelNiche ? `Channel niche: ${channelNiche}` : undefined,
+      "Aspect ratio: 16:9",
+      "No text in image",
+      "High CTR, bold visual elements",
+    ].filter(Boolean).join("\n");
+
+    const promptResponse = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${THUMBNAIL_AI_API}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: { id: THUMBNAIL_PROMPT_ID },
+        input: promptInput,
+      }),
+    });
+
+    if (!promptResponse.ok) {
+      const errorText = await promptResponse.text();
+      console.error("Thumbnail prompt error:", promptResponse.status, errorText);
+      await refundCredits(user.id, creditCheck.cost!, "Thumbnail prompt error - refund");
+      return new Response(
+        JSON.stringify({ error: "Failed to generate thumbnail prompt" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const promptData = await promptResponse.json();
+    const promptContent =
+      promptData.output_text ||
+      promptData.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+      ).find(Boolean);
+
+    if (!promptContent) {
+      await refundCredits(user.id, creditCheck.cost!, "Thumbnail prompt empty - refund");
+      return new Response(
+        JSON.stringify({ error: "Failed to generate thumbnail prompt" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const thumbnailPrompt = promptContent.trim();
 
     console.log("Generating thumbnail with prompt:", thumbnailPrompt);
 
