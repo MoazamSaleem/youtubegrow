@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { Button } from "@/components/ui/button";
@@ -10,19 +10,16 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
+import { canAccessFeature } from "@/lib/planLimits";
 import { supabase } from "@/integrations/supabase/client";
 import {
   FileText,
   Menu,
   Loader2,
   Clock,
-  Lightbulb,
   Copy,
   Check,
   Sparkles,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import {
   Select,
@@ -59,7 +56,6 @@ const ScriptWriter = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [script, setScript] = useState<GeneratedScript | null>(null);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
-  const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set([0]));
   const autoGenerateRef = useRef(false);
 
   const [formData, setFormData] = useState({
@@ -95,7 +91,6 @@ const ScriptWriter = () => {
       }
       if (parsed.script) {
         setScript(parsed.script);
-        setExpandedSections(new Set([0]));
       }
       localStorage.removeItem(key);
     } catch (error) {
@@ -166,7 +161,6 @@ const ScriptWriter = () => {
 
       const data = await response.json();
       setScript(data.script);
-      setExpandedSections(new Set([0]));
 
       toast({
         title: "Script Generated!",
@@ -181,13 +175,6 @@ const ScriptWriter = () => {
     } finally {
       setIsGenerating(false);
     }
-  };
-
-  const copyToClipboard = async (text: string, id: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedSection(id);
-    setTimeout(() => setCopiedSection(null), 2000);
-    toast({ title: "Copied to clipboard" });
   };
 
   const copyFullScript = async () => {
@@ -235,16 +222,28 @@ Estimated Duration: ${data.estimatedDuration}${tips}
     `.trim();
   };
 
-  const toggleSection = (index: number) => {
-    setExpandedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
-      } else {
-        next.add(index);
-      }
-      return next;
+  const getDocumentedBlocks = (data: GeneratedScript) => {
+    const blocks: Array<{ title: string; subtitle?: string; content: string }> = [];
+    if (data.hook) {
+      blocks.push({ title: "Hook", content: data.hook });
+    }
+    if (data.introduction) {
+      blocks.push({ title: "Introduction", content: data.introduction });
+    }
+    (data.sections || []).forEach((section) => {
+      blocks.push({
+        title: section.title || "Main Section",
+        subtitle: section.timestamp || undefined,
+        content: section.content || "",
+      });
     });
+    if (data.conclusion) {
+      blocks.push({ title: "Conclusion", content: data.conclusion });
+    }
+    if (data.callToAction) {
+      blocks.push({ title: "Call to Action", content: data.callToAction });
+    }
+    return blocks;
   };
 
   if (loading) {
@@ -438,15 +437,7 @@ Estimated Duration: ${data.estimatedDuration}${tips}
                   </div>
                 ) : script ? (
                   <ScrollArea className="h-[600px]">
-                    <div className="p-6 space-y-6">
-                      <div className="glass rounded-xl p-4 border border-border">
-                        <h3 className="font-display text-lg font-semibold mb-3">Full Script</h3>
-                        <pre className="whitespace-pre-wrap text-sm text-muted-foreground">
-                          {buildDocumentedScript(script)}
-                        </pre>
-                      </div>
-
-                      {/* Header */}
+                    <div className="p-6 space-y-6">                      {/* Header */}
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <h2 className="font-display text-2xl font-bold mb-2">{script.title}</h2>
@@ -466,141 +457,24 @@ Estimated Duration: ${data.estimatedDuration}${tips}
                           Copy All
                         </Button>
                       </div>
-
-                      {/* Hook */}
-                      <div className="p-4 rounded-xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-medium text-primary uppercase tracking-wider">
-                            Hook (First 10 Seconds)
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => copyToClipboard(script.hook, "hook")}
-                          >
-                            {copiedSection === "hook" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                        <p className="text-foreground font-medium">{script.hook}</p>
-                      </div>
-
-                      {/* Introduction */}
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-muted-foreground">Introduction</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => copyToClipboard(script.introduction, "intro")}
-                          >
-                            {copiedSection === "intro" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                        <p className="text-sm">{script.introduction}</p>
-                      </div>
-
-                      {/* Sections */}
-                      <div className="space-y-3">
-                        <span className="text-sm font-medium text-muted-foreground">Main Content</span>
-                      {(script.sections || []).map((section, index) => (
-                          <div key={index} className="glass rounded-xl overflow-hidden">
-                            <button
-                              onClick={() => toggleSection(index)}
-                              className="w-full flex items-center justify-between p-4 hover:bg-secondary/50 transition-colors"
-                            >
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-mono text-primary bg-primary/10 px-2 py-1 rounded">
-                                  {section.timestamp}
+                      <div className="space-y-6">
+                        <h3 className="font-display text-lg font-semibold">Main Content</h3>
+                        {getDocumentedBlocks(script).map((block, index) => (
+                          <div key={index} className="space-y-2">
+                            <div className="flex items-center gap-3">
+                              <h4 className="font-semibold text-base">{block.title}</h4>
+                              {block.subtitle ? (
+                                <span className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded">
+                                  {block.subtitle}
                                 </span>
-                                <span className="font-medium">{section.title}</span>
-                              </div>
-                              {expandedSections.has(index) ? (
-                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </button>
-                            <AnimatePresence>
-                              {expandedSections.has(index) && (
-                                <motion.div
-                                  initial={{ height: 0, opacity: 0 }}
-                                  animate={{ height: "auto", opacity: 1 }}
-                                  exit={{ height: 0, opacity: 0 }}
-                                  className="border-t border-border"
-                                >
-                                  <div className="p-4 space-y-3">
-                                    <p className="text-sm whitespace-pre-wrap">{section.content}</p>
-                                    {section.notes && (
-                                      <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 border border-warning/20">
-                                        <Lightbulb className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-                                        <p className="text-xs text-muted-foreground">{section.notes}</p>
-                                      </div>
-                                    )}
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => copyToClipboard(section.content, `section-${index}`)}
-                                    >
-                                      {copiedSection === `section-${index}` ? (
-                                        <Check className="h-4 w-4 mr-2" />
-                                      ) : (
-                                        <Copy className="h-4 w-4 mr-2" />
-                                      )}
-                                      Copy Section
-                                    </Button>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
+                              ) : null}
+                            </div>
+                            <p className="text-sm whitespace-pre-wrap text-foreground">
+                              {block.content}
+                            </p>
                           </div>
                         ))}
-                      </div>
-
-                      {/* Conclusion */}
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-muted-foreground">Conclusion</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => copyToClipboard(script.conclusion, "conclusion")}
-                          >
-                            {copiedSection === "conclusion" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                        <p className="text-sm">{script.conclusion}</p>
-                      </div>
-
-                      {/* CTA */}
-                      <div className="p-4 rounded-xl bg-accent/10 border border-accent/20">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-medium text-accent uppercase tracking-wider">
-                            Call to Action
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => copyToClipboard(script.callToAction, "cta")}
-                          >
-                            {copiedSection === "cta" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                        <p className="text-foreground">{script.callToAction}</p>
-                      </div>
-
-                      {/* Tips */}
-                      {(script.tips || []).length > 0 && (
-                        <div className="space-y-2">
-                          <span className="text-sm font-medium text-muted-foreground">Pro Tips</span>
-                          <div className="flex flex-wrap gap-2">
-                            {script.tips.map((tip, index) => (
-                              <span
-                                key={index}
-                                className="text-xs px-3 py-1.5 rounded-full bg-secondary text-muted-foreground"
-                              >
-                                💡 {tip}
-                              </span>
-                            ))}
+                      </div>}
                           </div>
                         </div>
                       )}
@@ -617,3 +491,6 @@ Estimated Duration: ${data.estimatedDuration}${tips}
 };
 
 export default ScriptWriter;
+
+
+

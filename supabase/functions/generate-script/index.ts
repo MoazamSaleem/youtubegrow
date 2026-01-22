@@ -151,13 +151,20 @@ serve(async (req) => {
         }
       }
 
-      const block = (pattern: RegExp) =>
-        normalized.match(pattern)?.[0]?.replace(/^\[[^\]]*\]\s*/i, "").trim() || "";
+      const stopTag =
+        "(INTRO|INTRODUCTION|SECTION|CALL TO ACTION|FINAL SUMMARY|CONCLUSION|END)";
+      const extractBlock = (start: string, stop = stopTag) => {
+        const regex = new RegExp(`\\[${start}[^\\]]*\\][\\s\\S]*?(?=\\n\\[${stop}\\b|$)`, "i");
+        return normalized
+          .match(regex)?.[0]
+          ?.replace(new RegExp(`^\\[${start}[^\\]]*\\]\\s*`, "i"), "")
+          .trim() || "";
+      };
 
-      const hook = block(/\[HOOK[^\]]*\][\s\S]*?(?=\n\[|$)/i);
-      const introduction = block(/\[(INTRO|INTRODUCTION)[^\]]*\][\s\S]*?(?=\n\[|$)/i);
-      const conclusion = block(/\[(FINAL SUMMARY \+ CLOSING|CONCLUSION)[^\]]*\][\s\S]*?(?=\n\[|$)/i);
-      const callToAction = block(/\[CALL TO ACTION[^\]]*\][\s\S]*?(?=\n\[|$)/i);
+      const hook = extractBlock("HOOK");
+      const introduction = extractBlock("INTRO|INTRODUCTION");
+      const conclusion = extractBlock("FINAL SUMMARY \\+ CLOSING|CONCLUSION", "CALL TO ACTION|END");
+      const callToAction = extractBlock("CALL TO ACTION", "FINAL SUMMARY|CONCLUSION|END");
 
       const sectionRegex = /\[SECTION[^\]]*\][\s\S]*?(?=\n\[SECTION|\n\[CALL TO ACTION|\n\[FINAL SUMMARY|\n\[CONCLUSION|\n\[END\]|\n$)/gi;
       const sections = Array.from(normalized.matchAll(sectionRegex)).map((match) => {
