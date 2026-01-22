@@ -88,8 +88,48 @@ serve(async (req) => {
       });
     }
 
+    const extractChannelHint = (url: string) => {
+      try {
+        const parsed = new URL(url);
+        const path = parsed.pathname;
+        if (path.includes("/@")) {
+          return path.split("/@")[1]?.split("/")[0];
+        }
+        if (path.includes("/channel/")) {
+          return path.split("/channel/")[1]?.split("/")[0];
+        }
+        if (path.includes("/c/")) {
+          return path.split("/c/")[1]?.split("/")[0];
+        }
+        return undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    let channelMeta: { title?: string; author?: string; authorUrl?: string } = {};
+    try {
+      const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(competitorChannelUrl)}&format=json`;
+      const metaResponse = await fetch(oembedUrl);
+      if (metaResponse.ok) {
+        const meta = await metaResponse.json();
+        channelMeta = {
+          title: typeof meta.title === "string" ? meta.title : undefined,
+          author: typeof meta.author_name === "string" ? meta.author_name : undefined,
+          authorUrl: typeof meta.author_url === "string" ? meta.author_url : undefined,
+        };
+      }
+    } catch {
+      // Ignore metadata fetch issues
+    }
+
+    const channelHint = extractChannelHint(competitorChannelUrl);
     const promptInput = [
       `Competitor Channel Link: ${competitorChannelUrl}`,
+      channelHint ? `Channel Handle/ID: ${channelHint}` : undefined,
+      channelMeta.title ? `Channel Title: ${channelMeta.title}` : undefined,
+      channelMeta.author ? `Channel Author: ${channelMeta.author}` : undefined,
+      channelMeta.authorUrl ? `Channel Author URL: ${channelMeta.authorUrl}` : undefined,
       niche ? `Niche: ${niche}` : undefined,
       yourChannelInfo ? `Your Channel Context: ${yourChannelInfo}` : undefined,
     ]
@@ -156,7 +196,34 @@ serve(async (req) => {
       }
     };
 
-    const analysis = parseAnalysisPayload(content);
+    const parsed = parseAnalysisPayload(content);
+    const rawAnalysis = parsed?.analysis ? parsed.analysis : parsed;
+    const normalizeList = (value: unknown) => (Array.isArray(value) ? value : []);
+    const channelOverview = rawAnalysis?.channelOverview || rawAnalysis?.channel_overview || {};
+    const contentStrategy = rawAnalysis?.contentStrategy || rawAnalysis?.content_strategy || {};
+    const fallbackNiche = niche || "General content";
+
+    const analysis = {
+      channelOverview: {
+        estimatedNiche: channelOverview.estimatedNiche ?? fallbackNiche,
+        contentStyle: channelOverview.contentStyle ?? "Not specified",
+        targetAudience: channelOverview.targetAudience ?? "Not specified",
+        uniqueSellingPoint: channelOverview.uniqueSellingPoint ?? "Not specified",
+      },
+      contentStrategy: {
+        uploadFrequency: contentStrategy.uploadFrequency ?? "Not specified",
+        videoFormats: normalizeList(contentStrategy.videoFormats),
+        averageLength: contentStrategy.averageLength ?? "Not specified",
+        topPerformingTopics: normalizeList(contentStrategy.topPerformingTopics),
+      },
+      strengths: normalizeList(rawAnalysis?.strengths),
+      weaknesses: normalizeList(rawAnalysis?.weaknesses),
+      contentGaps: normalizeList(rawAnalysis?.contentGaps || rawAnalysis?.content_gaps),
+      actionableInsights: normalizeList(rawAnalysis?.actionableInsights || rawAnalysis?.actionable_insights),
+      titleFormulas: normalizeList(rawAnalysis?.titleFormulas || rawAnalysis?.title_formulas),
+      thumbnailStyle: rawAnalysis?.thumbnailStyle || rawAnalysis?.thumbnail_style || "Not specified",
+      engagementTactics: normalizeList(rawAnalysis?.engagementTactics || rawAnalysis?.engagement_tactics),
+    };
 
     const { error: saveError } = await supabaseClient
       .from("competitor_analysis_results")
