@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { canAccessFeature } from "@/lib/planLimits";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Users,
   Menu,
@@ -67,22 +68,32 @@ interface CompetitorAnalysis {
   engagementTactics: string[];
 }
 
+interface SavedCompetitor {
+  id: string;
+  channel_url: string;
+  created_at: string;
+}
+
 const CompetitorAnalysisPage = () => {
   const { user, subscription, loading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [analysis, setAnalysis] = useState<CompetitorAnalysis | null>(null);
+  const [savedCompetitors, setSavedCompetitors] = useState<SavedCompetitor[]>([]);
 
   const [formData, setFormData] = useState({
-    competitorChannel: "",
+    competitorChannelUrl: "",
     niche: "",
     yourChannelInfo: "",
   });
 
   const currentPlan = subscription?.plan || "free";
   const hasAccess = canAccessFeature(currentPlan, "competitorAnalysisFrequency");
+  const saveLimit = currentPlan === "pro" ? 3 : currentPlan === "advanced" ? 5 : 0;
+  const hasSaveAccess = saveLimit > 0;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -90,11 +101,32 @@ const CompetitorAnalysisPage = () => {
     }
   }, [user, loading, navigate]);
 
+  useEffect(() => {
+    if (user) {
+      fetchSavedCompetitors();
+    }
+  }, [user]);
+
+  const fetchSavedCompetitors = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("competitor_channels")
+      .select("id, channel_url, created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to load competitors:", error);
+      return;
+    }
+
+    setSavedCompetitors(data || []);
+  };
+
   const handleAnalyze = async () => {
-    if (!formData.competitorChannel.trim()) {
+    if (!formData.competitorChannelUrl.trim()) {
       toast({
-        title: "Channel name required",
-        description: "Please enter a competitor channel name",
+        title: "Channel link required",
+        description: "Please enter a competitor channel link",
         variant: "destructive",
       });
       return;
@@ -113,13 +145,18 @@ const CompetitorAnalysisPage = () => {
     setAnalysis(null);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-competitor`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify(formData),
         }
@@ -146,6 +183,68 @@ const CompetitorAnalysisPage = () => {
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const handleSaveCompetitor = async () => {
+    if (!formData.competitorChannelUrl.trim()) {
+      toast({
+        title: "Channel link required",
+        description: "Please enter a competitor channel link",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!hasSaveAccess) {
+      toast({
+        title: "Upgrade Required",
+        description: "Save competitors on Pro (3) or Advanced (5) plans.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (savedCompetitors.length >= saveLimit) {
+      toast({
+        title: "Competitor limit reached",
+        description: `You can save up to ${saveLimit} competitors on your plan.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const normalizedUrl = formData.competitorChannelUrl.trim();
+    if (savedCompetitors.some((item) => item.channel_url === normalizedUrl)) {
+      toast({
+        title: "Already saved",
+        description: "This competitor is already in your list.",
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    const { error } = await supabase.from("competitor_channels").insert({
+      user_id: user?.id,
+      channel_url: normalizedUrl,
+    });
+
+    if (error) {
+      console.error("Failed to save competitor:", error);
+      toast({
+        title: "Save failed",
+        description: "Unable to save competitor right now.",
+        variant: "destructive",
+      });
+      setIsSaving(false);
+      return;
+    }
+
+    await fetchSavedCompetitors();
+    setIsSaving(false);
+    toast({
+      title: "Competitor saved",
+      description: "Saved to your competitor list.",
+    });
   };
 
   const getPriorityColor = (priority: string) => {
@@ -241,14 +340,14 @@ const CompetitorAnalysisPage = () => {
               >
                 <div className="grid md:grid-cols-3 gap-6">
                   <div className="space-y-2">
-                    <Label htmlFor="competitor">Competitor Channel Name *</Label>
+                    <Label htmlFor="competitor">Competitor Channel Link *</Label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="competitor"
-                        placeholder="E.g., MrBeast"
-                        value={formData.competitorChannel}
-                        onChange={(e) => setFormData({ ...formData, competitorChannel: e.target.value })}
+                        placeholder="E.g., https://www.youtube.com/@MrBeast"
+                        value={formData.competitorChannelUrl}
+                        onChange={(e) => setFormData({ ...formData, competitorChannelUrl: e.target.value })}
                         className="pl-10"
                       />
                     </div>
@@ -275,10 +374,27 @@ const CompetitorAnalysisPage = () => {
                   </div>
                 </div>
 
-                <div className="mt-6 flex justify-end">
+                <div className="mt-6 flex flex-wrap justify-end gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={handleSaveCompetitor}
+                    disabled={isSaving || !formData.competitorChannelUrl.trim() || !hasSaveAccess}
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Save Competitor
+                      </>
+                    )}
+                  </Button>
                   <Button
                     onClick={handleAnalyze}
-                    disabled={isAnalyzing || !formData.competitorChannel.trim()}
+                    disabled={isAnalyzing || !formData.competitorChannelUrl.trim()}
                     size="lg"
                   >
                     {isAnalyzing ? (
@@ -295,6 +411,52 @@ const CompetitorAnalysisPage = () => {
                   </Button>
                 </div>
               </motion.div>
+
+              {hasSaveAccess && (
+                <div className="glass rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="font-display text-lg font-bold">Saved Competitors</h2>
+                    <span className="text-xs text-muted-foreground">
+                      {savedCompetitors.length}/{saveLimit}
+                    </span>
+                  </div>
+                  {savedCompetitors.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Save competitor links to reuse them later.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {savedCompetitors.map((competitor) => (
+                        <div
+                          key={competitor.id}
+                          className="flex items-center justify-between gap-3 rounded-xl bg-secondary/50 px-4 py-3"
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                competitorChannelUrl: competitor.channel_url,
+                              }))
+                            }
+                            className="text-left text-sm font-medium text-foreground truncate"
+                          >
+                            {competitor.channel_url}
+                          </button>
+                          <a
+                            href={competitor.channel_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center text-xs text-primary"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Results */}
               {isAnalyzing ? (

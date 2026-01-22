@@ -201,6 +201,35 @@ export type Database = {
           },
         ]
       }
+      competitor_channels: {
+        Row: {
+          channel_url: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          channel_url: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          channel_url?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_channels_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       growth_tasks: {
         Row: {
           category: string

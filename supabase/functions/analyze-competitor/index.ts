@@ -43,11 +43,11 @@ serve(async (req) => {
     const userId = claimsData.claims.sub as string;
     console.log('Authenticated user:', userId);
 
-    const { competitorChannel, niche, yourChannelInfo } = await req.json();
+    const { competitorChannelUrl, niche, yourChannelInfo } = await req.json();
     
     // Input validation
-    if (!competitorChannel || typeof competitorChannel !== 'string' || competitorChannel.length > 500) {
-      return new Response(JSON.stringify({ error: "Competitor channel name is required (max 500 chars)" }), {
+    if (!competitorChannelUrl || typeof competitorChannelUrl !== 'string' || competitorChannelUrl.length > 500) {
+      return new Response(JSON.stringify({ error: "Competitor channel link is required (max 500 chars)" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -89,7 +89,7 @@ serve(async (req) => {
 
     const prompt = `Perform a strategic competitor analysis for a YouTube channel in the ${niche || "general content"} niche.
 
-Competitor Channel to Analyze: ${competitorChannel}
+Competitor Channel Link to Analyze: ${competitorChannelUrl}
 ${yourChannelInfo ? `My Channel Context: ${yourChannelInfo}` : ""}
 
 Provide a comprehensive analysis in the following JSON format:
