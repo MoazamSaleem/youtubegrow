@@ -138,11 +138,11 @@ serve(async (req) => {
 
     const promptInput = [
       stepIndex ? `Step: ${stepIndex}` : undefined,
-      "Return ONLY JSON matching the schema. Do not include commentary.",
+      "Return ONLY JSON matching the schema. No prose. No markdown.",
       "Only create tasks that are verifiable via YouTube API metrics.",
       "Allowed metrics: subscribers, videos, views_total, views_28d, watch_minutes_365, avg_view_duration_28d, subscribers_gained_28d, uploads_30d.",
       "Return each task with fields: title, description, category, difficulty, token_reward, xp_reward, verification_metric, verification_operator, verification_threshold, verification_window_days.",
-      "Each task must be realistically achievable and measurable within verification_window_days.",
+      "Do not return empty task arrays. Return at least 5 tasks.",
       channelText ? `Channel analysis: ${channelText}` : "Channel analysis: (not provided)",
       competitorText ? `Competitor analysis: ${competitorText}` : "Competitor analysis: (not provided)",
     ]
@@ -157,11 +157,10 @@ serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          // Use a structured-output capable model
-          model: "gpt-4o-mini-2024-07-18",
+          // Use a model that supports structured outputs in Responses API
+          model: "gpt-4.1",
           prompt: { id: PROMPT_ID },
           input,
-          // Force strict JSON that matches schema (prevents parse errors + empty task arrays)
           response_format: { type: "json_schema", json_schema: TASK_SCHEMA },
         }),
       });
@@ -171,37 +170,37 @@ serve(async (req) => {
         console.error("Growth task AI error:", r.status, errorText);
         throw new Error("Failed to generate growth tasks");
       }
+
       return await r.json();
     };
 
-    const extractContentText = (data: any) => {
-      // Most common
-      if (typeof data?.output_text === "string" && data.output_text.trim()) return data.output_text;
-
-      // Responses API output blocks
-      const fromBlocks =
+    // ✅ Extract either output_json (preferred) OR output_text (fallback)
+    const extractStructuredOrText = (data: any): { json?: any; text?: string } => {
+      // 1) Structured output blocks (most reliable with response_format json_schema)
+      const jsonPart =
         data?.output
-          ?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
-            item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
-          )
-          .find(Boolean) ?? null;
+          ?.flatMap((item: any) => item?.content ?? [])
+          ?.find((part: any) => part?.type === "output_json" && part?.json);
 
-      if (typeof fromBlocks === "string" && fromBlocks.trim()) return fromBlocks;
+      if (jsonPart?.json) return { json: jsonPart.json };
 
-      // Some variants return content[].text directly
-      const alt =
+      // 2) output_text (some responses still use this)
+      if (typeof data?.output_text === "string" && data.output_text.trim()) {
+        return { text: data.output_text };
+      }
+
+      // 3) output blocks with output_text
+      const textPart =
         data?.output
-          ?.flatMap((item: { content?: Array<{ text?: string }> }) => item.content?.map((p) => p.text))
-          .find((t: any) => typeof t === "string" && t.trim()) ?? null;
+          ?.flatMap((item: any) => item?.content ?? [])
+          ?.find((part: any) => part?.type === "output_text" && typeof part?.text === "string" && part.text.trim());
 
-      if (typeof alt === "string" && alt.trim()) return alt;
+      if (textPart?.text) return { text: textPart.text };
 
-      return "";
+      return {};
     };
 
-    const parsePayload = (text: string) => {
-      // With response_format json_schema strict, this should always succeed.
-      // Still keep a few fallbacks for safety.
+    const parsePayloadFromText = (text: string) => {
       try {
         return JSON.parse(text);
       } catch {
@@ -215,28 +214,41 @@ serve(async (req) => {
 
     let parsed: any;
 
-    // First attempt (structured outputs)
+    // First attempt
     try {
       const aiData = await callAI(promptInput);
-      const content = extractContentText(aiData);
-      if (!content) throw new Error("No content received from AI");
-      parsed = parsePayload(content);
+      const extracted = extractStructuredOrText(aiData);
+
+      if (extracted.json) {
+        parsed = extracted.json; // ✅ already an object with tasks
+      } else if (extracted.text) {
+        parsed = parsePayloadFromText(extracted.text);
+      } else {
+        throw new Error("No content received from AI");
+      }
     } catch (error) {
-      // Retry with an even stricter prompt (still using structured outputs)
+      // Retry attempt (still structured outputs)
       const retryPrompt = [
-        "You must return ONLY valid JSON and MUST include at least 5 tasks.",
-        "No prose. No markdown. No code fences. No extra keys.",
+        "Return ONLY JSON matching the schema. Must include at least 8 tasks.",
+        "No extra keys, no commentary.",
         promptInput,
       ].join("\n\n");
 
       const retryData = await callAI(retryPrompt);
-      const retryContent = extractContentText(retryData);
-      if (!retryContent) throw error;
-      parsed = parsePayload(retryContent);
+      const extracted = extractStructuredOrText(retryData);
+
+      if (extracted.json) {
+        parsed = extracted.json;
+      } else if (extracted.text) {
+        parsed = parsePayloadFromText(extracted.text);
+      } else {
+        throw error;
+      }
     }
 
     const rawTasks = normalizeList(parsed?.tasks ?? parsed?.growthTasks ?? parsed);
     if (rawTasks.length === 0) {
+      console.error("AI parsed payload (debug):", parsed);
       throw new Error("No tasks returned by AI");
     }
 
@@ -269,24 +281,22 @@ serve(async (req) => {
       const numberMatch = lower.match(/(\d+([,.]\d+)?)/);
       const value = numberMatch ? Number(numberMatch[1].replace(/,/g, "")) : undefined;
 
-      if (lower.includes("subscriber")) return { metric: "subscribers", threshold: value ?? 100 };
-      if (lower.includes("video")) return { metric: "videos", threshold: value ?? 1 };
+      if (lower.includes("subscriber")) return { metric: "subscribers", threshold: value ?? 50 };
+      if (lower.includes("videos")) return { metric: "videos", threshold: value ?? 1 };
       if (lower.includes("watch hour")) return { metric: "watch_minutes_365", threshold: value ? value * 60 : 600 };
       if (lower.includes("avg view") || lower.includes("average view") || lower.includes("duration"))
         return { metric: "avg_view_duration_28d", threshold: value ?? 30 };
       if (lower.includes("subscribers gained") || lower.includes("gained"))
         return { metric: "subscribers_gained_28d", threshold: value ?? 25 };
       if (lower.includes("upload")) return { metric: "uploads_30d", threshold: value ?? 2 };
-      if (lower.includes("view")) return { metric: "views_28d", threshold: value ?? 1000 };
+      if (lower.includes("view")) return { metric: "views_28d", threshold: value ?? 500 };
 
-      return { metric: "views_28d", threshold: 500 };
+      return { metric: "views_28d", threshold: 250 };
     };
 
     const tasksToInsert = rawTasks.map((task: any, index: number) => {
       const title = String(task.title ?? task.name ?? `Growth Task ${index + 1}`);
       const inferred = inferMetric(title);
-
-      // Ensure window days always has a default (prevents null downstream)
       const windowDays = Number(task.verification_window_days ?? task.window_days ?? 28);
 
       return {
