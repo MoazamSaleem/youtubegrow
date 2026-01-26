@@ -139,41 +139,45 @@ serve(async (req) => {
       .filter(Boolean)
       .join("\n");
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${ANALYSIS_AI_API}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        prompt: { id: COMPETITOR_PROMPT_ID },
-        input: promptInput,
-      }),
-    });
-
-    if (!response.ok) {
-      await refundCredits(userId, creditCheck.cost!, "OpenAI API error - refund");
-      
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const errorText = await response.text();
-      console.error("OpenAI API error:", response.status, errorText);
-      return new Response(JSON.stringify({ error: "Failed to analyze competitor" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const callCompetitorAI = async (input: string) => {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ANALYSIS_AI_API}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: { id: COMPETITOR_PROMPT_ID },
+          input,
+        }),
       });
-    }
 
-    const data = await response.json();
-    const content =
+      if (!response.ok) {
+        await refundCredits(userId, creditCheck.cost!, "OpenAI API error - refund");
+
+        if (response.status === 429) {
+          throw new Error("Rate limit exceeded. Please try again later.");
+        }
+        const errorText = await response.text();
+        console.error("OpenAI API error:", response.status, errorText);
+        throw new Error("Failed to analyze competitor");
+      }
+
+      return response.json();
+    };
+
+    const responseData = await callCompetitorAI(promptInput);
+
+    const extractContent = (data: any) =>
       data.output_text ||
       data.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
         item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
       ).find(Boolean);
+
+    let content = extractContent(responseData);
+    if (!content) {
+      throw new Error("No content received from AI");
+    }
     
     if (!content) {
       throw new Error("No content received from AI");
@@ -227,6 +231,61 @@ serve(async (req) => {
       thumbnailStyle: rawAnalysis?.thumbnailStyle || rawAnalysis?.thumbnail_style || "Not specified",
       engagementTactics: normalizeList(rawAnalysis?.engagementTactics || rawAnalysis?.engagement_tactics),
     };
+
+    const hasMeaningfulData =
+      analysis.channelOverview.estimatedNiche !== "Not specified" ||
+      analysis.channelOverview.contentStyle !== "Not specified" ||
+      analysis.channelOverview.targetAudience !== "Not specified" ||
+      analysis.channelOverview.uniqueSellingPoint !== "Not specified" ||
+      analysis.contentStrategy.uploadFrequency !== "Not specified" ||
+      analysis.contentStrategy.averageLength !== "Not specified" ||
+      analysis.contentStrategy.videoFormats.length > 0 ||
+      analysis.contentStrategy.topPerformingTopics.length > 0 ||
+      analysis.strengths.length > 0 ||
+      analysis.weaknesses.length > 0 ||
+      analysis.contentGaps.length > 0 ||
+      analysis.actionableInsights.length > 0 ||
+      analysis.titleFormulas.length > 0 ||
+      analysis.engagementTactics.length > 0;
+
+    if (!hasMeaningfulData) {
+      const retryInput = `${promptInput}\n\nIMPORTANT: Return a fully populated JSON with all required keys. Do not leave any field empty or "Not specified". Infer reasonable values from the channel handle, title, and niche if needed.`;
+      const retryData = await callCompetitorAI(retryInput);
+      const retryContent = extractContent(retryData);
+      if (retryContent) {
+        const retryParsed = parseAnalysisPayload(retryContent);
+        const retryRaw = retryParsed?.analysis ? retryParsed.analysis : retryParsed;
+        const retryChannel = retryRaw?.channelOverview || retryRaw?.channel_overview || {};
+        const retryStrategy = retryRaw?.contentStrategy || retryRaw?.content_strategy || {};
+        const retryVideoFormats = normalizeList(retryStrategy.videoFormats);
+        const retryTopTopics = normalizeList(retryStrategy.topPerformingTopics);
+        const retryStrengths = normalizeList(retryRaw?.strengths);
+        const retryWeaknesses = normalizeList(retryRaw?.weaknesses);
+        const retryGaps = normalizeList(retryRaw?.contentGaps || retryRaw?.content_gaps);
+        const retryInsights = normalizeList(retryRaw?.actionableInsights || retryRaw?.actionable_insights);
+        const retryFormulas = normalizeList(retryRaw?.titleFormulas || retryRaw?.title_formulas);
+        const retryTactics = normalizeList(retryRaw?.engagementTactics || retryRaw?.engagement_tactics);
+        analysis.channelOverview = {
+          estimatedNiche: retryChannel.estimatedNiche ?? analysis.channelOverview.estimatedNiche,
+          contentStyle: retryChannel.contentStyle ?? analysis.channelOverview.contentStyle,
+          targetAudience: retryChannel.targetAudience ?? analysis.channelOverview.targetAudience,
+          uniqueSellingPoint: retryChannel.uniqueSellingPoint ?? analysis.channelOverview.uniqueSellingPoint,
+        };
+        analysis.contentStrategy = {
+          uploadFrequency: retryStrategy.uploadFrequency ?? analysis.contentStrategy.uploadFrequency,
+          videoFormats: retryVideoFormats.length ? retryVideoFormats : analysis.contentStrategy.videoFormats,
+          averageLength: retryStrategy.averageLength ?? analysis.contentStrategy.averageLength,
+          topPerformingTopics: retryTopTopics.length ? retryTopTopics : analysis.contentStrategy.topPerformingTopics,
+        };
+        analysis.strengths = retryStrengths.length ? retryStrengths : analysis.strengths;
+        analysis.weaknesses = retryWeaknesses.length ? retryWeaknesses : analysis.weaknesses;
+        analysis.contentGaps = retryGaps.length ? retryGaps : analysis.contentGaps;
+        analysis.actionableInsights = retryInsights.length ? retryInsights : analysis.actionableInsights;
+        analysis.titleFormulas = retryFormulas.length ? retryFormulas : analysis.titleFormulas;
+        analysis.thumbnailStyle = retryRaw?.thumbnailStyle || retryRaw?.thumbnail_style || analysis.thumbnailStyle;
+        analysis.engagementTactics = retryTactics.length ? retryTactics : analysis.engagementTactics;
+      }
+    }
 
     const { error: saveError } = await supabaseClient
       .from("competitor_analysis_results")
