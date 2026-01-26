@@ -78,6 +78,9 @@ interface Perk {
 interface RecurringCompletion {
   task_id: string;
   period_start: string;
+  verified_at: string | null;
+  claimed_at: string | null;
+  completed_at: string | null;
 }
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -100,7 +103,7 @@ const GrowthTasks = () => {
   const [tasks, setTasks] = useState<GrowthTask[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [perks, setPerks] = useState<Perk[]>([]);
-  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
+  const [taskProgress, setTaskProgress] = useState<Record<string, { verified_at: string | null; claimed_at: string | null }>>({});
   const [recurringCompletions, setRecurringCompletions] = useState<RecurringCompletion[]>([]);
   const [unlockedMilestoneIds, setUnlockedMilestoneIds] = useState<Set<string>>(new Set());
   const [claimedMilestoneIds, setClaimedMilestoneIds] = useState<Set<string>>(new Set());
@@ -150,11 +153,19 @@ const GrowthTasks = () => {
     };
   };
 
-  const isRecurringTaskCompleted = (task: GrowthTask) => {
+  const isRecurringTaskVerified = (task: GrowthTask) => {
     if (!task.is_recurring || !task.reset_frequency) return false;
     const { periodStart } = getCurrentPeriod(task.reset_frequency);
     return recurringCompletions.some(
-      (c) => c.task_id === task.id && c.period_start === periodStart
+      (c) => c.task_id === task.id && c.period_start === periodStart && Boolean(c.verified_at)
+    );
+  };
+
+  const isRecurringTaskClaimed = (task: GrowthTask) => {
+    if (!task.is_recurring || !task.reset_frequency) return false;
+    const { periodStart } = getCurrentPeriod(task.reset_frequency);
+    return recurringCompletions.some(
+      (c) => c.task_id === task.id && c.period_start === periodStart && Boolean(c.claimed_at)
     );
   };
 
@@ -187,17 +198,27 @@ const GrowthTasks = () => {
       // Fetch user progress for one-time tasks
       const { data: progressData } = await supabase
         .from("user_task_progress")
-        .select("task_id")
-        .eq("user_id", user.id)
-        .not("completed_at", "is", null);
-      setCompletedTaskIds(new Set(progressData?.map((p) => p.task_id) || []));
+        .select("task_id, verified_at, claimed_at, completed_at")
+        .eq("user_id", user.id);
+      const progressMap: Record<string, { verified_at: string | null; claimed_at: string | null }> = {};
+      (progressData || []).forEach((progress) => {
+        const verifiedAt = progress.verified_at ?? progress.completed_at ?? null;
+        const claimedAt = progress.claimed_at ?? progress.completed_at ?? null;
+        progressMap[progress.task_id] = { verified_at: verifiedAt, claimed_at: claimedAt };
+      });
+      setTaskProgress(progressMap);
 
       // Fetch recurring task completions
       const { data: recurringData } = await supabase
         .from("recurring_task_completions")
-        .select("task_id, period_start")
+        .select("task_id, period_start, verified_at, claimed_at, completed_at")
         .eq("user_id", user.id);
-      setRecurringCompletions(recurringData || []);
+      const normalizedRecurring = (recurringData || []).map((item) => ({
+        ...item,
+        verified_at: item.verified_at ?? item.completed_at ?? null,
+        claimed_at: item.claimed_at ?? item.completed_at ?? null,
+      }));
+      setRecurringCompletions(normalizedRecurring);
 
       // Fetch user milestones
       const { data: userMilestonesData } = await supabase
@@ -242,39 +263,117 @@ const GrowthTasks = () => {
     }
   };
 
-  const completeTask = async (task: GrowthTask) => {
+  const verifyTask = async (task: GrowthTask) => {
     if (!user) return;
+    const now = new Date().toISOString();
 
-    // Check if already completed
     if (task.is_recurring) {
-      if (isRecurringTaskCompleted(task)) return;
-    } else {
-      if (completedTaskIds.has(task.id)) return;
+      if (!task.reset_frequency || isRecurringTaskVerified(task)) return;
+      setProcessingTask(task.id);
+      try {
+        const { periodStart, periodEnd } = getCurrentPeriod(task.reset_frequency);
+        const { data: existing } = await supabase
+          .from("recurring_task_completions")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("task_id", task.id)
+          .eq("period_start", periodStart)
+          .maybeSingle();
+
+        if (existing?.id) {
+          await supabase
+            .from("recurring_task_completions")
+            .update({ verified_at: now, completed_at: now })
+            .eq("id", existing.id);
+        } else {
+          await supabase.from("recurring_task_completions").insert({
+            user_id: user.id,
+            task_id: task.id,
+            period_start: periodStart,
+            period_end: periodEnd,
+            verified_at: now,
+            completed_at: now,
+          });
+        }
+
+        await fetchData();
+        toast({ title: "Task Verified", description: "You can now claim the reward." });
+      } catch (error: any) {
+        toast({
+          title: "Error verifying task",
+          description: error.message,
+          variant: "destructive",
+        });
+      } finally {
+        setProcessingTask(null);
+      }
+      return;
     }
 
+    if (taskProgress[task.id]?.verified_at) return;
+    setProcessingTask(task.id);
+    try {
+      await supabase.from("user_task_progress").upsert({
+        user_id: user.id,
+        task_id: task.id,
+        verified_at: now,
+        last_completed_at: now,
+      });
+
+      setTaskProgress((prev) => ({
+        ...prev,
+        [task.id]: {
+          verified_at: now,
+          claimed_at: prev[task.id]?.claimed_at ?? null,
+        },
+      }));
+
+      toast({ title: "Task Verified", description: "You can now claim the reward." });
+    } catch (error: any) {
+      toast({
+        title: "Error verifying task",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingTask(null);
+    }
+  };
+
+  const claimTask = async (task: GrowthTask) => {
+    if (!user) return;
+    const now = new Date().toISOString();
+
+    const isVerified = task.is_recurring
+      ? isRecurringTaskVerified(task)
+      : Boolean(taskProgress[task.id]?.verified_at);
+    const isClaimed = task.is_recurring
+      ? isRecurringTaskClaimed(task)
+      : Boolean(taskProgress[task.id]?.claimed_at);
+
+    if (!isVerified || isClaimed) return;
     setProcessingTask(task.id);
 
     try {
       if (task.is_recurring && task.reset_frequency) {
-        // Handle recurring task
-        const { periodStart, periodEnd } = getCurrentPeriod(task.reset_frequency);
-        await supabase.from("recurring_task_completions").insert({
-          user_id: user.id,
-          task_id: task.id,
-          period_start: periodStart,
-          period_end: periodEnd,
-        });
-        setRecurringCompletions([...recurringCompletions, { task_id: task.id, period_start: periodStart }]);
+        const { periodStart } = getCurrentPeriod(task.reset_frequency);
+        await supabase
+          .from("recurring_task_completions")
+          .update({ claimed_at: now })
+          .eq("user_id", user.id)
+          .eq("task_id", task.id)
+          .eq("period_start", periodStart);
       } else {
-        // Handle one-time task
-        await supabase.from("user_task_progress").upsert({
-          user_id: user.id,
-          task_id: task.id,
-          completed_at: new Date().toISOString(),
-          last_completed_at: new Date().toISOString(),
-          completion_count: 1,
-        });
-        setCompletedTaskIds(new Set([...completedTaskIds, task.id]));
+        await supabase
+          .from("user_task_progress")
+          .update({
+            claimed_at: now,
+            completed_at: now,
+            last_completed_at: now,
+            completion_count: 1,
+          })
+          .eq("user_id", user.id)
+          .eq("task_id", task.id);
       }
 
       // Update tokens
@@ -288,22 +387,21 @@ const GrowthTasks = () => {
           balance: newBalance,
           current_xp: newXp,
           total_earned: newTotalEarned,
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         })
         .eq("user_id", user.id);
 
       setUserTokens({ ...userTokens, balance: newBalance, current_xp: newXp, total_earned: newTotalEarned });
-
-      // Check for milestone unlocks
+      await fetchData();
       await checkMilestoneUnlocks(newXp);
 
       toast({
-        title: "Task Completed!",
+        title: "Reward Claimed!",
         description: `+${task.token_reward} tokens, +${task.xp_reward} XP`,
       });
     } catch (error: any) {
       toast({
-        title: "Error completing task",
+        title: "Error claiming reward",
         description: error.message,
         variant: "destructive",
       });
@@ -453,6 +551,9 @@ const GrowthTasks = () => {
 
   const nextMilestone = getNextMilestone();
   const progressToNext = nextMilestone ? (userTokens.current_xp / nextMilestone.required_xp) * 100 : 100;
+  const claimedOneTimeCount = Object.values(taskProgress).filter((progress) => progress.claimed_at).length;
+  const claimedRecurringCount = recurringCompletions.filter((completion) => completion.claimed_at).length;
+  const totalTasksDone = claimedOneTimeCount + claimedRecurringCount;
 
   // Separate tasks by type
   const oneTimeTasks = tasks.filter((t) => !t.is_recurring);
@@ -551,7 +652,7 @@ const GrowthTasks = () => {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Tasks Done</p>
-                  <p className="text-2xl font-bold">{completedTaskIds.size}</p>
+                  <p className="text-2xl font-bold">{totalTasksDone}</p>
                 </div>
               </div>
             </motion.div>
@@ -656,17 +757,21 @@ const GrowthTasks = () => {
                       {oneTimeTasks
                         .filter((t) => t.tier === tier)
                         .map((task, index) => {
-                          const isCompleted = completedTaskIds.has(task.id);
+                          const progress = taskProgress[task.id];
+                          const isVerified = Boolean(progress?.verified_at);
+                          const isClaimed = Boolean(progress?.claimed_at);
                           const isLocked = !canAccessTier(tier);
 
                           return (
                             <TaskCard
                               key={task.id}
                               task={task}
-                              isCompleted={isCompleted}
+                              isVerified={isVerified}
+                              isClaimed={isClaimed}
                               isLocked={isLocked}
                               isProcessing={processingTask === task.id}
-                              onComplete={() => completeTask(task)}
+                              onVerify={() => verifyTask(task)}
+                              onClaim={() => claimTask(task)}
                               getDifficultyColor={getDifficultyColor}
                               index={index}
                             />
@@ -689,17 +794,20 @@ const GrowthTasks = () => {
               </div>
               <div className="grid gap-3">
                 {dailyTasks.map((task, index) => {
-                  const isCompleted = isRecurringTaskCompleted(task);
+                  const isVerified = isRecurringTaskVerified(task);
+                  const isClaimed = isRecurringTaskClaimed(task);
                   const isLocked = !canAccessTier(task.tier);
 
                   return (
                     <TaskCard
                       key={task.id}
                       task={task}
-                      isCompleted={isCompleted}
+                      isVerified={isVerified}
+                      isClaimed={isClaimed}
                       isLocked={isLocked}
                       isProcessing={processingTask === task.id}
-                      onComplete={() => completeTask(task)}
+                      onVerify={() => verifyTask(task)}
+                      onClaim={() => claimTask(task)}
                       getDifficultyColor={getDifficultyColor}
                       index={index}
                       isRecurring
@@ -720,17 +828,20 @@ const GrowthTasks = () => {
               </div>
               <div className="grid gap-3">
                 {weeklyTasks.map((task, index) => {
-                  const isCompleted = isRecurringTaskCompleted(task);
+                  const isVerified = isRecurringTaskVerified(task);
+                  const isClaimed = isRecurringTaskClaimed(task);
                   const isLocked = !canAccessTier(task.tier);
 
                   return (
                     <TaskCard
                       key={task.id}
                       task={task}
-                      isCompleted={isCompleted}
+                      isVerified={isVerified}
+                      isClaimed={isClaimed}
                       isLocked={isLocked}
                       isProcessing={processingTask === task.id}
-                      onComplete={() => completeTask(task)}
+                      onVerify={() => verifyTask(task)}
+                      onClaim={() => claimTask(task)}
                       getDifficultyColor={getDifficultyColor}
                       index={index}
                       isRecurring
@@ -889,10 +1000,12 @@ const GrowthTasks = () => {
 // Task Card Component
 interface TaskCardProps {
   task: GrowthTask;
-  isCompleted: boolean;
+  isVerified: boolean;
+  isClaimed: boolean;
   isLocked: boolean;
   isProcessing: boolean;
-  onComplete: () => void;
+  onVerify: () => void;
+  onClaim: () => void;
   getDifficultyColor: (difficulty: string) => string;
   index: number;
   isRecurring?: boolean;
@@ -900,10 +1013,12 @@ interface TaskCardProps {
 
 const TaskCard = ({
   task,
-  isCompleted,
+  isVerified,
+  isClaimed,
   isLocked,
   isProcessing,
-  onComplete,
+  onVerify,
+  onClaim,
   getDifficultyColor,
   index,
   isRecurring,
@@ -912,12 +1027,12 @@ const TaskCard = ({
     initial={{ opacity: 0, x: -20 }}
     animate={{ opacity: 1, x: 0 }}
     transition={{ delay: index * 0.05 }}
-    className={`glass rounded-xl p-4 ${isCompleted ? "bg-green-500/5 border-green-500/20" : ""} ${isLocked ? "opacity-50" : ""}`}
+    className={`glass rounded-xl p-4 ${isClaimed ? "bg-green-500/5 border-green-500/20" : ""} ${isLocked ? "opacity-50" : ""}`}
   >
     <div className="flex items-center justify-between gap-4">
       <div className="flex items-center gap-4 flex-1">
-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isCompleted ? "bg-green-500" : "bg-muted"}`}>
-          {isCompleted ? (
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isClaimed ? "bg-green-500" : "bg-muted"}`}>
+          {isClaimed ? (
             <Check className="h-5 w-5 text-white" />
           ) : isLocked ? (
             <Lock className="h-5 w-5 text-muted-foreground" />
@@ -933,6 +1048,11 @@ const TaskCard = ({
             {isRecurring && (
               <Badge variant="outline" className="text-xs">
                 {task.reset_frequency}
+              </Badge>
+            )}
+            {isVerified && !isClaimed && !isLocked && (
+              <Badge variant="secondary" className="text-xs">
+                Verified
               </Badge>
             )}
           </div>
@@ -953,17 +1073,22 @@ const TaskCard = ({
         </div>
         <Button
           size="sm"
-          variant={isCompleted ? "outline" : "default"}
-          disabled={isCompleted || isLocked || isProcessing}
-          onClick={onComplete}
+          variant={isClaimed ? "outline" : "default"}
+          disabled={isClaimed || isLocked || isProcessing}
+          onClick={isVerified ? onClaim : onVerify}
         >
           {isProcessing ? (
             <Loader2 className="h-4 w-4 animate-spin" />
-          ) : isCompleted ? (
-            "Done"
+          ) : isClaimed ? (
+            "Claimed"
+          ) : isVerified ? (
+            <>
+              Claim
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </>
           ) : (
             <>
-              Complete
+              Verify
               <ChevronRight className="h-4 w-4 ml-1" />
             </>
           )}

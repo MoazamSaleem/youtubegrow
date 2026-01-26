@@ -411,28 +411,34 @@ export type Database = {
       }
       recurring_task_completions: {
         Row: {
+          claimed_at: string | null
           completed_at: string
           id: string
           period_end: string
           period_start: string
           task_id: string
           user_id: string
+          verified_at: string | null
         }
         Insert: {
+          claimed_at?: string | null
           completed_at?: string
           id?: string
           period_end: string
           period_start: string
           task_id: string
           user_id: string
+          verified_at?: string | null
         }
         Update: {
+          claimed_at?: string | null
           completed_at?: string
           id?: string
           period_end?: string
           period_start?: string
           task_id?: string
           user_id?: string
+          verified_at?: string | null
         }
         Relationships: [
           {
@@ -680,6 +686,7 @@ export type Database = {
       }
       user_task_progress: {
         Row: {
+          claimed_at: string | null
           completed_at: string | null
           completion_count: number
           created_at: string
@@ -687,8 +694,10 @@ export type Database = {
           last_completed_at: string | null
           task_id: string
           user_id: string
+          verified_at: string | null
         }
         Insert: {
+          claimed_at?: string | null
           completed_at?: string | null
           completion_count?: number
           created_at?: string
@@ -696,8 +705,10 @@ export type Database = {
           last_completed_at?: string | null
           task_id: string
           user_id: string
+          verified_at?: string | null
         }
         Update: {
+          claimed_at?: string | null
           completed_at?: string | null
           completion_count?: number
           created_at?: string
@@ -705,6 +716,7 @@ export type Database = {
           last_completed_at?: string | null
           task_id?: string
           user_id?: string
+          verified_at?: string | null
         }
         Relationships: [
           {
