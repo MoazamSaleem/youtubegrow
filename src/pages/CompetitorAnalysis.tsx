@@ -146,6 +146,19 @@ const CompetitorAnalysisPage = () => {
   }, [user, loading, navigate]);
 
   useEffect(() => {
+    if (!user) return;
+    const key = `competitor_analysis_cache:${user.id}`;
+    const cached = localStorage.getItem(key);
+    if (!cached) return;
+    try {
+      const parsed = JSON.parse(cached) as CompetitorAnalysis;
+      setAnalysis(parsed);
+    } catch (error) {
+      console.warn("Failed to load competitor analysis cache:", error);
+    }
+  }, [user]);
+
+  useEffect(() => {
     if (user) {
       fetchSavedCompetitors();
     }
@@ -263,6 +276,12 @@ const CompetitorAnalysisPage = () => {
       };
 
       setAnalysis(normalized);
+      if (user?.id) {
+        localStorage.setItem(
+          `competitor_analysis_cache:${user.id}`,
+          JSON.stringify(normalized)
+        );
+      }
 
       toast({
         title: "Analysis Complete!",
