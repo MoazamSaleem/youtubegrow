@@ -9,68 +9,6 @@ const corsHeaders = {
 
 const normalizeList = (value: unknown) => (Array.isArray(value) ? value : []);
 
-const clampDifficulty = (v: unknown) => {
-  const s = String(v ?? "").toLowerCase();
-  if (s === "easy" || s === "medium" || s === "hard") return s;
-  return "medium";
-};
-
-const TASK_SCHEMA = {
-  name: "growth_tasks_payload",
-  strict: true,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["tasks"],
-    properties: {
-      tasks: {
-        type: "array",
-        minItems: 1,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: [
-            "title",
-            "description",
-            "category",
-            "difficulty",
-            "token_reward",
-            "xp_reward",
-            "verification_metric",
-            "verification_operator",
-            "verification_threshold",
-            "verification_window_days",
-          ],
-          properties: {
-            title: { type: "string", minLength: 1 },
-            description: { type: "string" },
-            category: { type: "string" },
-            difficulty: { type: "string", enum: ["easy", "medium", "hard"] },
-            token_reward: { type: "number" },
-            xp_reward: { type: "number" },
-            verification_metric: {
-              type: "string",
-              enum: [
-                "subscribers",
-                "videos",
-                "views_total",
-                "views_28d",
-                "watch_minutes_365",
-                "avg_view_duration_28d",
-                "subscribers_gained_28d",
-                "uploads_30d",
-              ],
-            },
-            verification_operator: { type: "string", enum: [">="] },
-            verification_threshold: { type: "number" },
-            verification_window_days: { type: "number" },
-          },
-        },
-      },
-    },
-  },
-};
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -130,125 +68,113 @@ serve(async (req) => {
       .order("created_at", { ascending: true });
 
     const channelText = channelAnalysis?.analysis
-      ? JSON.stringify(channelAnalysis.analysis).slice(0, 6000)
+      ? JSON.stringify(channelAnalysis.analysis).slice(0, 3000)
       : "";
     const competitorText = competitorAnalyses?.length
-      ? JSON.stringify(competitorAnalyses.map((item) => item.analysis)).slice(0, 6000)
+      ? JSON.stringify(competitorAnalyses.map((item) => item.analysis)).slice(0, 3000)
       : "";
 
     const promptInput = [
       stepIndex ? `Step: ${stepIndex}` : undefined,
-      "Return ONLY JSON matching the schema. No prose. No markdown.",
       "Only create tasks that are verifiable via YouTube API metrics.",
       "Allowed metrics: subscribers, videos, views_total, views_28d, watch_minutes_365, avg_view_duration_28d, subscribers_gained_28d, uploads_30d.",
       "Return each task with fields: title, description, category, difficulty, token_reward, xp_reward, verification_metric, verification_operator, verification_threshold, verification_window_days.",
-      "Do not return empty task arrays. Return at least 5 tasks.",
-      channelText ? `Channel analysis: ${channelText}` : "Channel analysis: (not provided)",
-      competitorText ? `Competitor analysis: ${competitorText}` : "Competitor analysis: (not provided)",
+      channelText ? `Channel analysis: ${channelText}` : undefined,
+      competitorText ? `Competitor analysis: ${competitorText}` : undefined,
     ]
       .filter(Boolean)
       .join("\n");
 
-    const callAI = async (input: string) => {
-      const r = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ANALYSIS_AI_API}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: { id: PROMPT_ID },
+        input: promptInput,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Growth task AI error:", response.status, errorText);
+      return new Response(JSON.stringify({ error: "Failed to generate growth tasks" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const data = await response.json();
+    const content =
+      data.output_text ||
+      data.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+      ).find(Boolean);
+
+    if (!content) {
+      throw new Error("No content received from AI");
+    }
+
+    const parsePayload = (text: string) => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        const fencedJson = text.match(/```json\s*([\s\S]*?)\s*```/i);
+        if (fencedJson?.[1]) {
+          return JSON.parse(fencedJson[1]);
+        }
+        const fenced = text.match(/```\s*([\s\S]*?)\s*```/);
+        if (fenced?.[1]) {
+          return JSON.parse(fenced[1]);
+        }
+        const arrayMatch = text.match(/\[[\s\S]*\]/);
+        if (arrayMatch?.[0]) {
+          return JSON.parse(arrayMatch[0]);
+        }
+        const objectMatch = text.match(/\{[\s\S]*\}/);
+        if (objectMatch?.[0]) {
+          return JSON.parse(objectMatch[0]);
+        }
+        throw new Error("Failed to parse growth tasks response");
+      }
+    };
+
+    let parsed;
+    try {
+      parsed = parsePayload(content);
+    } catch (error) {
+      const strictPrompt = `Return ONLY valid JSON. Do not include any commentary.\n\n${promptInput}\n\nJSON schema:\n{\n  \"tasks\": [\n    {\n      \"title\": \"\",\n      \"description\": \"\",\n      \"category\": \"growth\",\n      \"difficulty\": \"easy|medium|hard\",\n      \"token_reward\": 10,\n      \"xp_reward\": 50,\n      \"verification_metric\": \"subscribers|videos|views_total|views_28d|watch_minutes_365|avg_view_duration_28d|subscribers_gained_28d|uploads_30d\",\n      \"verification_operator\": \">=\",\n      \"verification_threshold\": 0,\n      \"verification_window_days\": 28\n    }\n  ]\n}`;
+      const retryResponse = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${ANALYSIS_AI_API}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          // Use a model that supports structured outputs in Responses API
           model: "gpt-4.1",
-          prompt: { id: PROMPT_ID },
-          input,
-          response_format: { type: "json_schema", json_schema: TASK_SCHEMA },
+          input: strictPrompt,
         }),
       });
-
-      if (!r.ok) {
-        const errorText = await r.text();
-        console.error("Growth task AI error:", r.status, errorText);
-        throw new Error("Failed to generate growth tasks");
-      }
-
-      return await r.json();
-    };
-
-    // ✅ Extract either output_json (preferred) OR output_text (fallback)
-    const extractStructuredOrText = (data: any): { json?: any; text?: string } => {
-      // 1) Structured output blocks (most reliable with response_format json_schema)
-      const jsonPart =
-        data?.output
-          ?.flatMap((item: any) => item?.content ?? [])
-          ?.find((part: any) => part?.type === "output_json" && part?.json);
-
-      if (jsonPart?.json) return { json: jsonPart.json };
-
-      // 2) output_text (some responses still use this)
-      if (typeof data?.output_text === "string" && data.output_text.trim()) {
-        return { text: data.output_text };
-      }
-
-      // 3) output blocks with output_text
-      const textPart =
-        data?.output
-          ?.flatMap((item: any) => item?.content ?? [])
-          ?.find((part: any) => part?.type === "output_text" && typeof part?.text === "string" && part.text.trim());
-
-      if (textPart?.text) return { text: textPart.text };
-
-      return {};
-    };
-
-    const parsePayloadFromText = (text: string) => {
-      try {
-        return JSON.parse(text);
-      } catch {
-        const objectMatch = text.match(/\{[\s\S]*\}/);
-        if (objectMatch?.[0]) return JSON.parse(objectMatch[0]);
-        const arrayMatch = text.match(/\[[\s\S]*\]/);
-        if (arrayMatch?.[0]) return JSON.parse(arrayMatch[0]);
-        throw new Error("Failed to parse growth tasks response");
-      }
-    };
-
-    let parsed: any;
-
-    // First attempt
-    try {
-      const aiData = await callAI(promptInput);
-      const extracted = extractStructuredOrText(aiData);
-
-      if (extracted.json) {
-        parsed = extracted.json; // ✅ already an object with tasks
-      } else if (extracted.text) {
-        parsed = parsePayloadFromText(extracted.text);
-      } else {
-        throw new Error("No content received from AI");
-      }
-    } catch (error) {
-      // Retry attempt (still structured outputs)
-      const retryPrompt = [
-        "Return ONLY JSON matching the schema. Must include at least 8 tasks.",
-        "No extra keys, no commentary.",
-        promptInput,
-      ].join("\n\n");
-
-      const retryData = await callAI(retryPrompt);
-      const extracted = extractStructuredOrText(retryData);
-
-      if (extracted.json) {
-        parsed = extracted.json;
-      } else if (extracted.text) {
-        parsed = parsePayloadFromText(extracted.text);
-      } else {
+      if (!retryResponse.ok) {
+        const errorText = await retryResponse.text();
+        console.error("Growth task retry error:", retryResponse.status, errorText);
         throw error;
       }
+      const retryData = await retryResponse.json();
+      const retryContent =
+        retryData.output_text ||
+        retryData.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+          item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+        ).find(Boolean);
+      if (!retryContent) {
+        throw error;
+      }
+      parsed = parsePayload(retryContent);
     }
-
     const rawTasks = normalizeList(parsed?.tasks ?? parsed?.growthTasks ?? parsed);
     if (rawTasks.length === 0) {
-      console.error("AI parsed payload (debug):", parsed);
       throw new Error("No tasks returned by AI");
     }
 
@@ -280,39 +206,44 @@ serve(async (req) => {
       const lower = title.toLowerCase();
       const numberMatch = lower.match(/(\d+([,.]\d+)?)/);
       const value = numberMatch ? Number(numberMatch[1].replace(/,/g, "")) : undefined;
-
-      if (lower.includes("subscriber")) return { metric: "subscribers", threshold: value ?? 50 };
-      if (lower.includes("videos")) return { metric: "videos", threshold: value ?? 1 };
-      if (lower.includes("watch hour")) return { metric: "watch_minutes_365", threshold: value ? value * 60 : 600 };
-      if (lower.includes("avg view") || lower.includes("average view") || lower.includes("duration"))
-        return { metric: "avg_view_duration_28d", threshold: value ?? 30 };
-      if (lower.includes("subscribers gained") || lower.includes("gained"))
-        return { metric: "subscribers_gained_28d", threshold: value ?? 25 };
-      if (lower.includes("upload")) return { metric: "uploads_30d", threshold: value ?? 2 };
-      if (lower.includes("view")) return { metric: "views_28d", threshold: value ?? 500 };
-
-      return { metric: "views_28d", threshold: 250 };
+      if (lower.includes("subscriber")) {
+        return { metric: "subscribers", threshold: value ?? 100 };
+      }
+      if (lower.includes("video")) {
+        return { metric: "videos", threshold: value ?? 5 };
+      }
+      if (lower.includes("watch hour")) {
+        return { metric: "watch_minutes_365", threshold: value ? value * 60 : 600 };
+      }
+      if (lower.includes("view")) {
+        return { metric: "views_28d", threshold: value ?? 1000 };
+      }
+      if (lower.includes("upload")) {
+        return { metric: "uploads_30d", threshold: value ?? 2 };
+      }
+      return { metric: "views_28d", threshold: 500 };
     };
 
     const tasksToInsert = rawTasks.map((task: any, index: number) => {
-      const title = String(task.title ?? task.name ?? `Growth Task ${index + 1}`);
-      const inferred = inferMetric(title);
-      const windowDays = Number(task.verification_window_days ?? task.window_days ?? 28);
-
+      const inferred = inferMetric(String(task.title ?? task.name ?? ""));
       return {
         user_id: userId,
         task_set_id: newSet.id,
-        title,
+        title: String(task.title ?? task.name ?? `Growth Task ${index + 1}`),
         description: task.description ? String(task.description) : null,
         category: String(task.category ?? "growth"),
-        difficulty: clampDifficulty(task.difficulty),
+        difficulty: String(task.difficulty ?? "medium").toLowerCase(),
         token_reward: Number(task.token_reward ?? task.tokenReward ?? 15),
         xp_reward: Number(task.xp_reward ?? task.xpReward ?? 50),
         order_index: Number(task.order_index ?? task.orderIndex ?? index + 1),
         verification_metric: String(task.verification_metric ?? task.metric ?? inferred.metric),
         verification_operator: String(task.verification_operator ?? task.operator ?? ">="),
         verification_threshold: Number(task.verification_threshold ?? task.threshold ?? inferred.threshold),
-        verification_window_days: windowDays,
+        verification_window_days: task.verification_window_days
+          ? Number(task.verification_window_days)
+          : task.window_days
+          ? Number(task.window_days)
+          : null,
       };
     });
 
