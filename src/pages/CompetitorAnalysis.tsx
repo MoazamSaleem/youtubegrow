@@ -212,7 +212,57 @@ const CompetitorAnalysisPage = () => {
       }
 
       const data = await response.json();
-      setAnalysis(data.analysis);
+      const raw = data.analysis ?? data.competitorAnalysis ?? data;
+      const normalizeList = (value: unknown) => (Array.isArray(value) ? value : value ? [value] : []);
+      const normalized: CompetitorAnalysis = {
+        channelOverview: {
+          estimatedNiche:
+            raw.channelOverview?.estimatedNiche ??
+            raw.channelOverview?.estimated_niche ??
+            raw.niche ??
+            "Not specified",
+          contentStyle:
+            raw.channelOverview?.contentStyle ??
+            raw.channelOverview?.content_style ??
+            raw.contentStyle ??
+            "Not specified",
+          targetAudience:
+            raw.channelOverview?.targetAudience ??
+            raw.channelOverview?.target_audience ??
+            raw.targetAudience ??
+            "Not specified",
+          uniqueSellingPoint:
+            raw.channelOverview?.uniqueSellingPoint ??
+            raw.channelOverview?.unique_selling_point ??
+            raw.usp ??
+            "Not specified",
+        },
+        contentStrategy: {
+          uploadFrequency:
+            raw.contentStrategy?.uploadFrequency ??
+            raw.contentStrategy?.upload_frequency ??
+            "Not specified",
+          videoFormats: normalizeList(
+            raw.contentStrategy?.videoFormats ?? raw.contentStrategy?.video_formats
+          ),
+          averageLength:
+            raw.contentStrategy?.averageLength ??
+            raw.contentStrategy?.average_length ??
+            "Not specified",
+          topPerformingTopics: normalizeList(
+            raw.contentStrategy?.topPerformingTopics ?? raw.contentStrategy?.top_performing_topics
+          ),
+        },
+        strengths: normalizeList(raw.strengths),
+        weaknesses: normalizeList(raw.weaknesses ?? raw.weaknessesOpportunities),
+        contentGaps: normalizeList(raw.contentGaps ?? raw.contentGapsToExploit),
+        actionableInsights: normalizeList(raw.actionableInsights),
+        titleFormulas: normalizeList(raw.titleFormulas),
+        thumbnailStyle: raw.thumbnailStyle ?? "Not specified",
+        engagementTactics: normalizeList(raw.engagementTactics),
+      };
+
+      setAnalysis(normalized);
 
       toast({
         title: "Analysis Complete!",

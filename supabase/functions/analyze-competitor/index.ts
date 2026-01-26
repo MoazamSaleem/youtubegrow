@@ -286,6 +286,69 @@ serve(async (req) => {
       }
     }
 
+    const stillEmpty =
+      analysis.channelOverview.contentStyle === "Not specified" &&
+      analysis.channelOverview.targetAudience === "Not specified" &&
+      analysis.channelOverview.uniqueSellingPoint === "Not specified" &&
+      analysis.contentStrategy.uploadFrequency === "Not specified" &&
+      analysis.contentStrategy.averageLength === "Not specified" &&
+      analysis.contentStrategy.videoFormats.length === 0 &&
+      analysis.contentStrategy.topPerformingTopics.length === 0 &&
+      analysis.strengths.length === 0 &&
+      analysis.weaknesses.length === 0 &&
+      analysis.contentGaps.length === 0 &&
+      analysis.actionableInsights.length === 0 &&
+      analysis.titleFormulas.length === 0 &&
+      analysis.engagementTactics.length === 0;
+
+    if (stillEmpty) {
+      const directPrompt = `You are a YouTube competitive analyst. Using the channel info below, infer a plausible competitor analysis. Always return VALID JSON with ALL keys populated. Do not leave any field blank or "Not specified".\n\n${promptInput}\n\nJSON schema:\n{\n  \"channelOverview\": {\n    \"estimatedNiche\": \"\",\n    \"contentStyle\": \"\",\n    \"targetAudience\": \"\",\n    \"uniqueSellingPoint\": \"\"\n  },\n  \"contentStrategy\": {\n    \"uploadFrequency\": \"\",\n    \"videoFormats\": [\"\"],\n    \"averageLength\": \"\",\n    \"topPerformingTopics\": [\"\"]\n  },\n  \"strengths\": [{\"area\":\"\",\"description\":\"\",\"howToAdapt\":\"\"}],\n  \"weaknesses\": [{\"area\":\"\",\"description\":\"\",\"yourOpportunity\":\"\"}],\n  \"contentGaps\": [{\"topic\":\"\",\"potential\":\"\",\"difficulty\":\"\"}],\n  \"actionableInsights\": [{\"priority\":\"\",\"action\":\"\",\"expectedImpact\":\"\"}],\n  \"titleFormulas\": [\"\"],\n  \"thumbnailStyle\": \"\",\n  \"engagementTactics\": [\"\"]\n}`;
+
+      const directResponse = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ANALYSIS_AI_API}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4.1",
+          input: directPrompt,
+        }),
+      });
+
+      if (directResponse.ok) {
+        const directData = await directResponse.json();
+        const directContent = extractContent(directData);
+        if (directContent) {
+          const directParsed = parseAnalysisPayload(directContent);
+          const directRaw = directParsed?.analysis ? directParsed.analysis : directParsed;
+          const directChannel = directRaw?.channelOverview || directRaw?.channel_overview || {};
+          const directStrategy = directRaw?.contentStrategy || directRaw?.content_strategy || {};
+          const directVideoFormats = normalizeList(directStrategy.videoFormats || directStrategy.video_formats);
+          const directTopTopics = normalizeList(directStrategy.topPerformingTopics || directStrategy.top_performing_topics);
+          analysis.channelOverview = {
+            estimatedNiche: directChannel.estimatedNiche ?? directChannel.estimated_niche ?? analysis.channelOverview.estimatedNiche,
+            contentStyle: directChannel.contentStyle ?? directChannel.content_style ?? analysis.channelOverview.contentStyle,
+            targetAudience: directChannel.targetAudience ?? directChannel.target_audience ?? analysis.channelOverview.targetAudience,
+            uniqueSellingPoint: directChannel.uniqueSellingPoint ?? directChannel.unique_selling_point ?? analysis.channelOverview.uniqueSellingPoint,
+          };
+          analysis.contentStrategy = {
+            uploadFrequency: directStrategy.uploadFrequency ?? directStrategy.upload_frequency ?? analysis.contentStrategy.uploadFrequency,
+            videoFormats: directVideoFormats.length ? directVideoFormats : analysis.contentStrategy.videoFormats,
+            averageLength: directStrategy.averageLength ?? directStrategy.average_length ?? analysis.contentStrategy.averageLength,
+            topPerformingTopics: directTopTopics.length ? directTopTopics : analysis.contentStrategy.topPerformingTopics,
+          };
+          analysis.strengths = normalizeList(directRaw?.strengths) || analysis.strengths;
+          analysis.weaknesses = normalizeList(directRaw?.weaknesses) || analysis.weaknesses;
+          analysis.contentGaps = normalizeList(directRaw?.contentGaps || directRaw?.content_gaps) || analysis.contentGaps;
+          analysis.actionableInsights = normalizeList(directRaw?.actionableInsights || directRaw?.actionable_insights) || analysis.actionableInsights;
+          analysis.titleFormulas = normalizeList(directRaw?.titleFormulas || directRaw?.title_formulas) || analysis.titleFormulas;
+          analysis.thumbnailStyle = directRaw?.thumbnailStyle || directRaw?.thumbnail_style || analysis.thumbnailStyle;
+          analysis.engagementTactics = normalizeList(directRaw?.engagementTactics || directRaw?.engagement_tactics) || analysis.engagementTactics;
+        }
+      }
+    }
+
     const { error: saveError } = await supabaseClient
       .from("competitor_analysis_results")
       .insert({
