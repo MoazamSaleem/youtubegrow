@@ -167,6 +167,7 @@ serve(async (req) => {
     };
 
     const responseData = await callCompetitorAI(promptInput);
+    console.log("Competitor AI response received");
 
     const extractContent = (data: any) =>
       data.output_text ||
@@ -179,9 +180,7 @@ serve(async (req) => {
       throw new Error("No content received from AI");
     }
     
-    if (!content) {
-      throw new Error("No content received from AI");
-    }
+    console.log("Competitor AI content length:", content.length);
 
     const parseAnalysisPayload = (text: string) => {
       try {
@@ -212,16 +211,16 @@ serve(async (req) => {
 
     const analysis = {
       channelOverview: {
-        estimatedNiche: channelOverview.estimatedNiche ?? fallbackNiche,
-        contentStyle: channelOverview.contentStyle ?? "Not specified",
-        targetAudience: channelOverview.targetAudience ?? "Not specified",
-        uniqueSellingPoint: channelOverview.uniqueSellingPoint ?? "Not specified",
+        estimatedNiche: channelOverview.estimatedNiche ?? channelOverview.estimated_niche ?? fallbackNiche,
+        contentStyle: channelOverview.contentStyle ?? channelOverview.content_style ?? "Not specified",
+        targetAudience: channelOverview.targetAudience ?? channelOverview.target_audience ?? "Not specified",
+        uniqueSellingPoint: channelOverview.uniqueSellingPoint ?? channelOverview.unique_selling_point ?? "Not specified",
       },
       contentStrategy: {
-        uploadFrequency: contentStrategy.uploadFrequency ?? "Not specified",
-        videoFormats: normalizeList(contentStrategy.videoFormats),
-        averageLength: contentStrategy.averageLength ?? "Not specified",
-        topPerformingTopics: normalizeList(contentStrategy.topPerformingTopics),
+        uploadFrequency: contentStrategy.uploadFrequency ?? contentStrategy.upload_frequency ?? "Not specified",
+        videoFormats: normalizeList(contentStrategy.videoFormats ?? contentStrategy.video_formats),
+        averageLength: contentStrategy.averageLength ?? contentStrategy.average_length ?? "Not specified",
+        topPerformingTopics: normalizeList(contentStrategy.topPerformingTopics ?? contentStrategy.top_performing_topics),
       },
       strengths: normalizeList(rawAnalysis?.strengths),
       weaknesses: normalizeList(rawAnalysis?.weaknesses),
@@ -266,15 +265,15 @@ serve(async (req) => {
         const retryFormulas = normalizeList(retryRaw?.titleFormulas || retryRaw?.title_formulas);
         const retryTactics = normalizeList(retryRaw?.engagementTactics || retryRaw?.engagement_tactics);
         analysis.channelOverview = {
-          estimatedNiche: retryChannel.estimatedNiche ?? analysis.channelOverview.estimatedNiche,
-          contentStyle: retryChannel.contentStyle ?? analysis.channelOverview.contentStyle,
-          targetAudience: retryChannel.targetAudience ?? analysis.channelOverview.targetAudience,
-          uniqueSellingPoint: retryChannel.uniqueSellingPoint ?? analysis.channelOverview.uniqueSellingPoint,
+          estimatedNiche: retryChannel.estimatedNiche ?? retryChannel.estimated_niche ?? analysis.channelOverview.estimatedNiche,
+          contentStyle: retryChannel.contentStyle ?? retryChannel.content_style ?? analysis.channelOverview.contentStyle,
+          targetAudience: retryChannel.targetAudience ?? retryChannel.target_audience ?? analysis.channelOverview.targetAudience,
+          uniqueSellingPoint: retryChannel.uniqueSellingPoint ?? retryChannel.unique_selling_point ?? analysis.channelOverview.uniqueSellingPoint,
         };
         analysis.contentStrategy = {
-          uploadFrequency: retryStrategy.uploadFrequency ?? analysis.contentStrategy.uploadFrequency,
+          uploadFrequency: retryStrategy.uploadFrequency ?? retryStrategy.upload_frequency ?? analysis.contentStrategy.uploadFrequency,
           videoFormats: retryVideoFormats.length ? retryVideoFormats : analysis.contentStrategy.videoFormats,
-          averageLength: retryStrategy.averageLength ?? analysis.contentStrategy.averageLength,
+          averageLength: retryStrategy.averageLength ?? retryStrategy.average_length ?? analysis.contentStrategy.averageLength,
           topPerformingTopics: retryTopTopics.length ? retryTopTopics : analysis.contentStrategy.topPerformingTopics,
         };
         analysis.strengths = retryStrengths.length ? retryStrengths : analysis.strengths;
@@ -297,6 +296,8 @@ serve(async (req) => {
 
     if (saveError) {
       console.error("Failed to save competitor analysis:", saveError);
+    } else {
+      console.log("Competitor analysis saved");
     }
 
     return new Response(JSON.stringify({ analysis }), {
