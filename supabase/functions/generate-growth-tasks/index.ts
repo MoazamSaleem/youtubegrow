@@ -76,6 +76,9 @@ serve(async (req) => {
 
     const promptInput = [
       stepIndex ? `Step: ${stepIndex}` : undefined,
+      "Only create tasks that are verifiable via YouTube API metrics.",
+      "Allowed metrics: subscribers, videos, views_total, views_28d, watch_minutes_365, avg_view_duration_28d, subscribers_gained_28d, uploads_30d.",
+      "Return each task with fields: title, description, category, difficulty, token_reward, xp_reward, verification_metric, verification_operator, verification_threshold, verification_window_days.",
       channelText ? `Channel analysis: ${channelText}` : undefined,
       competitorText ? `Competitor analysis: ${competitorText}` : undefined,
     ]
@@ -119,9 +122,21 @@ serve(async (req) => {
         return JSON.parse(text);
       } catch {
         const fencedJson = text.match(/```json\s*([\s\S]*?)\s*```/i);
-        if (fencedJson?.[1]) return JSON.parse(fencedJson[1]);
-        const loose = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-        if (loose?.[0]) return JSON.parse(loose[0]);
+        if (fencedJson?.[1]) {
+          return JSON.parse(fencedJson[1]);
+        }
+        const fenced = text.match(/```\s*([\s\S]*?)\s*```/);
+        if (fenced?.[1]) {
+          return JSON.parse(fenced[1]);
+        }
+        const arrayMatch = text.match(/\[[\s\S]*\]/);
+        if (arrayMatch?.[0]) {
+          return JSON.parse(arrayMatch[0]);
+        }
+        const objectMatch = text.match(/\{[\s\S]*\}/);
+        if (objectMatch?.[0]) {
+          return JSON.parse(objectMatch[0]);
+        }
         throw new Error("Failed to parse growth tasks response");
       }
     };
@@ -156,17 +171,50 @@ serve(async (req) => {
       });
     }
 
-    const tasksToInsert = rawTasks.map((task: any, index: number) => ({
-      user_id: userId,
-      task_set_id: newSet.id,
-      title: String(task.title ?? task.name ?? `Growth Task ${index + 1}`),
-      description: task.description ? String(task.description) : null,
-      category: String(task.category ?? "growth"),
-      difficulty: String(task.difficulty ?? "medium").toLowerCase(),
-      token_reward: Number(task.token_reward ?? task.tokenReward ?? 15),
-      xp_reward: Number(task.xp_reward ?? task.xpReward ?? 50),
-      order_index: Number(task.order_index ?? task.orderIndex ?? index + 1),
-    }));
+    const inferMetric = (title: string) => {
+      const lower = title.toLowerCase();
+      const numberMatch = lower.match(/(\d+([,.]\d+)?)/);
+      const value = numberMatch ? Number(numberMatch[1].replace(/,/g, "")) : undefined;
+      if (lower.includes("subscriber")) {
+        return { metric: "subscribers", threshold: value ?? 100 };
+      }
+      if (lower.includes("video")) {
+        return { metric: "videos", threshold: value ?? 5 };
+      }
+      if (lower.includes("watch hour")) {
+        return { metric: "watch_minutes_365", threshold: value ? value * 60 : 600 };
+      }
+      if (lower.includes("view")) {
+        return { metric: "views_28d", threshold: value ?? 1000 };
+      }
+      if (lower.includes("upload")) {
+        return { metric: "uploads_30d", threshold: value ?? 2 };
+      }
+      return { metric: "views_28d", threshold: 500 };
+    };
+
+    const tasksToInsert = rawTasks.map((task: any, index: number) => {
+      const inferred = inferMetric(String(task.title ?? task.name ?? ""));
+      return {
+        user_id: userId,
+        task_set_id: newSet.id,
+        title: String(task.title ?? task.name ?? `Growth Task ${index + 1}`),
+        description: task.description ? String(task.description) : null,
+        category: String(task.category ?? "growth"),
+        difficulty: String(task.difficulty ?? "medium").toLowerCase(),
+        token_reward: Number(task.token_reward ?? task.tokenReward ?? 15),
+        xp_reward: Number(task.xp_reward ?? task.xpReward ?? 50),
+        order_index: Number(task.order_index ?? task.orderIndex ?? index + 1),
+        verification_metric: String(task.verification_metric ?? task.metric ?? inferred.metric),
+        verification_operator: String(task.verification_operator ?? task.operator ?? ">="),
+        verification_threshold: Number(task.verification_threshold ?? task.threshold ?? inferred.threshold),
+        verification_window_days: task.verification_window_days
+          ? Number(task.verification_window_days)
+          : task.window_days
+          ? Number(task.window_days)
+          : null,
+      };
+    });
 
     const { error: taskError } = await supabaseClient.from("user_growth_tasks").insert(tasksToInsert);
     if (taskError) {

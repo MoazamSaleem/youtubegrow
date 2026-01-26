@@ -95,6 +95,10 @@ interface AiTask {
   order_index: number;
   verified_at: string | null;
   claimed_at: string | null;
+  verification_metric?: string | null;
+  verification_operator?: string | null;
+  verification_threshold?: number | null;
+  verification_window_days?: number | null;
 }
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -260,7 +264,7 @@ const GrowthTasks = () => {
       if (aiSet?.id) {
         const { data: aiTasksData } = await supabase
           .from("user_growth_tasks")
-          .select("id, task_set_id, title, description, category, difficulty, token_reward, xp_reward, order_index, verified_at, claimed_at")
+          .select("id, task_set_id, title, description, category, difficulty, token_reward, xp_reward, order_index, verified_at, claimed_at, verification_metric, verification_operator, verification_threshold, verification_window_days")
           .eq("task_set_id", aiSet.id)
           .order("order_index");
         setAiTasks(aiTasksData || []);
@@ -315,69 +319,51 @@ const GrowthTasks = () => {
 
   const verifyTask = async (task: GrowthTask) => {
     if (!user) return;
-    const now = new Date().toISOString();
-
     if (task.is_recurring) {
-      if (!task.reset_frequency || isRecurringTaskVerified(task)) return;
-      setProcessingTask(task.id);
-      try {
-        const { periodStart, periodEnd } = getCurrentPeriod(task.reset_frequency);
-        const { data: existing } = await supabase
-          .from("recurring_task_completions")
-          .select("id")
-          .eq("user_id", user.id)
-          .eq("task_id", task.id)
-          .eq("period_start", periodStart)
-          .maybeSingle();
-
-        if (existing?.id) {
-          await supabase
-            .from("recurring_task_completions")
-            .update({ verified_at: now, completed_at: now })
-            .eq("id", existing.id);
-        } else {
-          await supabase.from("recurring_task_completions").insert({
-            user_id: user.id,
-            task_id: task.id,
-            period_start: periodStart,
-            period_end: periodEnd,
-            verified_at: now,
-            completed_at: now,
-          });
-        }
-
-        await fetchData();
-        toast({ title: "Task Verified", description: "You can now claim the reward." });
-      } catch (error: any) {
-        toast({
-          title: "Error verifying task",
-          description: error.message,
-          variant: "destructive",
-        });
-      } finally {
-        setProcessingTask(null);
-      }
+      toast({
+        title: "Manual task",
+        description: "Recurring tasks cannot be verified via YouTube API.",
+        variant: "destructive",
+      });
       return;
     }
 
     if (taskProgress[task.id]?.verified_at) return;
     setProcessingTask(task.id);
     try {
-      await supabase.from("user_task_progress").upsert({
-        user_id: user.id,
-        task_id: task.id,
-        verified_at: now,
-        last_completed_at: now,
-      });
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
 
-      setTaskProgress((prev) => ({
-        ...prev,
-        [task.id]: {
-          verified_at: now,
-          claimed_at: prev[task.id]?.claimed_at ?? null,
-        },
-      }));
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-growth-task`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ taskId: task.id, taskType: "legacy" }),
+        }
+      );
 
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Task verification failed");
+      }
+
+      if (!data.verified) {
+        toast({
+          title: "Not completed yet",
+          description: `Current ${data.metric}: ${data.actual}. Target: ${data.target}.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await fetchData();
       toast({ title: "Task Verified", description: "You can now claim the reward." });
     } catch (error: any) {
       toast({
@@ -510,19 +496,42 @@ const GrowthTasks = () => {
 
   const verifyAiTask = async (task: AiTask) => {
     if (!user || task.verified_at) return;
-    const now = new Date().toISOString();
     setProcessingTask(task.id);
 
     try {
-      await supabase
-        .from("user_growth_tasks")
-        .update({ verified_at: now })
-        .eq("id", task.id)
-        .eq("user_id", user.id);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
 
-      setAiTasks((prev) =>
-        prev.map((item) => (item.id === task.id ? { ...item, verified_at: now } : item))
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-growth-task`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ taskId: task.id, taskType: "ai" }),
+        }
       );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Task verification failed");
+      }
+
+      if (!data.verified) {
+        toast({
+          title: "Not completed yet",
+          description: `Current ${data.metric}: ${data.actual}. Target: ${data.target}.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await fetchData();
       toast({ title: "Task Verified", description: "You can now claim the reward." });
     } catch (error: any) {
       toast({

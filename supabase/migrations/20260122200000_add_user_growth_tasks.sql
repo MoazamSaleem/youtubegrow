@@ -19,6 +19,10 @@ create table if not exists public.user_growth_tasks (
   token_reward integer not null default 10,
   xp_reward integer not null default 50,
   order_index integer not null default 0,
+  verification_metric text,
+  verification_operator text,
+  verification_threshold numeric,
+  verification_window_days integer,
   verified_at timestamptz,
   claimed_at timestamptz,
   created_at timestamptz not null default now()
