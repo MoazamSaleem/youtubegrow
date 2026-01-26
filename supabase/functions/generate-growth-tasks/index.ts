@@ -141,6 +141,25 @@ serve(async (req) => {
       }
     };
 
+    const parseTaskLines = (text: string) => {
+      const lines = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      const items = lines
+        .map((line) => line.replace(/^(\d+[\).\-\s]+|[-*]\s+)/, "").trim())
+        .filter((line) => line.length > 0);
+      return items.slice(0, 10).map((title, index) => ({
+        title,
+        description: "",
+        category: "growth",
+        difficulty: "medium",
+        token_reward: 15,
+        xp_reward: 50,
+        order_index: index + 1,
+      }));
+    };
+
     let parsed;
     try {
       parsed = parsePayload(content);
@@ -171,7 +190,12 @@ serve(async (req) => {
       if (!retryContent) {
         throw error;
       }
-      parsed = parsePayload(retryContent);
+      try {
+        parsed = parsePayload(retryContent);
+      } catch (retryError) {
+        const fallbackTasks = parseTaskLines(retryContent);
+        parsed = { tasks: fallbackTasks };
+      }
     }
     const rawTasks = normalizeList(parsed?.tasks ?? parsed?.growthTasks ?? parsed);
     if (rawTasks.length === 0) {
