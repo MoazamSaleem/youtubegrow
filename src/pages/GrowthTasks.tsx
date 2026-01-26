@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
@@ -83,6 +83,20 @@ interface RecurringCompletion {
   completed_at: string | null;
 }
 
+interface AiTask {
+  id: string;
+  task_set_id: string;
+  title: string;
+  description: string | null;
+  category: string;
+  difficulty: string;
+  token_reward: number;
+  xp_reward: number;
+  order_index: number;
+  verified_at: string | null;
+  claimed_at: string | null;
+}
+
 const ICON_MAP: Record<string, React.ElementType> = {
   rocket: Rocket,
   star: Star,
@@ -105,6 +119,9 @@ const GrowthTasks = () => {
   const [perks, setPerks] = useState<Perk[]>([]);
   const [taskProgress, setTaskProgress] = useState<Record<string, { verified_at: string | null; claimed_at: string | null }>>({});
   const [recurringCompletions, setRecurringCompletions] = useState<RecurringCompletion[]>([]);
+  const [aiTasks, setAiTasks] = useState<AiTask[]>([]);
+  const [aiStepIndex, setAiStepIndex] = useState<number | null>(null);
+  const [isGeneratingAiTasks, setIsGeneratingAiTasks] = useState(false);
   const [unlockedMilestoneIds, setUnlockedMilestoneIds] = useState<Set<string>>(new Set());
   const [claimedMilestoneIds, setClaimedMilestoneIds] = useState<Set<string>>(new Set());
   const [unlockedPerkIds, setUnlockedPerkIds] = useState<Set<string>>(new Set());
@@ -115,6 +132,7 @@ const GrowthTasks = () => {
   const [processingTask, setProcessingTask] = useState<string | null>(null);
   const [processingMilestone, setProcessingMilestone] = useState<string | null>(null);
   const [processingPerk, setProcessingPerk] = useState<string | null>(null);
+  const aiGenerateRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
   const userTier = currentPlan === "free" ? "basic" : currentPlan === "basic" ? "basic" : currentPlan === "pro" ? "pro" : "advanced";
@@ -123,6 +141,16 @@ const GrowthTasks = () => {
   useEffect(() => {
     fetchData();
   }, [user]);
+
+  useEffect(() => {
+    if (!user || loading) return;
+    if (aiGenerateRef.current) return;
+    const allClaimed = aiTasks.length > 0 && aiTasks.every((task) => task.claimed_at);
+    if (aiTasks.length === 0 || allClaimed) {
+      aiGenerateRef.current = true;
+      generateAiTasks(allClaimed);
+    }
+  }, [user, loading, aiTasks]);
 
   // Get current period start/end for a recurring task
   const getCurrentPeriod = (frequency: string) => {
@@ -219,6 +247,28 @@ const GrowthTasks = () => {
         claimed_at: item.claimed_at ?? item.completed_at ?? null,
       }));
       setRecurringCompletions(normalizedRecurring);
+
+      // Fetch AI-generated task set + tasks
+      const { data: aiSet } = await supabase
+        .from("user_growth_task_sets")
+        .select("id, step_index")
+        .eq("user_id", user.id)
+        .order("step_index", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (aiSet?.id) {
+        const { data: aiTasksData } = await supabase
+          .from("user_growth_tasks")
+          .select("id, task_set_id, title, description, category, difficulty, token_reward, xp_reward, order_index, verified_at, claimed_at")
+          .eq("task_set_id", aiSet.id)
+          .order("order_index");
+        setAiTasks(aiTasksData || []);
+        setAiStepIndex(aiSet.step_index);
+      } else {
+        setAiTasks([]);
+        setAiStepIndex(null);
+      }
 
       // Fetch user milestones
       const { data: userMilestonesData } = await supabase
@@ -340,6 +390,54 @@ const GrowthTasks = () => {
     }
   };
 
+  const generateAiTasks = async (advanceStep: boolean) => {
+    if (!user || isGeneratingAiTasks) return;
+    setIsGeneratingAiTasks(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
+      const nextStep = advanceStep && aiStepIndex ? aiStepIndex + 1 : undefined;
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-growth-tasks`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ stepIndex: nextStep }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to generate growth tasks");
+      }
+
+      await fetchData();
+      toast({
+        title: advanceStep ? "Next steps unlocked" : "Growth tasks ready",
+        description: advanceStep
+          ? "New growth tasks are available."
+          : "Your personalized growth tasks have been generated.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Task generation failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingAiTasks(false);
+      aiGenerateRef.current = false;
+    }
+  };
+
   const claimTask = async (task: GrowthTask) => {
     if (!user) return;
     const now = new Date().toISOString();
@@ -395,6 +493,79 @@ const GrowthTasks = () => {
       await fetchData();
       await checkMilestoneUnlocks(newXp);
 
+      toast({
+        title: "Reward Claimed!",
+        description: `+${task.token_reward} tokens, +${task.xp_reward} XP`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error claiming reward",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingTask(null);
+    }
+  };
+
+  const verifyAiTask = async (task: AiTask) => {
+    if (!user || task.verified_at) return;
+    const now = new Date().toISOString();
+    setProcessingTask(task.id);
+
+    try {
+      await supabase
+        .from("user_growth_tasks")
+        .update({ verified_at: now })
+        .eq("id", task.id)
+        .eq("user_id", user.id);
+
+      setAiTasks((prev) =>
+        prev.map((item) => (item.id === task.id ? { ...item, verified_at: now } : item))
+      );
+      toast({ title: "Task Verified", description: "You can now claim the reward." });
+    } catch (error: any) {
+      toast({
+        title: "Error verifying task",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingTask(null);
+    }
+  };
+
+  const claimAiTask = async (task: AiTask) => {
+    if (!user || task.claimed_at || !task.verified_at) return;
+    const now = new Date().toISOString();
+    setProcessingTask(task.id);
+
+    try {
+      await supabase
+        .from("user_growth_tasks")
+        .update({ claimed_at: now })
+        .eq("id", task.id)
+        .eq("user_id", user.id);
+
+      const newBalance = userTokens.balance + task.token_reward;
+      const newXp = userTokens.current_xp + task.xp_reward;
+      const newTotalEarned = userTokens.total_earned + task.token_reward;
+
+      await supabase
+        .from("user_tokens")
+        .update({
+          balance: newBalance,
+          current_xp: newXp,
+          total_earned: newTotalEarned,
+          updated_at: now,
+        })
+        .eq("user_id", user.id);
+
+      setUserTokens({ ...userTokens, balance: newBalance, current_xp: newXp, total_earned: newTotalEarned });
+      setAiTasks((prev) =>
+        prev.map((item) => (item.id === task.id ? { ...item, claimed_at: now } : item))
+      );
+      await checkMilestoneUnlocks(newXp);
       toast({
         title: "Reward Claimed!",
         description: `+${task.token_reward} tokens, +${task.xp_reward} XP`,
@@ -553,7 +724,8 @@ const GrowthTasks = () => {
   const progressToNext = nextMilestone ? (userTokens.current_xp / nextMilestone.required_xp) * 100 : 100;
   const claimedOneTimeCount = Object.values(taskProgress).filter((progress) => progress.claimed_at).length;
   const claimedRecurringCount = recurringCompletions.filter((completion) => completion.claimed_at).length;
-  const totalTasksDone = claimedOneTimeCount + claimedRecurringCount;
+  const claimedAiCount = aiTasks.filter((task) => task.claimed_at).length;
+  const totalTasksDone = claimedOneTimeCount + claimedRecurringCount + claimedAiCount;
 
   // Separate tasks by type
   const oneTimeTasks = tasks.filter((t) => !t.is_recurring);
@@ -730,6 +902,62 @@ const GrowthTasks = () => {
             {/* One-Time Tasks Tab */}
             <TabsContent value="tasks">
               <div className="space-y-4">
+                <div className="glass rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      <h3 className="font-display text-lg font-semibold">
+                        AI Growth Tasks {aiStepIndex ? `- Step ${aiStepIndex}` : ""}
+                      </h3>
+                    </div>
+                    {isGeneratingAiTasks && (
+                      <Badge variant="secondary" className="gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Generating
+                      </Badge>
+                    )}
+                  </div>
+                  {aiTasks.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Generating your personalized growth tasks...
+                    </p>
+                  ) : (
+                    <div className="grid gap-3">
+                      {aiTasks.map((task, index) => {
+                        const isVerified = Boolean(task.verified_at);
+                        const isClaimed = Boolean(task.claimed_at);
+                        const taskData: GrowthTask = {
+                          id: task.id,
+                          title: task.title,
+                          description: task.description || "",
+                          category: task.category,
+                          tier: "basic",
+                          token_reward: task.token_reward,
+                          xp_reward: task.xp_reward,
+                          difficulty: task.difficulty,
+                          order_index: task.order_index,
+                          is_recurring: false,
+                          reset_frequency: null,
+                        };
+
+                        return (
+                          <TaskCard
+                            key={task.id}
+                            task={taskData}
+                            isVerified={isVerified}
+                            isClaimed={isClaimed}
+                            isLocked={false}
+                            isProcessing={processingTask === task.id}
+                            onVerify={() => verifyAiTask(task)}
+                            onClaim={() => claimAiTask(task)}
+                            getDifficultyColor={getDifficultyColor}
+                            index={index}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 {["basic", "pro", "advanced"].map((tier) => (
                   <div key={tier}>
                     <div className="flex items-center gap-2 mb-4">

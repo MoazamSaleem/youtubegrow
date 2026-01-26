@@ -663,6 +663,91 @@ export type Database = {
           },
         ]
       }
+      user_growth_task_sets: {
+        Row: {
+          created_at: string
+          id: string
+          step_index: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          step_index?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          step_index?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_growth_task_sets_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_growth_tasks: {
+        Row: {
+          category: string
+          claimed_at: string | null
+          created_at: string
+          description: string | null
+          difficulty: string
+          id: string
+          order_index: number
+          task_set_id: string
+          title: string
+          token_reward: number
+          user_id: string
+          verified_at: string | null
+          xp_reward: number
+        }
+        Insert: {
+          category: string
+          claimed_at?: string | null
+          created_at?: string
+          description?: string | null
+          difficulty: string
+          id?: string
+          order_index?: number
+          task_set_id: string
+          title: string
+          token_reward?: number
+          user_id: string
+          verified_at?: string | null
+          xp_reward?: number
+        }
+        Update: {
+          category?: string
+          claimed_at?: string | null
+          created_at?: string
+          description?: string | null
+          difficulty?: string
+          id?: string
+          order_index?: number
+          task_set_id?: string
+          title?: string
+          token_reward?: number
+          user_id?: string
+          verified_at?: string | null
+          xp_reward?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_growth_tasks_task_set_id_fkey"
+            columns: ["task_set_id"]
+            isOneToOne: false
+            referencedRelation: "user_growth_task_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
