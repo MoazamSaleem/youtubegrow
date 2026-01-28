@@ -439,9 +439,9 @@ serve(async (req) => {
       }
       
       // Fetch analytics from YouTube Analytics API
-      const buildAnalyticsUrl = (metrics: string) => {
+      const buildAnalyticsUrl = (metrics: string, ids: string) => {
         const url = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
-        url.searchParams.set("ids", `channel==${channelId}`);
+        url.searchParams.set("ids", ids);
         url.searchParams.set("startDate", startDate || "2024-01-01");
         url.searchParams.set("endDate", endDate || new Date().toISOString().split("T")[0]);
         url.searchParams.set("metrics", metrics);
@@ -450,8 +450,12 @@ serve(async (req) => {
         return url;
       };
 
+      const idsForChannel = `channel==${channelId}`;
+      const idsForMine = "channel==MINE";
+
       let analyticsUrl = buildAnalyticsUrl(
-        "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration,estimatedRevenue"
+        "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration,estimatedRevenue",
+        idsForChannel
       );
       
       let analyticsResponse = await fetch(analyticsUrl.toString(), {
@@ -463,9 +467,19 @@ serve(async (req) => {
         console.error("Analytics fetch error:", errorText);
         const lowered = errorText.toLowerCase();
         const isUnauthorized = lowered.includes("insufficient") || lowered.includes("unauthorized");
+        const isForbidden = lowered.includes("forbidden");
         if (isUnauthorized) {
           analyticsUrl = buildAnalyticsUrl(
-            "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration"
+            "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration",
+            idsForChannel
+          );
+          analyticsResponse = await fetch(analyticsUrl.toString(), {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+        } else if (isForbidden) {
+          analyticsUrl = buildAnalyticsUrl(
+            "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration",
+            idsForMine
           );
           analyticsResponse = await fetch(analyticsUrl.toString(), {
             headers: { Authorization: `Bearer ${accessToken}` },
@@ -480,13 +494,16 @@ serve(async (req) => {
             combinedLower.includes("invalid credentials") ||
             combinedLower.includes("unauthorized") ||
             combinedLower.includes("insufficient");
+          const possibleMismatch = combinedLower.includes("forbidden");
           return new Response(JSON.stringify({
             error: shouldReconnect
               ? "YouTube authorization expired or missing analytics permission. Please reconnect your channel."
+              : possibleMismatch
+              ? "YouTube Analytics access is forbidden for this channel. Make sure the linked Google account owns the channel."
               : "Failed to fetch analytics",
             details: combined ? combined.slice(0, 500) : undefined,
           }), {
-            status: shouldReconnect ? 401 : 400,
+            status: shouldReconnect ? 401 : 403,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
