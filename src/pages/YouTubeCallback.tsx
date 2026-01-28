@@ -14,18 +14,35 @@ const YouTubeCallback = () => {
   const [message, setMessage] = useState("Connecting your YouTube channel...");
   const [channelName, setChannelName] = useState<string | null>(null);
 
-  const getSessionWithRefresh = async () => {
+  const getSessionWithRefresh = async (forceRefresh = false) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.access_token) {
       const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
       const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
-      if (!shouldRefresh) return session;
+      if (!forceRefresh && !shouldRefresh) return session;
     }
 
     const { data: refreshed } = await supabase.auth.refreshSession();
     if (refreshed.session?.access_token) return refreshed.session;
 
-    return null;
+    return session ?? null;
+  };
+
+  const normalizeFunctionError = (error: any) => {
+    if (!error) return null;
+    const rawBody = error?.context?.body;
+    if (typeof rawBody === "string") {
+      try {
+        const parsed = JSON.parse(rawBody);
+        return parsed?.error || parsed?.message || error.message;
+      } catch {
+        return rawBody || error.message;
+      }
+    }
+    if (rawBody && typeof rawBody === "object") {
+      return rawBody.error || rawBody.message || error.message;
+    }
+    return error.message;
   };
 
   const invokeWithAuthRetry = async <T,>(payload: {
@@ -48,7 +65,7 @@ const YouTubeCallback = () => {
       return { data, error };
     }
 
-    const refreshed = await getSessionWithRefresh();
+    const refreshed = await getSessionWithRefresh(true);
     if (!refreshed?.access_token) {
       return { data, error };
     }
@@ -94,7 +111,7 @@ const YouTubeCallback = () => {
       localStorage.removeItem("youtube_oauth_state");
 
       try {
-        const session = await getSessionWithRefresh();
+        const session = await getSessionWithRefresh(true);
         if (!session?.access_token) {
           throw new Error("Your session expired. Please sign in again.");
         }
@@ -115,7 +132,7 @@ const YouTubeCallback = () => {
         });
 
         if (error) {
-          throw new Error(error.message || "Failed to connect channel");
+          throw new Error(normalizeFunctionError(error) || "Failed to connect channel");
         }
 
         setStatus("success");

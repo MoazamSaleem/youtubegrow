@@ -401,6 +401,12 @@ serve(async (req) => {
     if (action === "analytics") {
       // Fetch analytics data
       const { channelId, userId, startDate, endDate } = body ?? {};
+      if (!channelId) {
+        return new Response(JSON.stringify({ error: "Missing channelId" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       if (!userId || authData.user.id !== userId) {
         return new Response(JSON.stringify({ error: "User mismatch" }), {
           status: 403,
@@ -453,9 +459,10 @@ serve(async (req) => {
       });
       
       if (!analyticsResponse.ok) {
-        const error = await analyticsResponse.text();
-        console.error("Analytics fetch error:", error);
-        const isUnauthorized = error.includes("Insufficient permission") || error.includes("unauthorized");
+        const errorText = await analyticsResponse.text();
+        console.error("Analytics fetch error:", errorText);
+        const lowered = errorText.toLowerCase();
+        const isUnauthorized = lowered.includes("insufficient") || lowered.includes("unauthorized");
         if (isUnauthorized) {
           analyticsUrl = buildAnalyticsUrl(
             "views,estimatedMinutesWatched,subscribersGained,subscribersLost,averageViewDuration"
@@ -466,8 +473,20 @@ serve(async (req) => {
         }
 
         if (!analyticsResponse.ok) {
-          return new Response(JSON.stringify({ error: "Failed to fetch analytics" }), {
-            status: 400,
+          const fallbackText = await analyticsResponse.text().catch(() => "");
+          const combined = [errorText, fallbackText].filter(Boolean).join(" ");
+          const combinedLower = combined.toLowerCase();
+          const shouldReconnect =
+            combinedLower.includes("invalid credentials") ||
+            combinedLower.includes("unauthorized") ||
+            combinedLower.includes("insufficient");
+          return new Response(JSON.stringify({
+            error: shouldReconnect
+              ? "YouTube authorization expired or missing analytics permission. Please reconnect your channel."
+              : "Failed to fetch analytics",
+            details: combined ? combined.slice(0, 500) : undefined,
+          }), {
+            status: shouldReconnect ? 401 : 400,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
