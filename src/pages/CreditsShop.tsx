@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
@@ -41,6 +42,7 @@ const CreditsShop = () => {
   const { user, subscription } = useAuth();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [packages, setPackages] = useState<CreditPackage[]>([]);
   const [userCredits, setUserCredits] = useState<UserCredits>({
@@ -122,6 +124,15 @@ const CreditsShop = () => {
   useEffect(() => {
     if (user) fetchData();
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const purchaseStatus = searchParams.get("purchase");
+    const sessionId = searchParams.get("session_id");
+    if (purchaseStatus === "success" && sessionId) {
+      void confirmStripePurchase(sessionId);
+    }
+  }, [user, searchParams]);
 
   const fetchData = async () => {
     if (!user) return;
@@ -260,6 +271,46 @@ const CreditsShop = () => {
       });
     } finally {
       setPurchasing(null);
+    }
+  };
+
+  const confirmStripePurchase = async (sessionId: string) => {
+    try {
+      const session = await getSessionWithRefresh(true);
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
+      const { data, error } = await supabase.functions.invoke<{
+        success?: boolean;
+        creditsAdded?: number;
+        balance?: number;
+        alreadyProcessed?: boolean;
+      }>("confirm-credits-purchase", {
+        body: { sessionId },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+      });
+
+      if (error) throw new Error(normalizeFunctionError(error) || "Failed to confirm purchase");
+
+      if (data?.success) {
+        await fetchData();
+        toast({
+          title: "Credits added",
+          description: data.creditsAdded
+            ? `+${data.creditsAdded.toLocaleString()} AI credits added to your balance`
+            : "Your AI credits have been updated.",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Purchase confirmation failed",
+        description: error.message || "Please contact support",
+        variant: "destructive",
+      });
     }
   };
 
