@@ -79,6 +79,10 @@ interface GrowthTask {
   difficulty: string;
   is_recurring: boolean;
   reset_frequency: string | null;
+  verification_metric?: string | null;
+  verification_operator?: string | null;
+  verification_threshold?: number | null;
+  verification_window_days?: number | null;
 }
 
 interface Milestone {
@@ -260,13 +264,24 @@ const AdminDashboard = () => {
   const saveTask = async (task: Partial<GrowthTask>) => {
     setSaving(true);
     try {
+      const normalizedTask = {
+        ...task,
+        verification_metric: task.verification_metric || null,
+        verification_operator: task.verification_metric ? task.verification_operator || ">=" : null,
+        verification_threshold: task.verification_metric
+          ? task.verification_threshold ?? null
+          : null,
+        verification_window_days: task.verification_metric
+          ? task.verification_window_days ?? null
+          : null,
+      };
       if (editingTask?.id) {
-        await supabase.from("growth_tasks").update(task).eq("id", editingTask.id);
+        await supabase.from("growth_tasks").update(normalizedTask).eq("id", editingTask.id);
         toast.success("Task updated");
       } else {
         // Add required fields for insert
         const insertData = {
-          ...task,
+          ...normalizedTask,
           category: "general",
           title: task.title || "New Task",
         };
@@ -814,6 +829,10 @@ const TaskForm = ({ task, onSave, saving }: { task: GrowthTask | null; onSave: (
     difficulty: task?.difficulty || "easy",
     is_recurring: task?.is_recurring || false,
     reset_frequency: task?.reset_frequency || null,
+    verification_metric: task?.verification_metric || "",
+    verification_operator: task?.verification_operator || ">=",
+    verification_threshold: task?.verification_threshold || 0,
+    verification_window_days: task?.verification_window_days || null,
   });
 
   return (
@@ -862,6 +881,55 @@ const TaskForm = ({ task, onSave, saving }: { task: GrowthTask | null; onSave: (
             </SelectContent>
           </Select>
         )}
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Select value={formData.verification_metric} onValueChange={(v) => setFormData({ ...formData, verification_metric: v })}>
+          <SelectTrigger>
+            <SelectValue placeholder="Verification Metric" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">None</SelectItem>
+            <SelectItem value="subscribers">Subscribers</SelectItem>
+            <SelectItem value="videos">Total Videos</SelectItem>
+            <SelectItem value="views_total">Total Views</SelectItem>
+            <SelectItem value="views_28d">Views (28d)</SelectItem>
+            <SelectItem value="watch_minutes_365">Watch Minutes (365d)</SelectItem>
+            <SelectItem value="avg_view_duration_28d">Avg View Duration (28d)</SelectItem>
+            <SelectItem value="subscribers_gained_28d">Subscribers Gained (28d)</SelectItem>
+            <SelectItem value="uploads_30d">Uploads (30d)</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={formData.verification_operator} onValueChange={(v) => setFormData({ ...formData, verification_operator: v })}>
+          <SelectTrigger>
+            <SelectValue placeholder="Operator" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value=">=">{">="}</SelectItem>
+            <SelectItem value=">">{">"}</SelectItem>
+            <SelectItem value="==">{"=="}</SelectItem>
+            <SelectItem value="<=">{"<="}</SelectItem>
+            <SelectItem value="<">{"<"}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Input
+          type="number"
+          placeholder="Verification Threshold"
+          value={formData.verification_threshold}
+          onChange={(e) => setFormData({ ...formData, verification_threshold: Number(e.target.value) })}
+        />
+        <Input
+          type="number"
+          placeholder="Verification Window (days)"
+          value={formData.verification_window_days ?? ""}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              verification_window_days: e.target.value === "" ? null : Number(e.target.value),
+            })
+          }
+        />
       </div>
       <Button onClick={() => onSave(formData)} disabled={saving} className="w-full">
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}

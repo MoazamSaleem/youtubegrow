@@ -319,16 +319,12 @@ const GrowthTasks = () => {
 
   const verifyTask = async (task: GrowthTask) => {
     if (!user) return;
+
     if (task.is_recurring) {
-      toast({
-        title: "Manual task",
-        description: "Recurring tasks cannot be verified via YouTube API.",
-        variant: "destructive",
-      });
+      if (isRecurringTaskVerified(task)) return;
+    } else if (taskProgress[task.id]?.verified_at) {
       return;
     }
-
-    if (taskProgress[task.id]?.verified_at) return;
     setProcessingTask(task.id);
     try {
       const { data: { session } } = await supabase.auth.getSession();

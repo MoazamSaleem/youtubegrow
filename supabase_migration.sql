@@ -144,6 +144,10 @@ CREATE TABLE public.growth_tasks (
     token_reward integer NOT NULL DEFAULT 10,
     is_recurring boolean NOT NULL DEFAULT false,
     reset_frequency text,
+    verification_metric text,
+    verification_operator text,
+    verification_threshold numeric,
+    verification_window_days integer,
     recurrence_days integer,
     order_index integer NOT NULL DEFAULT 0,
     created_at timestamp with time zone NOT NULL DEFAULT now()
@@ -154,6 +158,8 @@ CREATE TABLE public.user_task_progress (
     id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id uuid NOT NULL,
     task_id uuid NOT NULL,
+    verified_at timestamp with time zone,
+    claimed_at timestamp with time zone,
     completed_at timestamp with time zone,
     last_completed_at timestamp with time zone,
     completion_count integer NOT NULL DEFAULT 0,
@@ -168,8 +174,45 @@ CREATE TABLE public.recurring_task_completions (
     task_id uuid NOT NULL,
     period_start date NOT NULL,
     period_end date NOT NULL,
+    verified_at timestamp with time zone,
+    claimed_at timestamp with time zone,
     completed_at timestamp with time zone NOT NULL DEFAULT now()
 );
+
+-- AI-generated growth task sets
+CREATE TABLE public.user_growth_task_sets (
+    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    step_index integer NOT NULL DEFAULT 1,
+    created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS user_growth_task_sets_user_id_idx
+    ON public.user_growth_task_sets (user_id, step_index DESC);
+
+-- AI-generated growth tasks
+CREATE TABLE public.user_growth_tasks (
+    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    task_set_id uuid NOT NULL REFERENCES public.user_growth_task_sets(id) ON DELETE CASCADE,
+    title text NOT NULL,
+    description text,
+    category text NOT NULL,
+    difficulty text NOT NULL DEFAULT 'easy'::text,
+    token_reward integer NOT NULL DEFAULT 10,
+    xp_reward integer NOT NULL DEFAULT 50,
+    order_index integer NOT NULL DEFAULT 0,
+    verification_metric text,
+    verification_operator text,
+    verification_threshold numeric,
+    verification_window_days integer,
+    verified_at timestamp with time zone,
+    claimed_at timestamp with time zone,
+    created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS user_growth_tasks_set_idx
+    ON public.user_growth_tasks (task_set_id, order_index);
 
 -- Milestones table
 CREATE TABLE public.milestones (
@@ -396,6 +439,8 @@ ALTER TABLE public.credits_purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.growth_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_task_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recurring_task_completions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_growth_task_sets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_growth_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_milestones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.badges ENABLE ROW LEVEL SECURITY;
@@ -474,6 +519,15 @@ CREATE POLICY "Users can update their own task progress" ON public.user_task_pro
 CREATE POLICY "Users can view their own recurring completions" ON public.recurring_task_completions FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Admins can view all recurring completions" ON public.recurring_task_completions FOR SELECT USING (has_role(auth.uid(), 'admin'::app_role));
 CREATE POLICY "Users can insert their own recurring completions" ON public.recurring_task_completions FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- USER GROWTH TASK SETS POLICIES
+CREATE POLICY "Users can view own growth task sets" ON public.user_growth_task_sets FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own growth task sets" ON public.user_growth_task_sets FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- USER GROWTH TASKS POLICIES
+CREATE POLICY "Users can view own growth tasks" ON public.user_growth_tasks FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own growth tasks" ON public.user_growth_tasks FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own growth tasks" ON public.user_growth_tasks FOR UPDATE USING (auth.uid() = user_id);
 
 -- MILESTONES POLICIES
 CREATE POLICY "Anyone can view milestones" ON public.milestones FOR SELECT USING (true);

@@ -276,6 +276,10 @@ export type Database = {
           tier: string
           title: string
           token_reward: number
+          verification_metric: string | null
+          verification_operator: string | null
+          verification_threshold: number | null
+          verification_window_days: number | null
           xp_reward: number
         }
         Insert: {
@@ -291,6 +295,10 @@ export type Database = {
           tier?: string
           title: string
           token_reward?: number
+          verification_metric?: string | null
+          verification_operator?: string | null
+          verification_threshold?: number | null
+          verification_window_days?: number | null
           xp_reward?: number
         }
         Update: {
@@ -306,6 +314,10 @@ export type Database = {
           tier?: string
           title?: string
           token_reward?: number
+          verification_metric?: string | null
+          verification_operator?: string | null
+          verification_threshold?: number | null
+          verification_window_days?: number | null
           xp_reward?: number
         }
         Relationships: []

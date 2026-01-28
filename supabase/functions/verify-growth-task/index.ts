@@ -72,6 +72,33 @@ const dateOffset = (days: number) => {
   return date.toISOString().split("T")[0];
 };
 
+const getCurrentPeriod = (frequency: string) => {
+  const now = new Date();
+  let periodStart: Date;
+  let periodEnd: Date;
+
+  if (frequency === "daily") {
+    periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    periodEnd = new Date(periodStart);
+    periodEnd.setDate(periodEnd.getDate() + 1);
+  } else if (frequency === "weekly") {
+    const dayOfWeek = now.getDay();
+    periodStart = new Date(now);
+    periodStart.setDate(now.getDate() - dayOfWeek);
+    periodStart.setHours(0, 0, 0, 0);
+    periodEnd = new Date(periodStart);
+    periodEnd.setDate(periodEnd.getDate() + 7);
+  } else {
+    periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  }
+
+  return {
+    periodStart: periodStart.toISOString().split("T")[0],
+    periodEnd: periodEnd.toISOString().split("T")[0],
+  };
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -250,6 +277,9 @@ serve(async (req) => {
     let target = 0;
     let windowDays: number | null = null;
 
+    let isRecurring = false;
+    let resetFrequency: string | null = null;
+
     if (taskType === "ai") {
       const { data: task } = await supabase
         .from("user_growth_tasks")
@@ -270,30 +300,39 @@ serve(async (req) => {
     } else {
       const { data: task } = await supabase
         .from("growth_tasks")
-        .select("title")
+        .select("title, is_recurring, reset_frequency, verification_metric, verification_operator, verification_threshold, verification_window_days")
         .eq("id", taskId)
         .maybeSingle();
-      const title = task?.title?.toLowerCase() ?? "";
-      if (title.includes("1000 subscribers")) {
-        metric = "subscribers";
-        target = 1000;
-      } else if (title.includes("100 subscribers")) {
-        metric = "subscribers";
-        target = 100;
-      } else if (title.includes("first video")) {
-        metric = "videos";
-        target = 1;
-      } else if (title.includes("publish 10 videos")) {
-        metric = "videos";
-        target = 10;
-      } else if (title.includes("4000 watch hours")) {
-        metric = "watch_minutes_365";
-        target = 240000;
+      isRecurring = Boolean(task?.is_recurring);
+      resetFrequency = task?.reset_frequency ?? null;
+      if (task?.verification_metric && task.verification_threshold != null) {
+        metric = task.verification_metric;
+        operator = task.verification_operator || ">=";
+        target = Number(task.verification_threshold);
+        windowDays = task.verification_window_days;
       } else {
-        return new Response(
-          JSON.stringify({ error: "This task cannot be verified via YouTube API." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        const title = task?.title?.toLowerCase() ?? "";
+        if (title.includes("1000 subscribers")) {
+          metric = "subscribers";
+          target = 1000;
+        } else if (title.includes("100 subscribers")) {
+          metric = "subscribers";
+          target = 100;
+        } else if (title.includes("first video")) {
+          metric = "videos";
+          target = 1;
+        } else if (title.includes("publish 10 videos")) {
+          metric = "videos";
+          target = 10;
+        } else if (title.includes("4000 watch hours")) {
+          metric = "watch_minutes_365";
+          target = 240000;
+        } else {
+          return new Response(
+            JSON.stringify({ error: "This task cannot be verified via YouTube API." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
     }
 
@@ -313,6 +352,18 @@ serve(async (req) => {
         .update({ verified_at: now })
         .eq("id", taskId)
         .eq("user_id", userId);
+    } else if (isRecurring && resetFrequency) {
+      const { periodStart, periodEnd } = getCurrentPeriod(resetFrequency);
+      await supabase
+        .from("recurring_task_completions")
+        .upsert({
+          user_id: userId,
+          task_id: taskId,
+          period_start: periodStart,
+          period_end: periodEnd,
+          verified_at: now,
+          completed_at: now,
+        });
     } else {
       await supabase
         .from("user_task_progress")
