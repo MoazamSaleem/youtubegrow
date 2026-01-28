@@ -68,7 +68,6 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     { name: "Competitors", icon: Users, href: "/dashboard/competitors", requiredPlan: ["basic", "pro", "advanced"], description: "Analyze competitor channels" },
     { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"], description: "Track your growth journey" },
     { name: "AI Credits", icon: Sparkles, href: "/dashboard/credits", description: "Manage your AI credits" },
-    { name: "Leaderboard", icon: Crown, href: "/dashboard/leaderboard", description: "See top creators" },
     { name: "Profile", icon: User, href: "/dashboard/profile", description: "Your account settings" },
     { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat", description: "Chat with AI strategist" },
   ];
