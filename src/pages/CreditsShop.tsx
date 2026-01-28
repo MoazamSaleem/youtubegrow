@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
@@ -41,8 +41,10 @@ interface UserCredits {
 const CreditsShop = () => {
   const { user, subscription } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchParams] = useSearchParams();
+  const confirmHandledRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [packages, setPackages] = useState<CreditPackage[]>([]);
   const [userCredits, setUserCredits] = useState<UserCredits>({
@@ -129,10 +131,13 @@ const CreditsShop = () => {
     if (!user) return;
     const purchaseStatus = searchParams.get("purchase");
     const sessionId = searchParams.get("session_id");
-    if (purchaseStatus === "success" && sessionId) {
-      void confirmStripePurchase(sessionId);
+    if (purchaseStatus === "success" && sessionId && !confirmHandledRef.current) {
+      confirmHandledRef.current = true;
+      void confirmStripePurchase(sessionId).finally(() => {
+        navigate("/dashboard/credits", { replace: true });
+      });
     }
-  }, [user, searchParams]);
+  }, [user, searchParams, navigate]);
 
   const fetchData = async () => {
     if (!user) return;
