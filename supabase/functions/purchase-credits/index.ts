@@ -29,7 +29,13 @@ serve(async (req) => {
     if (!packageId) throw new Error("Package ID is required");
     logStep("Package ID received", { packageId });
 
-    const authHeader = req.headers.get("Authorization")!;
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Missing or invalid Authorization header" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401,
+      });
+    }
     const token = authHeader.replace("Bearer ", "");
     const { data: userData } = await supabaseClient.auth.getUser(token);
     const user = userData.user;
@@ -44,9 +50,12 @@ serve(async (req) => {
       .single();
 
     if (pkgError || !pkg) throw new Error("Package not found");
+    if (!pkg.price_usd) throw new Error("Package price is missing");
     logStep("Package found", { name: pkg.name, credits: pkg.credits_amount, price: pkg.price_usd });
 
-    const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", { apiVersion: "2024-06-20" });
+    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") || "";
+    if (!stripeKey) throw new Error("Stripe is not configured");
+    const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
 
     // Check for existing customer
     const customers = await stripe.customers.list({ email: user.email, limit: 1 });

@@ -54,6 +54,71 @@ const CreditsShop = () => {
   const currentPlan = subscription?.plan || "free";
   const planLimits = PLAN_LIMITS[currentPlan];
 
+  const getSessionWithRefresh = async (forceRefresh = false) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!forceRefresh && !shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return session ?? null;
+  };
+
+  const normalizeFunctionError = (error: any) => {
+    if (!error) return null;
+    const rawBody = error?.context?.body;
+    if (typeof rawBody === "string") {
+      try {
+        const parsed = JSON.parse(rawBody);
+        return parsed?.error || parsed?.message || error.message;
+      } catch {
+        return rawBody || error.message;
+      }
+    }
+    if (rawBody && typeof rawBody === "object") {
+      return rawBody.error || rawBody.message || error.message;
+    }
+    return error.message;
+  };
+
+  const invokeWithAuthRetry = async <T,>(payload: {
+    body: Record<string, unknown>;
+    accessToken: string;
+  }) => {
+    let { data, error } = await supabase.functions.invoke<T>("purchase-credits", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${payload.accessToken}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (!error) return { data, error };
+
+    const status = (error as any)?.context?.status ?? (error as any)?.status;
+    const message = error?.message?.toLowerCase() || "";
+    if (status !== 401 && !message.includes("invalid jwt") && !message.includes("401")) {
+      return { data, error };
+    }
+
+    const refreshed = await getSessionWithRefresh(true);
+    if (!refreshed?.access_token) {
+      return { data, error };
+    }
+
+    return supabase.functions.invoke<T>("purchase-credits", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${refreshed.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+  };
+
   useEffect(() => {
     if (user) fetchData();
   }, [user]);
@@ -173,11 +238,17 @@ const CreditsShop = () => {
     setPurchasing(pkg.id);
 
     try {
-      const { data, error } = await supabase.functions.invoke("purchase-credits", {
+      const session = await getSessionWithRefresh(true);
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
+      const { data, error } = await invokeWithAuthRetry<{ url?: string }>({
         body: { packageId: pkg.id },
+        accessToken: session.access_token,
       });
 
-      if (error) throw error;
+      if (error) throw new Error(normalizeFunctionError(error) || "Unable to start checkout");
       if (data?.url) {
         window.open(data.url, "_blank");
       }
