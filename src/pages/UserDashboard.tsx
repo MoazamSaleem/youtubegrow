@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -46,6 +46,7 @@ const UserDashboard = () => {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [analyticsRows, setAnalyticsRows] = useState<AnalyticsRow[]>([]);
+  const refreshAttemptedRef = useRef(false);
   const [usage, setUsage] = useState({
     keywords_used: 0,
     topics_generated: 0,
@@ -81,6 +82,10 @@ const UserDashboard = () => {
 
   useEffect(() => {
     if (user && channels.length > 0) {
+      if (!refreshAttemptedRef.current) {
+        refreshAttemptedRef.current = true;
+        refreshYouTubeSession();
+      }
       fetchAnalytics();
     }
   }, [user, channels, timeFilter]);
@@ -97,6 +102,40 @@ const UserDashboard = () => {
     if (refreshed.session?.access_token) return refreshed.session;
 
     return null;
+  };
+
+  const invokeWithAuthRetry = async <T,>(payload: {
+    body: Record<string, unknown>;
+    accessToken: string;
+  }) => {
+    let { data, error } = await supabase.functions.invoke<T>("youtube-oauth", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${payload.accessToken}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (!error) return { data, error };
+
+    const status = (error as any)?.context?.status ?? (error as any)?.status;
+    const message = error?.message?.toLowerCase() || "";
+    if (status !== 401 && !message.includes("invalid jwt") && !message.includes("401")) {
+      return { data, error };
+    }
+
+    const refreshed = await getSessionWithRefresh();
+    if (!refreshed?.access_token) {
+      return { data, error };
+    }
+
+    return supabase.functions.invoke<T>("youtube-oauth", {
+      body: payload.body,
+      headers: {
+        Authorization: `Bearer ${refreshed.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
   };
 
   const getTimeRange = () => {
@@ -130,6 +169,35 @@ const UserDashboard = () => {
     }
   };
 
+  const refreshYouTubeSession = async () => {
+    if (!user || channels.length === 0) return;
+    const primary = channels.find((c) => c.is_primary) ?? channels[0];
+    if (!primary?.channel_id) return;
+
+    try {
+      const session = await getSessionWithRefresh();
+      if (!session?.access_token) return;
+
+      const { error } = await invokeWithAuthRetry<{ success?: boolean }>({
+        body: {
+          action: "refresh",
+          channelId: primary.channel_id,
+          userId: user.id,
+        },
+        accessToken: session.access_token,
+      });
+
+      if (error) {
+        const message = error.message || "Failed to refresh YouTube session";
+        if (message.toLowerCase().includes("reconnect")) {
+          toast.error(message);
+        }
+      }
+    } catch (error) {
+      console.error("YouTube session refresh error:", error);
+    }
+  };
+
   const fetchAnalytics = async () => {
     if (!user || channels.length === 0) return;
 
@@ -146,7 +214,7 @@ const UserDashboard = () => {
       }
 
       const { startDate, endDate } = getTimeRange();
-      const { data, error } = await supabase.functions.invoke<{ analytics?: { rows?: AnalyticsRow[] } }>("youtube-oauth", {
+      const { data, error } = await invokeWithAuthRetry<{ analytics?: { rows?: AnalyticsRow[] } }>({
         body: {
           action: "analytics",
           channelId: primary.channel_id,
@@ -154,10 +222,7 @@ const UserDashboard = () => {
           startDate,
           endDate,
         },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
+        accessToken: session.access_token,
       });
 
       if (error) {
