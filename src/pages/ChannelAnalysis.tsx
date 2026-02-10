@@ -103,6 +103,32 @@ interface ChannelAnalysisResult {
   };
 }
 
+interface RealtimeVideoContext {
+  id: string;
+  title: string;
+  description: string;
+  tags?: string[];
+  publishedAt?: string;
+  viewCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  topicCategories?: string[];
+  topicIds?: string[];
+}
+
+interface RealtimeChannelContext {
+  channel?: {
+    title?: string;
+    description?: string;
+    stats?: {
+      subscriberCount?: number;
+      viewCount?: number;
+      videoCount?: number;
+    } | null;
+  };
+  recentVideos?: RealtimeVideoContext[];
+}
+
 const ChannelAnalysis = () => {
   const { user, subscription, loading } = useAuth();
   const navigate = useNavigate();
@@ -117,6 +143,7 @@ const ChannelAnalysis = () => {
   const [goals, setGoals] = useState("");
   const [lastAnalysisDate, setLastAnalysisDate] = useState<string | null>(null);
   const [channelsLoading, setChannelsLoading] = useState(true);
+  const [realtimeContext, setRealtimeContext] = useState<RealtimeChannelContext | null>(null);
   const selectedChannelParam = searchParams.get("channelId");
   const isTestUser = user?.email?.toLowerCase() === "moazamm.dev@gmail.com";
 
@@ -245,6 +272,26 @@ const ChannelAnalysis = () => {
     return session ?? null;
   };
 
+  const fetchRealtimeContext = async (channelId: string) => {
+    if (!user) return null;
+    const session = await getSessionWithRefresh();
+    if (!session?.access_token) return null;
+
+    const { data, error } = await supabase.functions.invoke<RealtimeChannelContext>("youtube-oauth", {
+      body: { action: "channel-context", channelId, userId: user.id },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+    });
+
+    if (error) {
+      console.error("Realtime context error:", error);
+      return null;
+    }
+    return data ?? null;
+  };
+
   const canAnalyze = () => {
     if (isTestUser) return true;
     if (planLimits.channelAnalysisFrequency === "unlimited") return true;
@@ -291,6 +338,12 @@ const ChannelAnalysis = () => {
         expiresAt: session.expires_at,
       });
 
+      const realtime = await fetchRealtimeContext(selectedChannel.channel_id);
+      if (realtime) {
+        setRealtimeContext(realtime);
+      }
+
+      const realtimeStats = realtime?.channel?.stats;
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-channel`,
         {
@@ -303,9 +356,17 @@ const ChannelAnalysis = () => {
           body: JSON.stringify({
             channelId: selectedChannel.channel_id,
             channelName: selectedChannel.channel_name,
-            subscriberCount: selectedChannel.subscriber_count,
-            viewCount: selectedChannel.view_count,
-            videoCount: selectedChannel.video_count,
+            subscriberCount: realtimeStats?.subscriberCount ?? selectedChannel.subscriber_count,
+            viewCount: realtimeStats?.viewCount ?? selectedChannel.view_count,
+            videoCount: realtimeStats?.videoCount ?? selectedChannel.video_count,
+            realtime: realtime
+              ? {
+                  ...realtime,
+                  channel: realtime.channel
+                    ? { ...realtime.channel, title: undefined }
+                    : realtime.channel,
+                }
+              : null,
             ...(channels.length === 0 ? { niche, goals } : {}),
           }),
         }

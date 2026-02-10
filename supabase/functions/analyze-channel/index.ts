@@ -58,7 +58,7 @@ serve(async (req) => {
     const userId = claimsData.user.id;
     console.log('Authenticated user:', userId);
 
-    const { channelId, channelName, subscriberCount, viewCount, videoCount, niche, goals } = await req.json();
+    const { channelId, channelName, subscriberCount, viewCount, videoCount, niche, goals, realtime } = await req.json();
     
     // Input validation
     if (!channelName || typeof channelName !== 'string') {
@@ -100,7 +100,9 @@ serve(async (req) => {
       { onConflict: "user_id,date" }
     );
 
+    const realtimeText = realtime ? JSON.stringify(realtime).slice(0, 4000) : "";
     const prompt = `Perform a comprehensive strategic analysis for my YouTube channel.
+Deeply analyze the channel using realtime data (recent videos, performance, topics) and saved metrics before generating the analysis. Do not base conclusions on the channel name.
 
 Channel Details:
 - Channel Name: ${channelName}
@@ -109,6 +111,7 @@ Channel Details:
 - Video Count: ${videoCount || 'Unknown'}
 ${niche ? `- Niche: ${niche}` : ''}
 ${goals ? `- Growth Goals: ${goals}` : ''}
+${realtimeText ? `- Realtime Channel Data: ${realtimeText}` : ''}
 
 Based on these metrics and general YouTube best practices, provide a detailed strategic analysis in the following JSON format:
 {
