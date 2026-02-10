@@ -87,31 +87,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      (_event, session) => {
         setSession(session);
-        setUser(session?.user ?? null);
         pendingSyncAttempted.current = null;
 
-        // Defer data fetching with setTimeout to prevent deadlock
-        if (session?.user) {
-          setTimeout(() => {
-            fetchUserData(session.user.id);
-          }, 0);
+        // Always resolve user from auth server, not profiles
+        if (session?.access_token) {
+          supabase.auth.getUser().then(({ data }) => {
+            const authUser = data.user ?? null;
+            setUser(authUser);
+            if (authUser) {
+              setTimeout(() => {
+                fetchUserData(authUser.id);
+              }, 0);
+            } else {
+              setProfile(null);
+              setSubscription(null);
+              setIsAdmin(false);
+            }
+            setLoading(false);
+          });
         } else {
+          setUser(null);
           setProfile(null);
           setSubscription(null);
           setIsAdmin(false);
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserData(session.user.id);
+      if (session?.access_token) {
+        const { data } = await supabase.auth.getUser();
+        const authUser = data.user ?? null;
+        setUser(authUser);
+        if (authUser) {
+          fetchUserData(authUser.id);
+        }
+      } else {
+        setUser(null);
       }
       setLoading(false);
     });
