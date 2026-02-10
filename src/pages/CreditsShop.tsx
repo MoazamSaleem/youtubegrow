@@ -161,6 +161,23 @@ const CreditsShop = () => {
 
       if (userData) {
         setUserCredits(userData);
+      } else {
+        const session = await getSessionWithRefresh(true);
+        if (session?.access_token) {
+          await supabase.functions.invoke("init-user-tokens", {
+            body: { reason: "ensure" },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+          });
+          const { data: refreshed } = await supabase
+            .from("user_tokens")
+            .select("ai_credits_balance, ai_credits_used, balance")
+            .eq("user_id", user.id)
+            .maybeSingle();
+          if (refreshed) setUserCredits(refreshed);
+        }
       }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -184,58 +201,40 @@ const CreditsShop = () => {
     setPurchasing(pkg.id);
 
     try {
-      const bonusCredits = Math.floor((pkg.credits_amount * pkg.bonus_percentage) / 100);
-      const totalCredits = pkg.credits_amount + bonusCredits;
-      const newTokenBalance = userCredits.balance - pkg.token_cost;
-      const newCreditsBalance = userCredits.ai_credits_balance + totalCredits;
+      const session = await getSessionWithRefresh(true);
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
 
-      // First get current total_spent
-      const { data: currentData } = await supabase
-        .from("user_tokens")
-        .select("total_spent")
-        .eq("user_id", user.id)
-        .single();
-
-      const currentSpent = (currentData as any)?.total_spent || 0;
-
-      // Update user tokens
-      await supabase
-        .from("user_tokens")
-        .update({
-          balance: newTokenBalance,
-          ai_credits_balance: newCreditsBalance,
-          total_spent: currentSpent + pkg.token_cost,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", user.id);
-
-      // Record purchase
-      await supabase.from("credits_purchases").insert({
-        user_id: user.id,
-        package_id: pkg.id,
-        credits_amount: totalCredits,
-        payment_method: "tokens",
-        tokens_spent: pkg.token_cost,
+      const { data, error } = await supabase.functions.invoke<{
+        success?: boolean;
+        creditsAdded?: number;
+        tokenBalance?: number;
+        creditsBalance?: number;
+        error?: string;
+      }>("purchase-credits-with-tokens", {
+        body: { packageId: pkg.id },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
       });
 
-      // Log to credits history
-      await supabase.from("credits_history").insert({
-        user_id: user.id,
-        amount: totalCredits,
-        type: "purchase",
-        description: `Purchased ${pkg.name} with tokens`,
-        balance_after: newCreditsBalance,
-      });
+      if (error || data?.error) {
+        throw new Error(normalizeFunctionError(error) || data?.error || "Purchase failed");
+      }
 
       setUserCredits({
         ...userCredits,
-        balance: newTokenBalance,
-        ai_credits_balance: newCreditsBalance,
+        balance: data?.tokenBalance ?? userCredits.balance,
+        ai_credits_balance: data?.creditsBalance ?? userCredits.ai_credits_balance,
       });
 
       toast({
         title: "Purchase successful!",
-        description: `+${totalCredits.toLocaleString()} AI credits added to your balance`,
+        description: data?.creditsAdded
+          ? `+${data.creditsAdded.toLocaleString()} AI credits added to your balance`
+          : "AI credits added to your balance",
       });
     } catch (error: any) {
       toast({

@@ -44,7 +44,19 @@ verify_jwt = false
 enabled = true
 verify_jwt = true
 
+[functions.purchase-credits-with-tokens]
+enabled = true
+verify_jwt = true
+
 [functions.confirm-credits-purchase]
+enabled = true
+verify_jwt = true
+
+[functions.init-user-tokens]
+enabled = true
+verify_jwt = true
+
+[functions.claim-growth-task]
 enabled = true
 verify_jwt = true
 

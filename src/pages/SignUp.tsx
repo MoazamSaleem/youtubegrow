@@ -189,25 +189,15 @@ const SignUp = () => {
         console.error("Subscription error:", subError);
       }
 
-      // Add free trial credits
-      await supabase.from("user_tokens").upsert({
-        user_id: userId,
-        ai_credits_balance: 100,
-        balance: 0,
-        total_earned: 0,
-        total_spent: 0,
-        current_xp: 0,
-        ai_credits_used: 0,
-      }, { onConflict: "user_id" });
-
-      // Log to credits history
-      await supabase.from("credits_history").insert({
-        user_id: userId,
-        amount: 100,
-        type: "subscription",
-        description: "Free trial signup bonus",
-        balance_after: 100,
-      });
+      if (hasSession && session?.access_token) {
+        await supabase.functions.invoke("init-user-tokens", {
+          body: { reason: "free_trial" },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+        });
+      }
 
       setLoading(false);
       
@@ -268,16 +258,15 @@ const SignUp = () => {
             current_period_end: trialEnd.toISOString(),
           }, { onConflict: "user_id" });
 
-          // Add free trial credits
-          await supabase.from("user_tokens").upsert({
-            user_id: userId,
-            ai_credits_balance: 100,
-            balance: 0,
-            total_earned: 0,
-            total_spent: 0,
-            current_xp: 0,
-            ai_credits_used: 0,
-          }, { onConflict: "user_id" });
+          if (hasSession && session?.access_token) {
+            await supabase.functions.invoke("init-user-tokens", {
+              body: { reason: "free_trial" },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              },
+            });
+          }
 
           if (needsConfirmation) {
             navigate("/signin");

@@ -158,16 +158,22 @@ const GrowthTasks = () => {
       if (tokensData) {
         setUserTokens(tokensData);
       } else {
-        // Create initial tokens record with plan's AI credits
-        const { data: newTokens } = await supabase
-          .from("user_tokens")
-          .insert({ 
-            user_id: user.id,
-            ai_credits_balance: planLimits.aiStrategistCredits 
-          })
-          .select()
-          .single();
-        if (newTokens) setUserTokens(newTokens);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          await supabase.functions.invoke("init-user-tokens", {
+            body: { reason: "ensure" },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+          });
+          const { data: refreshed } = await supabase
+            .from("user_tokens")
+            .select("*")
+            .eq("user_id", user.id)
+            .maybeSingle();
+          if (refreshed) setUserTokens(refreshed);
+        }
       }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -278,33 +284,39 @@ const GrowthTasks = () => {
 
   const claimAiTask = async (task: AiTask) => {
     if (!user || task.claimed_at || !task.verified_at) return;
-    const now = new Date().toISOString();
     setProcessingTask(task.id);
 
     try {
-      await supabase
-        .from("user_growth_tasks")
-        .update({ claimed_at: now })
-        .eq("id", task.id)
-        .eq("user_id", user.id);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
 
-      const newBalance = userTokens.balance + task.token_reward;
-      const newXp = userTokens.current_xp + task.xp_reward;
-      const newTotalEarned = userTokens.total_earned + task.token_reward;
+      const { data, error } = await supabase.functions.invoke<{
+        success?: boolean;
+        balance?: number;
+        total_earned?: number;
+        current_xp?: number;
+        error?: string;
+      }>("claim-growth-task", {
+        body: { taskId: task.id },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+      });
 
-      await supabase
-        .from("user_tokens")
-        .update({
-          balance: newBalance,
-          current_xp: newXp,
-          total_earned: newTotalEarned,
-          updated_at: now,
-        })
-        .eq("user_id", user.id);
+      if (error || data?.error) {
+        throw new Error(data?.error || error?.message || "Failed to claim reward");
+      }
+
+      const newBalance = data?.balance ?? userTokens.balance;
+      const newXp = data?.current_xp ?? userTokens.current_xp;
+      const newTotalEarned = data?.total_earned ?? userTokens.total_earned;
 
       setUserTokens({ ...userTokens, balance: newBalance, current_xp: newXp, total_earned: newTotalEarned });
       setAiTasks((prev) =>
-        prev.map((item) => (item.id === task.id ? { ...item, claimed_at: now } : item))
+        prev.map((item) => (item.id === task.id ? { ...item, claimed_at: new Date().toISOString() } : item))
       );
       await checkMilestoneUnlocks(newXp);
       toast({

@@ -85,16 +85,22 @@ const AIChat = () => {
     if (data) {
       setUserCredits(data);
     } else {
-      // Initialize user tokens with plan credits
-      const { data: newData } = await supabase
-        .from("user_tokens")
-        .insert({
-          user_id: user.id,
-          ai_credits_balance: planLimits.aiStrategistCredits,
-        })
-        .select("ai_credits_balance, ai_credits_used")
-        .single();
-      if (newData) setUserCredits(newData);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await supabase.functions.invoke("init-user-tokens", {
+          body: { reason: "ensure" },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+        });
+        const { data: refreshed } = await supabase
+          .from("user_tokens")
+          .select("ai_credits_balance, ai_credits_used")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (refreshed) setUserCredits(refreshed);
+      }
     }
   };
 
@@ -109,44 +115,6 @@ const AIChat = () => {
       return "standard";
     }
     return "basic";
-  };
-
-  const deductCredits = async (complexity: "basic" | "standard" | "extensive") => {
-    if (!user) return false;
-
-    const cost = CREDIT_COSTS[complexity];
-    if (userCredits.ai_credits_balance < cost) {
-      toast({
-        title: "Insufficient credits",
-        description: `You need ${cost} credits for this query. Current balance: ${userCredits.ai_credits_balance}`,
-        variant: "destructive",
-      });
-      return false;
-    }
-
-    const newBalance = userCredits.ai_credits_balance - cost;
-    const newUsed = userCredits.ai_credits_used + cost;
-
-    // Update user tokens
-    await supabase
-      .from("user_tokens")
-      .update({
-        ai_credits_balance: newBalance,
-        ai_credits_used: newUsed,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", user.id);
-
-    // Log usage
-    await supabase.from("ai_credits_usage").insert({
-      user_id: user.id,
-      credits_used: cost,
-      query_type: "ai_chat",
-      query_complexity: complexity,
-    });
-
-    setUserCredits({ ai_credits_balance: newBalance, ai_credits_used: newUsed });
-    return true;
   };
 
   const quickPrompts = [
@@ -178,15 +146,6 @@ const AIChat = () => {
     setIsStreaming(true);
 
     try {
-      // Deduct credits if plan has credits
-      if (planLimits.aiStrategistCredits > 0) {
-        const success = await deductCredits(complexity);
-        if (!success) {
-          setIsStreaming(false);
-          return;
-        }
-      }
-
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`,
         {
@@ -267,6 +226,7 @@ const AIChat = () => {
     } finally {
       setIsStreaming(false);
       inputRef.current?.focus();
+      fetchUserCredits();
     }
   };
 

@@ -393,7 +393,7 @@ serve(async (req) => {
         .eq("user_id", userId)
         .eq("channel_id", channelId);
       
-      return new Response(JSON.stringify({ success: true, accessToken: tokens.access_token }), {
+      return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
