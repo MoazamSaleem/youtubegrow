@@ -226,10 +226,23 @@ const KeywordsResearch = () => {
     try {
       const cached = localStorage.getItem(cacheKey);
       if (!cached) return;
-      const parsed = JSON.parse(cached) as { keywords?: Keyword[]; summary?: string };
+      const parsed = JSON.parse(cached) as {
+        keywords?: Keyword[];
+        summary?: string;
+        lastQuery?: string;
+        lastNiche?: string;
+      };
       if (parsed.keywords && parsed.keywords.length > 0) {
         setKeywords(parsed.keywords);
         setSummary(parsed.summary || "");
+        if (parsed.lastQuery) {
+          setLastQuery(parsed.lastQuery);
+          if (!searchQuery) setSearchQuery(parsed.lastQuery);
+        }
+        if (parsed.lastNiche) {
+          setLastNiche(parsed.lastNiche);
+          if (!niche) setNiche(parsed.lastNiche);
+        }
       }
     } catch (error) {
       console.warn("Failed to load cached keywords:", error);
@@ -245,9 +258,9 @@ const KeywordsResearch = () => {
     }
     localStorage.setItem(
       cacheKey,
-      JSON.stringify({ keywords, summary })
+      JSON.stringify({ keywords, summary, lastQuery, lastNiche })
     );
-  }, [user, keywords, summary]);
+  }, [user, keywords, summary, lastQuery, lastNiche]);
 
   useEffect(() => {
     if (autoRunRef.current || keywords.length > 0) return;
