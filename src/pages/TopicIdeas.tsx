@@ -29,6 +29,17 @@ interface Topic {
   difficulty: "easy" | "medium" | "hard";
 }
 
+interface ChannelAnalysisSummary {
+  overallHealth?: { summary?: string };
+  contentStrategy?: {
+    contentPillars?: string[];
+    trendingTopics?: string[];
+  };
+  audienceInsights?: {
+    likelyDemographic?: string;
+  };
+}
+
 const TopicIdeas = () => {
   const navigate = useNavigate();
   const { user, subscription, loading } = useAuth();
@@ -43,6 +54,7 @@ const TopicIdeas = () => {
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelSnippet, setChannelSnippet] = useState<string>("");
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
+  const [channelAnalysis, setChannelAnalysis] = useState<ChannelAnalysisSummary | null>(null);
   const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
@@ -88,6 +100,55 @@ const TopicIdeas = () => {
     setRecentTitles((data?.recentVideos || []).map((v) => v.title || "").filter(Boolean));
   };
 
+  const fetchChannelAnalysis = async (channelId: string) => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("channel_analysis_results")
+      .select("analysis")
+      .eq("user_id", user.id)
+      .eq("channel_id", channelId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Channel analysis fetch error:", error);
+      return;
+    }
+
+    setChannelAnalysis((data?.analysis as ChannelAnalysisSummary) ?? null);
+  };
+
+  const buildAutoNiche = () => {
+    const parts = [
+      channelAnalysis?.overallHealth?.summary,
+      channelAnalysis?.contentStrategy?.contentPillars?.length
+        ? `Pillars: ${channelAnalysis.contentStrategy.contentPillars.join(", ")}`
+        : undefined,
+      channelAnalysis?.audienceInsights?.likelyDemographic
+        ? `Audience: ${channelAnalysis.audienceInsights.likelyDemographic}`
+        : undefined,
+    ].filter(Boolean) as string[];
+
+    const nicheValue = parts.join(" | ").trim();
+    if (nicheValue) return nicheValue.slice(0, 200);
+    if (channelSnippet) return channelSnippet.split(".")[0]?.slice(0, 120) || "";
+    if (recentTitles.length > 0) return recentTitles[0].slice(0, 120);
+    return "";
+  };
+
+  const buildAutoDescription = () => {
+    const parts = [
+      channelSnippet,
+      recentTitles.length > 0 ? `Recent videos: ${recentTitles.join(", ")}` : "",
+      channelAnalysis?.overallHealth?.summary ? `Channel summary: ${channelAnalysis.overallHealth.summary}` : "",
+      channelAnalysis?.contentStrategy?.trendingTopics?.length
+        ? `Trending topics: ${channelAnalysis.contentStrategy.trendingTopics.join(", ")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return parts.slice(0, 1800);
+  };
+
   useEffect(() => {
     if (!user) return;
     const loadChannel = async () => {
@@ -99,7 +160,10 @@ const TopicIdeas = () => {
         const primary = data.find((c) => c.is_primary) || data[0];
         setChannelName(primary.channel_name || null);
         if (primary.channel_id) {
-          await fetchChannelContext(primary.channel_id);
+          await Promise.all([
+            fetchChannelContext(primary.channel_id),
+            fetchChannelAnalysis(primary.channel_id),
+          ]);
         }
       }
     };
@@ -140,22 +204,19 @@ const TopicIdeas = () => {
   }, [user, topics]);
 
   useEffect(() => {
-    if (!channelName || autoRunRef.current || topics.length > 0) return;
+    if (autoRunRef.current || topics.length > 0) return;
+    const autoNiche = buildAutoNiche();
+    if (!autoNiche) return;
     autoRunRef.current = true;
-    const descriptionBlock = [
-      channelSnippet,
-      recentTitles.length > 0 ? `Recent videos: ${recentTitles.join(", ")}` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-    setChannelNiche(channelName);
+    const descriptionBlock = buildAutoDescription();
+    setChannelNiche(autoNiche);
     if (descriptionBlock) {
       setChannelDescription(descriptionBlock);
     }
-    void handleGenerate(channelName);
-  }, [channelName, channelSnippet, recentTitles, topics.length]);
+    void handleGenerate(autoNiche, descriptionBlock);
+  }, [channelSnippet, recentTitles, channelAnalysis, topics.length]);
 
-  const handleGenerate = async (nicheOverride?: string) => {
+  const handleGenerate = async (nicheOverride?: string, descriptionOverride?: string) => {
     const nicheValue = nicheOverride ?? channelNiche;
     if (!nicheValue.trim()) {
       toast({ title: "Please enter your channel niche", variant: "destructive" });
@@ -172,8 +233,9 @@ const TopicIdeas = () => {
       const { data, error } = await supabase.functions.invoke("generate-topics", {
         body: {
           channelNiche: nicheValue,
-          channelDescription,
+          channelDescription: descriptionOverride ?? channelDescription,
           targetAudience,
+          analysis: channelAnalysis,
           count: Math.min(limits.topicsPerDay, 5),
         },
         headers: {
@@ -287,7 +349,7 @@ const TopicIdeas = () => {
             <div className="grid gap-4">
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Channel Niche {channelName ? "(auto-filled)" : <span className="text-destructive">*</span>}
+                  Channel Niche <span className="text-destructive">*</span>
                 </label>
                 <Input
                   placeholder={channelName ? "Search a different niche..." : "e.g., Tech Reviews, Gaming, Cooking, Fitness..."}

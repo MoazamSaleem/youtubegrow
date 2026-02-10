@@ -43,7 +43,7 @@ serve(async (req) => {
     const userId = claimsData.claims.sub as string;
     console.log('Authenticated user:', userId);
 
-    const { channelNiche, channelDescription, targetAudience, count = 5 } = await req.json();
+    const { channelNiche, channelDescription, targetAudience, analysis, count = 5 } = await req.json();
     
     // Input validation
     if (channelNiche && channelNiche.length > 500) {
@@ -83,12 +83,15 @@ serve(async (req) => {
       });
     }
 
+    const analysisText = analysis ? JSON.stringify(analysis).slice(0, 4000) : "";
     const promptInput = [
+      "Instruction: Do not base topics on the channel name. Use channel analysis, recent videos, and competitor insights.",
       `Channel Niche: ${channelNiche || "General"}`,
       `Channel Description: ${channelDescription || "Not specified"}`,
       `Target Audience: ${targetAudience || "General audience"}`,
+      analysisText ? `Channel analysis: ${analysisText}` : undefined,
       `Count: ${validCount}`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
 
     const { data: competitorAnalyses } = await supabaseClient
       .from("competitor_analysis_results")

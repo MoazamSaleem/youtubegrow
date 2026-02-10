@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
@@ -51,7 +50,6 @@ interface ChannelAnalysisSummary {
 }
 
 const KeywordsResearch = () => {
-  const navigate = useNavigate();
   const { user, subscription, loading } = useAuth();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -66,6 +64,9 @@ const KeywordsResearch = () => {
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
   const [channelNiche, setChannelNiche] = useState<string>("");
   const [channelAnalysis, setChannelAnalysis] = useState<ChannelAnalysisSummary | null>(null);
+  const [keywordsUsedToday, setKeywordsUsedToday] = useState(0);
+  const [lastQuery, setLastQuery] = useState("");
+  const [lastNiche, setLastNiche] = useState("");
   const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
@@ -133,10 +134,22 @@ const KeywordsResearch = () => {
     setChannelAnalysis((data?.analysis as ChannelAnalysisSummary) ?? null);
   };
 
+  const fetchUsage = async () => {
+    if (!user) return;
+    const today = new Date().toISOString().split("T")[0];
+    const { data } = await supabase
+      .from("usage_tracking")
+      .select("keywords_used")
+      .eq("user_id", user.id)
+      .eq("date", today)
+      .maybeSingle();
+    setKeywordsUsedToday(data?.keywords_used || 0);
+  };
+
   const buildAutoQuery = () => {
     const trending = channelAnalysis?.contentStrategy?.trendingTopics?.filter(Boolean) ?? [];
     const pillars = channelAnalysis?.contentStrategy?.contentPillars?.filter(Boolean) ?? [];
-    const fallback = recentTitles[0] || channelName || "";
+    const fallback = recentTitles[0] || channelDescription.split(".")[0] || "";
     return trending[0] || pillars[0] || fallback;
   };
 
@@ -179,6 +192,11 @@ const KeywordsResearch = () => {
 
   useEffect(() => {
     if (!user) return;
+    fetchUsage();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
     const cacheKey = `keywords_cache:${user.id}`;
     try {
       const cached = localStorage.getItem(cacheKey);
@@ -207,7 +225,7 @@ const KeywordsResearch = () => {
   }, [user, keywords, summary]);
 
   useEffect(() => {
-    if (!channelName || autoRunRef.current || keywords.length > 0) return;
+    if (autoRunRef.current || keywords.length > 0) return;
     const autoQuery = buildAutoQuery();
     if (!autoQuery) return;
     autoRunRef.current = true;
@@ -215,9 +233,15 @@ const KeywordsResearch = () => {
     if (!searchQuery) setSearchQuery(autoQuery);
     if (!niche) setNiche(autoNiche);
     void handleSearch(autoQuery, autoNiche, true);
-  }, [channelName, channelAnalysis, recentTitles, keywords.length]);
+  }, [channelAnalysis, channelDescription, recentTitles, keywords.length]);
 
-  const handleSearch = async (queryOverride?: string, nicheOverride?: string, autoRun = false) => {
+  const handleSearch = async (
+    queryOverride?: string,
+    nicheOverride?: string,
+    autoRun = false,
+    options?: { append?: boolean; countOverride?: number }
+  ) => {
+    const append = options?.append ?? false;
     const queryValue = queryOverride ?? searchQuery;
     const nicheValue = (nicheOverride ?? niche).trim() ? (nicheOverride ?? niche) : channelNiche;
     const trimmedQuery = queryValue.trim();
@@ -229,6 +253,25 @@ const KeywordsResearch = () => {
       }
       return;
     }
+
+    const remaining = limits.keywordsPerDay === -1
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, limits.keywordsPerDay - keywordsUsedToday);
+    if (remaining <= 0) {
+      toast({ title: "Daily keyword limit reached", variant: "destructive" });
+      return;
+    }
+
+    const defaultInitialCount = 15;
+    const baseCount = options?.countOverride ?? (append
+      ? (currentPlan === "advanced" ? 20 : 10)
+      : Math.min(
+          defaultInitialCount,
+          limits.keywordsPerDay === -1 ? defaultInitialCount : Math.max(1, remaining)
+        ));
+    const requestCount = limits.keywordsPerDay === -1
+      ? baseCount
+      : Math.min(baseCount, Math.max(1, remaining));
 
     setIsSearching(true);
     try {
@@ -250,10 +293,8 @@ const KeywordsResearch = () => {
             query: effectiveQuery,
             niche: trimmedNiche,
             analysis: channelAnalysis,
-            count: Math.min(
-              limits.keywordsPerDay === -1 ? 15 : Math.max(1, limits.keywordsPerDay),
-              15
-            ),
+            existingKeywords: append ? keywords.map((item) => item.keyword) : [],
+            count: requestCount,
           }),
         }
       );
@@ -264,19 +305,42 @@ const KeywordsResearch = () => {
       }
 
       const data = await response.json();
-      setKeywords(data.keywords || []);
-      setSummary(data.summary || "");
+      const incoming = Array.isArray(data.keywords) ? data.keywords : [];
+      const merged = append ? [...keywords, ...incoming] : incoming;
+      const deduped = Array.from(
+        new Map(merged.map((item) => [item.keyword.toLowerCase(), item])).values()
+      );
+      setKeywords(deduped);
+      setSummary(data.summary || summary);
 
       // Update usage
       const today = new Date().toISOString().split("T")[0];
-      await supabase.from("usage_tracking").upsert(
-        {
+      const addedCount = incoming.length;
+      const nextUsed = keywordsUsedToday + addedCount;
+      const { data: existing } = await supabase
+        .from("usage_tracking")
+        .select("user_id")
+        .eq("user_id", user?.id)
+        .eq("date", today)
+        .maybeSingle();
+      if (existing) {
+        await supabase
+          .from("usage_tracking")
+          .update({ keywords_used: nextUsed })
+          .eq("user_id", user?.id)
+          .eq("date", today);
+      } else {
+        await supabase.from("usage_tracking").insert({
           user_id: user?.id,
           date: today,
-          keywords_used: (data.keywords?.length || 0),
-        },
-        { onConflict: "user_id,date" }
-      );
+          keywords_used: nextUsed,
+        });
+      }
+      setKeywordsUsedToday(nextUsed);
+      if (!append) {
+        setLastQuery(effectiveQuery);
+        setLastNiche(trimmedNiche);
+      }
 
       toast({ title: "Keywords researched successfully!" });
     } catch (error: any) {
@@ -289,6 +353,25 @@ const KeywordsResearch = () => {
     } finally {
       setIsSearching(false);
     }
+  };
+
+  const handleLoadMore = () => {
+    if (!lastQuery) {
+      toast({ title: "Run a search first", variant: "destructive" });
+      return;
+    }
+    const loadMoreCount = currentPlan === "advanced" ? 20 : 10;
+    const remaining = limits.keywordsPerDay === -1
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, limits.keywordsPerDay - keywordsUsedToday);
+    if (remaining <= 0) {
+      toast({ title: "Daily keyword limit reached", variant: "destructive" });
+      return;
+    }
+    const count = limits.keywordsPerDay === -1
+      ? loadMoreCount
+      : Math.min(loadMoreCount, remaining);
+    void handleSearch(lastQuery, lastNiche, false, { append: true, countOverride: count });
   };
 
   const copyToClipboard = (keyword: string) => {
@@ -389,7 +472,7 @@ const KeywordsResearch = () => {
                 variant="hero"
                 size="lg"
                 onClick={() => handleSearch()}
-                disabled={isSearching || !searchQuery.trim()}
+                disabled={isSearching || (!searchQuery.trim() && !niche.trim())}
                 className="h-12"
               >
                 {isSearching ? (
@@ -499,6 +582,33 @@ const KeywordsResearch = () => {
                   ))}
                 </TableBody>
               </Table>
+              {(currentPlan === "pro" || currentPlan === "advanced") && lastQuery.trim() && (
+                <div className="p-4 border-t border-border flex flex-col items-center gap-2">
+                  {limits.keywordsPerDay !== -1 && keywordsUsedToday >= limits.keywordsPerDay ? (
+                    <p className="text-sm text-muted-foreground">Daily keyword limit reached.</p>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={handleLoadMore}
+                      disabled={isSearching}
+                    >
+                      {isSearching ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Loading...
+                        </>
+                      ) : (
+                        <>Load More</>
+                      )}
+                    </Button>
+                  )}
+                  {limits.keywordsPerDay !== -1 && (
+                    <p className="text-xs text-muted-foreground">
+                      {Math.max(0, limits.keywordsPerDay - keywordsUsedToday)} keywords remaining today
+                    </p>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
 

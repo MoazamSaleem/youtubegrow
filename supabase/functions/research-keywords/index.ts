@@ -75,7 +75,7 @@ serve(async (req) => {
     }
     console.log('Authenticated user:', userId);
 
-    const { query, niche, analysis, count = 10 } = await req.json();
+    const { query, niche, analysis, existingKeywords, count = 10 } = await req.json();
     
     // Input validation
     if (!query || typeof query !== 'string' || query.length > 200) {
@@ -124,11 +124,16 @@ serve(async (req) => {
     const competitorText = competitorAnalyses?.length
       ? JSON.stringify(competitorAnalyses.map((item) => item.analysis)).slice(0, 3000)
       : "";
+    const existingList = Array.isArray(existingKeywords)
+      ? existingKeywords.map((item) => String(item)).slice(0, 50)
+      : [];
     const promptInput = [
+      "Instruction: Do not base keywords on the channel name. Use channel analysis, content pillars, recent videos, and competitor insights.",
       `Query: ${query}`,
       niche ? `Niche: ${niche}` : undefined,
       analysisText ? `Channel analysis: ${analysisText}` : undefined,
       competitorText ? `Competitor analysis: ${competitorText}` : undefined,
+      existingList.length ? `Avoid duplicates: ${existingList.join(", ")}` : undefined,
       `Count: ${validCount}`,
     ].filter(Boolean).join("\n");
 
