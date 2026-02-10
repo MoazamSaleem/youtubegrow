@@ -43,7 +43,7 @@ serve(async (req) => {
     const userId = claimsData.claims.sub as string;
     console.log('Authenticated user:', userId);
 
-    const { channelNiche, channelDescription, targetAudience, analysis, count = 5 } = await req.json();
+    const { channelNiche, channelDescription, targetAudience, analysis, realtime, count = 5 } = await req.json();
     
     // Input validation
     if (channelNiche && channelNiche.length > 500) {
@@ -84,12 +84,14 @@ serve(async (req) => {
     }
 
     const analysisText = analysis ? JSON.stringify(analysis).slice(0, 4000) : "";
+    const realtimeText = realtime ? JSON.stringify(realtime).slice(0, 4000) : "";
     const promptInput = [
-      "Instruction: Do not base topics on the channel name. Use channel analysis, recent videos, and competitor insights.",
+      "Instruction: Deeply analyze the channel using realtime data (recent videos, performance, topics) and saved analysis before generating topics. Do not base topics on the channel name.",
       `Channel Niche: ${channelNiche || "General"}`,
       `Channel Description: ${channelDescription || "Not specified"}`,
       `Target Audience: ${targetAudience || "General audience"}`,
       analysisText ? `Channel analysis: ${analysisText}` : undefined,
+      realtimeText ? `Realtime channel data: ${realtimeText}` : undefined,
       `Count: ${validCount}`,
     ].filter(Boolean).join("\n");
 

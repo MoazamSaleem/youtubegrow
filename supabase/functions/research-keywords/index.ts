@@ -75,7 +75,7 @@ serve(async (req) => {
     }
     console.log('Authenticated user:', userId);
 
-    const { query, niche, analysis, existingKeywords, count = 10 } = await req.json();
+    const { query, niche, analysis, realtime, existingKeywords, count = 10 } = await req.json();
     
     // Input validation
     if (!query || typeof query !== 'string' || query.length > 200) {
@@ -127,11 +127,13 @@ serve(async (req) => {
     const existingList = Array.isArray(existingKeywords)
       ? existingKeywords.map((item) => String(item)).slice(0, 50)
       : [];
+    const realtimeText = realtime ? JSON.stringify(realtime).slice(0, 4000) : "";
     const promptInput = [
-      "Instruction: Do not base keywords on the channel name. Use channel analysis, content pillars, recent videos, and competitor insights.",
+      "Instruction: Deeply analyze the channel using realtime data (recent videos, performance, topics) and saved analysis before generating keywords. Do not base keywords on the channel name.",
       `Query: ${query}`,
       niche ? `Niche: ${niche}` : undefined,
       analysisText ? `Channel analysis: ${analysisText}` : undefined,
+      realtimeText ? `Realtime channel data: ${realtimeText}` : undefined,
       competitorText ? `Competitor analysis: ${competitorText}` : undefined,
       existingList.length ? `Avoid duplicates: ${existingList.join(", ")}` : undefined,
       `Count: ${validCount}`,

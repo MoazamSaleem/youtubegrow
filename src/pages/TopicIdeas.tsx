@@ -40,6 +40,32 @@ interface ChannelAnalysisSummary {
   };
 }
 
+interface RealtimeVideoContext {
+  id: string;
+  title: string;
+  description: string;
+  tags?: string[];
+  publishedAt?: string;
+  viewCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  topicCategories?: string[];
+  topicIds?: string[];
+}
+
+interface RealtimeChannelContext {
+  channel?: {
+    title?: string;
+    description?: string;
+    stats?: {
+      subscriberCount?: number;
+      viewCount?: number;
+      videoCount?: number;
+    } | null;
+  };
+  recentVideos?: RealtimeVideoContext[];
+}
+
 const TopicIdeas = () => {
   const navigate = useNavigate();
   const { user, subscription, loading } = useAuth();
@@ -55,6 +81,7 @@ const TopicIdeas = () => {
   const [channelSnippet, setChannelSnippet] = useState<string>("");
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
   const [channelAnalysis, setChannelAnalysis] = useState<ChannelAnalysisSummary | null>(null);
+  const [realtimeContext, setRealtimeContext] = useState<RealtimeChannelContext | null>(null);
   const autoRunRef = useRef(false);
 
   const currentPlan = subscription?.plan || "free";
@@ -80,10 +107,7 @@ const TopicIdeas = () => {
     const session = await getSessionWithRefresh();
     if (!session?.access_token) return;
 
-    const { data, error } = await supabase.functions.invoke<{
-      channel?: { title?: string; description?: string };
-      recentVideos?: Array<{ title?: string }>;
-    }>("youtube-oauth", {
+    const { data, error } = await supabase.functions.invoke<RealtimeChannelContext>("youtube-oauth", {
       body: { action: "channel-context", channelId: id, userId: user.id },
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -96,6 +120,7 @@ const TopicIdeas = () => {
       return;
     }
 
+    setRealtimeContext(data ?? null);
     setChannelSnippet(data?.channel?.description || "");
     setRecentTitles((data?.recentVideos || []).map((v) => v.title || "").filter(Boolean));
   };
@@ -236,6 +261,14 @@ const TopicIdeas = () => {
           channelDescription: descriptionOverride ?? channelDescription,
           targetAudience,
           analysis: channelAnalysis,
+          realtime: realtimeContext
+            ? {
+                ...realtimeContext,
+                channel: realtimeContext.channel
+                  ? { ...realtimeContext.channel, title: undefined }
+                  : realtimeContext.channel,
+              }
+            : null,
           count: Math.min(limits.topicsPerDay, 5),
         },
         headers: {

@@ -49,6 +49,32 @@ interface ChannelAnalysisSummary {
   };
 }
 
+interface RealtimeVideoContext {
+  id: string;
+  title: string;
+  description: string;
+  tags?: string[];
+  publishedAt?: string;
+  viewCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  topicCategories?: string[];
+  topicIds?: string[];
+}
+
+interface RealtimeChannelContext {
+  channel?: {
+    title?: string;
+    description?: string;
+    stats?: {
+      subscriberCount?: number;
+      viewCount?: number;
+      videoCount?: number;
+    } | null;
+  };
+  recentVideos?: RealtimeVideoContext[];
+}
+
 const KeywordsResearch = () => {
   const { user, subscription, loading } = useAuth();
   const { toast } = useToast();
@@ -64,6 +90,7 @@ const KeywordsResearch = () => {
   const [recentTitles, setRecentTitles] = useState<string[]>([]);
   const [channelNiche, setChannelNiche] = useState<string>("");
   const [channelAnalysis, setChannelAnalysis] = useState<ChannelAnalysisSummary | null>(null);
+  const [realtimeContext, setRealtimeContext] = useState<RealtimeChannelContext | null>(null);
   const [keywordsUsedToday, setKeywordsUsedToday] = useState(0);
   const [lastQuery, setLastQuery] = useState("");
   const [lastNiche, setLastNiche] = useState("");
@@ -91,10 +118,7 @@ const KeywordsResearch = () => {
     const session = await getSessionWithRefresh();
     if (!session?.access_token) return;
 
-    const { data, error } = await supabase.functions.invoke<{
-      channel?: { title?: string; description?: string };
-      recentVideos?: Array<{ title?: string }>;
-    }>("youtube-oauth", {
+    const { data, error } = await supabase.functions.invoke<RealtimeChannelContext>("youtube-oauth", {
       body: { action: "channel-context", channelId: id, userId: user.id },
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -108,6 +132,7 @@ const KeywordsResearch = () => {
     }
 
     const description = data?.channel?.description || "";
+    setRealtimeContext(data ?? null);
     setChannelDescription(description);
     setRecentTitles((data?.recentVideos || []).map((v) => v.title || "").filter(Boolean));
     const derivedNiche = description ? description.split(".")[0]?.slice(0, 120) : "";
@@ -293,6 +318,14 @@ const KeywordsResearch = () => {
             query: effectiveQuery,
             niche: trimmedNiche,
             analysis: channelAnalysis,
+            realtime: realtimeContext
+              ? {
+                  ...realtimeContext,
+                  channel: realtimeContext.channel
+                    ? { ...realtimeContext.channel, title: undefined }
+                    : realtimeContext.channel,
+                }
+              : null,
             existingKeywords: append ? keywords.map((item) => item.keyword) : [],
             count: requestCount,
           }),

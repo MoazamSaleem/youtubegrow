@@ -550,7 +550,7 @@ serve(async (req) => {
       }
 
       const channelResponse = await fetch(
-        "https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&mine=true",
+        "https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails,statistics&mine=true",
         {
           headers: { Authorization: `Bearer ${accessToken}` },
         }
@@ -569,12 +569,30 @@ serve(async (req) => {
       const channel = channelData.items?.[0];
       const description = channel?.snippet?.description ?? "";
       const title = channel?.snippet?.title ?? "";
+      const channelStats = channel?.statistics
+        ? {
+          subscriberCount: Number(channel.statistics.subscriberCount || 0),
+          viewCount: Number(channel.statistics.viewCount || 0),
+          videoCount: Number(channel.statistics.videoCount || 0),
+        }
+        : null;
       const uploadsPlaylist = channel?.contentDetails?.relatedPlaylists?.uploads;
-      let recentVideos: Array<{ title: string }> = [];
+      let recentVideos: Array<{
+        id: string;
+        title: string;
+        description: string;
+        tags?: string[];
+        publishedAt?: string;
+        viewCount?: number;
+        likeCount?: number;
+        commentCount?: number;
+        topicCategories?: string[];
+        topicIds?: string[];
+      }> = [];
 
       if (uploadsPlaylist) {
         const uploadsResponse = await fetch(
-          `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylist}&maxResults=5`,
+          `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${uploadsPlaylist}&maxResults=10`,
           {
             headers: { Authorization: `Bearer ${accessToken}` },
           }
@@ -582,15 +600,47 @@ serve(async (req) => {
 
         if (uploadsResponse.ok) {
           const uploads = await uploadsResponse.json();
-          recentVideos = (uploads.items || [])
-            .map((item: any) => item?.snippet?.title)
-            .filter((videoTitle: string) => Boolean(videoTitle))
-            .map((videoTitle: string) => ({ title: videoTitle }));
+          const items = uploads.items || [];
+          const videoIds = items
+            .map((item: any) => item?.contentDetails?.videoId)
+            .filter((videoId: string) => Boolean(videoId));
+
+          if (videoIds.length > 0) {
+            const videosResponse = await fetch(
+              `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,topicDetails&id=${videoIds.join(",")}`,
+              { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+
+            if (videosResponse.ok) {
+              const videosData = await videosResponse.json();
+              recentVideos = (videosData.items || []).map((video: any) => ({
+                id: video.id,
+                title: video?.snippet?.title ?? "",
+                description: video?.snippet?.description ?? "",
+                tags: video?.snippet?.tags ?? [],
+                publishedAt: video?.snippet?.publishedAt ?? undefined,
+                viewCount: Number(video?.statistics?.viewCount || 0),
+                likeCount: Number(video?.statistics?.likeCount || 0),
+                commentCount: Number(video?.statistics?.commentCount || 0),
+                topicCategories: video?.topicDetails?.topicCategories ?? [],
+                topicIds: video?.topicDetails?.relevantTopicIds ?? [],
+              }));
+            } else {
+              recentVideos = items
+                .map((item: any) => ({
+                  id: item?.contentDetails?.videoId ?? "",
+                  title: item?.snippet?.title ?? "",
+                  description: item?.snippet?.description ?? "",
+                  publishedAt: item?.snippet?.publishedAt ?? undefined,
+                }))
+                .filter((video: any) => Boolean(video.title));
+            }
+          }
         }
       }
 
       return new Response(JSON.stringify({
-        channel: { title, description },
+        channel: { title, description, stats: channelStats },
         recentVideos,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
