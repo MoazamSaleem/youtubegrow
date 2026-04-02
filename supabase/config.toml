@@ -78,4 +78,4 @@ verify_jwt = true
 
 [functions.check-free-trial-eligibility]
 enabled = true
-verify_jwt = true
+verify_jwt = false

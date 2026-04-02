@@ -182,7 +182,7 @@ serve(async (req) => {
 
     console.log("Generating thumbnail with prompt:", thumbnailPrompt);
 
-    const imageResponse = await fetch("https://api.openai.com/v1/images", {
+    const imageResponse = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${THUMBNAIL_AI_API}`,
@@ -191,8 +191,8 @@ serve(async (req) => {
       body: JSON.stringify({
         model: "gpt-image-1.5",
         prompt: thumbnailPrompt,
-        size: "1792x1024",
-        response_format: "b64_json",
+        size: "1536x1024",
+        quality: "medium",
       }),
     });
 

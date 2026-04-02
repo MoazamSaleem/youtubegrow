@@ -189,7 +189,7 @@ const Hero = () => {
                 </div>
                 <div className="flex-1 flex justify-center">
                   <div className="px-4 py-1 rounded-full bg-secondary text-xs text-muted-foreground">
-                    dashboard.tubegrow.ai
+                    dashboard.youtubegrowthplanner.ai
                   </div>
                 </div>
               </div>

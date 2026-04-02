@@ -34,7 +34,7 @@ const Contact = () => {
     {
       icon: Mail,
       title: "Email Us",
-      description: "support@tubegrow.com",
+      description: "support@youtubegrowth.cloud",
       detail: "We'll respond within 24 hours",
     },
     {
@@ -61,8 +61,8 @@ const Contact = () => {
               <Youtube className="h-8 w-8 text-primary" />
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
-            <span className="font-display font-bold text-xl">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-base sm:text-xl leading-tight">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </Link>
           <Link to="/">

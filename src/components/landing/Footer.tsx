@@ -72,8 +72,8 @@ const Footer = () => {
                 <Youtube className="h-8 w-8 text-primary transition-transform group-hover:scale-110" />
                 <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
               </div>
-              <span className="font-display font-bold text-xl">
-                Tube<span className="gradient-text">Grow</span>
+              <span className="font-display font-bold text-base sm:text-xl leading-tight">
+                YouTube <span className="gradient-text">Growth Planner</span>
               </span>
             </Link>
             <p className="text-muted-foreground text-sm max-w-xs mb-6">
@@ -147,7 +147,7 @@ const Footer = () => {
         {/* Bottom */}
         <div className="pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-sm text-muted-foreground">
-            © 2026 TubeGrow. All rights reserved.
+            © 2026 YouTube Growth Planner. All rights reserved.
           </p>
           <p className="text-sm text-muted-foreground">
             Made with ❤️ for YouTube creators

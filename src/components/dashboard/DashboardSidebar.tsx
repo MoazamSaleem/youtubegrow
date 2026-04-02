@@ -129,8 +129,8 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
                 <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
               </div>
               {sidebarOpen && (
-                <span className="font-display font-bold text-lg">
-                  Tube<span className="gradient-text">Grow</span>
+                <span className="font-display font-bold text-sm leading-tight max-w-[132px]">
+                  YouTube <span className="gradient-text">Growth Planner</span>
                 </span>
               )}
             </Link>

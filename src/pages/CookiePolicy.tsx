@@ -14,8 +14,8 @@ const CookiePolicy = () => {
               <Youtube className="h-8 w-8 text-primary" />
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
-            <span className="font-display font-bold text-xl">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-base sm:text-xl leading-tight">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </Link>
           <Link to="/">
@@ -46,7 +46,7 @@ const CookiePolicy = () => {
 
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">How We Use Cookies</h2>
-              <p className="text-muted-foreground mb-4">TubeGrow uses cookies for the following purposes:</p>
+              <p className="text-muted-foreground mb-4">YouTube Growth Planner uses cookies for the following purposes:</p>
               
               <div className="space-y-4">
                 <div className="glass rounded-lg p-4">
@@ -131,7 +131,7 @@ const CookiePolicy = () => {
               <p className="text-muted-foreground">
                 If you have questions about our use of cookies, please contact us at:
               </p>
-              <p className="text-primary mt-2">privacy@tubegrow.com</p>
+              <p className="text-primary mt-2">privacy@youtubegrowth.cloud</p>
             </section>
           </div>
         </motion.div>

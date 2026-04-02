@@ -49,6 +49,26 @@ const ThumbnailGenerator = () => {
     }
   }, [user]);
 
+  const normalizeFunctionError = (error: any) => {
+    if (!error) return null;
+    const rawBody = error?.context?.body;
+
+    if (typeof rawBody === "string") {
+      try {
+        const parsed = JSON.parse(rawBody);
+        return parsed?.error || parsed?.message || error.message;
+      } catch {
+        return rawBody || error.message;
+      }
+    }
+
+    if (rawBody && typeof rawBody === "object") {
+      return rawBody.error || rawBody.message || error.message;
+    }
+
+    return error.message;
+  };
+
   const fetchUsageData = async () => {
     if (!user) return;
 
@@ -108,7 +128,7 @@ const ThumbnailGenerator = () => {
       });
 
       if (error) {
-        throw error;
+        throw new Error(normalizeFunctionError(error) || "Failed to generate thumbnail");
       }
 
       if (data.error) {

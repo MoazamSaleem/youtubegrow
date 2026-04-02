@@ -12,7 +12,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { YouTubeChannelLink } from "@/components/youtube/YouTubeChannelLink";
 import {
-  Youtube,
   Eye,
   Clock,
   DollarSign,
@@ -332,9 +331,9 @@ const UserDashboard = () => {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center max-w-md"
+            className="w-full max-w-4xl"
           >
-            <div className="glass rounded-2xl p-8">
+            <div className="text-center max-w-md mx-auto mb-8">
               <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mx-auto mb-6">
                 <Link2 className="h-10 w-10 text-primary-foreground" />
               </div>
@@ -347,10 +346,9 @@ const UserDashboard = () => {
               <p className="text-sm text-muted-foreground mb-4">
                 You can link up to {limits.maxChannels} channel{limits.maxChannels > 1 ? "s" : ""} with your {currentPlan} plan.
               </p>
-              <Button variant="hero" size="lg" onClick={() => navigate("/dashboard/profile")}>
-                <Youtube className="h-5 w-5 mr-2" />
-                Connect YouTube
-              </Button>
+            </div>
+            <div className="max-w-3xl mx-auto">
+              <YouTubeChannelLink />
             </div>
           </motion.div>
         </div>

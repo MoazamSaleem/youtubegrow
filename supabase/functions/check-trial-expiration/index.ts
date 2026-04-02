@@ -111,16 +111,16 @@ serve(async (req) => {
 
         try {
           const { data: emailResult, error: emailError } = await resend.emails.send({
-            from: "TubeGrow <noreply@resend.dev>",
+            from: "YouTube Growth Planner <noreply@resend.dev>",
             to: [email],
             subject: daysLeft === 1 
-              ? "⚠️ Your TubeGrow trial expires tomorrow!" 
-              : `Your TubeGrow trial expires in ${daysLeft} days`,
+              ? "⚠️ Your YouTube Growth Planner trial expires tomorrow!" 
+              : `Your YouTube Growth Planner trial expires in ${daysLeft} days`,
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <h1 style="color: #6366f1;">Hi ${name}! 👋</h1>
                 
-                <p>Your free trial of TubeGrow ${daysLeft === 1 ? "expires <strong>tomorrow</strong>" : `expires in <strong>${daysLeft} days</strong>`}!</p>
+                <p>Your free trial of YouTube Growth Planner ${daysLeft === 1 ? "expires <strong>tomorrow</strong>" : `expires in <strong>${daysLeft} days</strong>`}!</p>
                 
                 <p>Don't lose access to:</p>
                 <ul>
@@ -149,7 +149,7 @@ serve(async (req) => {
                 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                 
                 <p style="color: #999; font-size: 12px;">
-                  You're receiving this because you signed up for a TubeGrow free trial.
+                  You're receiving this because you signed up for a YouTube Growth Planner free trial.
                 </p>
               </div>
             `,

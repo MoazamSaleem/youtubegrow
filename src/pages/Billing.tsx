@@ -26,7 +26,7 @@ import {
 const Billing = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, subscription, loading, refreshSubscription } = useAuth();
+  const { subscription, loading, refreshSubscription } = useAuth();
   const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isYearly, setIsYearly] = useState(false);
@@ -34,6 +34,14 @@ const Billing = () => {
   const [managingSubscription, setManagingSubscription] = useState(false);
 
   const currentPlan = subscription?.plan || "free";
+  const currentBillingCycle = subscription?.billing_cycle === "yearly" ? "yearly" : "monthly";
+  const selectedBillingCycle = isYearly ? "yearly" : "monthly";
+
+  useEffect(() => {
+    if (subscription?.billing_cycle === "yearly") {
+      setIsYearly(true);
+    }
+  }, [subscription?.billing_cycle]);
 
   // Handle checkout success/cancel
   useEffect(() => {
@@ -52,6 +60,20 @@ const Billing = () => {
       });
     }
   }, [searchParams, toast, refreshSubscription]);
+
+  const getSessionWithRefresh = async (forceRefresh = false) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!forceRefresh && !shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return session ?? null;
+  };
 
   const plans: { key: SubscriptionPlan; icon: React.ElementType; color: string; description: string; cta: string; popular?: boolean }[] = [
     { key: "free", icon: Star, color: "from-slate-500 to-slate-600", description: "1 month trial", cta: "Start Free Trial" },
@@ -94,53 +116,50 @@ const Billing = () => {
   ];
 
   const handleUpgrade = async (plan: SubscriptionPlan) => {
-    if (plan === currentPlan) return;
+    const isSamePlan = plan === currentPlan;
+    const isSameSelection =
+      plan === "free"
+        ? isSamePlan
+        : isSamePlan && currentBillingCycle === selectedBillingCycle;
+
+    if (isSameSelection) return;
     
-    // Free plan - direct downgrade
+    // Free plan changes must go through Stripe so the external subscription is cancelled correctly.
     if (plan === "free") {
-      setUpgradingPlan(plan);
-      try {
-        const { error } = await supabase
-          .from("subscriptions")
-          .update({
-            plan: "free",
-            billing_cycle: "monthly",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", user?.id);
-
-        if (error) throw error;
-
+      if (currentPlan !== "free") {
         toast({
-          title: "Downgraded to Free",
-          description: "Your plan has been updated.",
+          title: "Manage cancellation in Stripe",
+          description: "Use the customer portal to cancel or downgrade your paid subscription safely.",
         });
-        refreshSubscription();
-      } catch (error: any) {
-        toast({
-          title: "Failed to downgrade",
-          description: error.message,
-          variant: "destructive",
-        });
-      } finally {
-        setUpgradingPlan(null);
+        await handleManageSubscription();
       }
       return;
     }
 
-    // Paid plans - use Stripe checkout
     const stripePlan = STRIPE_PLANS[plan as keyof typeof STRIPE_PLANS];
     if (!stripePlan) return;
 
     setUpgradingPlan(plan);
     try {
+      const session = await getSessionWithRefresh();
       const { data, error } = await supabase.functions.invoke("create-checkout", {
-        body: { priceId: stripePlan.priceId },
+        body: {
+          priceId: selectedBillingCycle === "monthly" ? stripePlan.monthlyPriceId : undefined,
+          productId: stripePlan.productId,
+          billingCycle: selectedBillingCycle,
+          amountUsd: selectedBillingCycle === "yearly" ? stripePlan.yearlyPrice : stripePlan.monthlyPrice,
+        },
+        headers: session?.access_token
+          ? {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            }
+          : undefined,
       });
 
       if (error) throw error;
       if (data?.url) {
-        window.open(data.url, "_blank");
+        window.location.href = data.url;
       }
     } catch (error: any) {
       console.error("Checkout error:", error);
@@ -157,11 +176,19 @@ const Billing = () => {
   const handleManageSubscription = async () => {
     setManagingSubscription(true);
     try {
-      const { data, error } = await supabase.functions.invoke("customer-portal");
+      const session = await getSessionWithRefresh();
+      const { data, error } = await supabase.functions.invoke("customer-portal", {
+        headers: session?.access_token
+          ? {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            }
+          : undefined,
+      });
       
       if (error) throw error;
       if (data?.url) {
-        window.open(data.url, "_blank");
+        window.location.href = data.url;
       }
     } catch (error: any) {
       toast({
@@ -265,8 +292,14 @@ const Billing = () => {
           {/* Plans Grid */}
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
             {plans.map((plan, index) => {
-              const limits = PLAN_LIMITS[plan.key];
-              const isCurrentPlan = currentPlan === plan.key;
+              const isCurrentPlan =
+                plan.key === "free"
+                  ? currentPlan === "free"
+                  : currentPlan === plan.key && currentBillingCycle === selectedBillingCycle;
+              const isSamePlanDifferentCycle =
+                plan.key !== "free" &&
+                currentPlan === plan.key &&
+                currentBillingCycle !== selectedBillingCycle;
               const price = getPrice(plan.key);
               const savings = getSavings(plan.key);
 
@@ -338,8 +371,10 @@ const Billing = () => {
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : isCurrentPlan ? (
                       "Current Plan"
+                    ) : isSamePlanDifferentCycle ? (
+                      selectedBillingCycle === "yearly" ? "Switch to Yearly" : "Switch to Monthly"
                     ) : plan.key === "free" ? (
-                      "Start Free Trial"
+                      currentPlan === "free" ? "Start Free Trial" : "Cancel Paid Plan"
                     ) : (
                       plan.cta
                     )}

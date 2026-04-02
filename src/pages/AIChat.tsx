@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -36,10 +36,227 @@ interface UserCredits {
   ai_credits_used: number;
 }
 
+type DocumentationBlock =
+  | { type: "paragraph"; content: string }
+  | { type: "heading"; content: string; level: number }
+  | { type: "unordered-list"; items: string[] }
+  | { type: "ordered-list"; items: string[] }
+  | { type: "code"; content: string };
+
 const CREDIT_COSTS = {
   basic: 20,
   standard: 50,
   extensive: 100,
+};
+
+const parseInlineDocumentation = (text: string) => {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+
+  return parts.map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code
+          key={index}
+          className="rounded-md border border-border/70 bg-background/70 px-1.5 py-0.5 font-mono text-[0.8em] text-primary"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={index} className="font-semibold text-foreground">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+
+    return <Fragment key={index}>{part}</Fragment>;
+  });
+};
+
+const parseDocumentationBlocks = (content: string): DocumentationBlock[] => {
+  const lines = content.replace(/\r/g, "").split("\n");
+  const blocks: DocumentationBlock[] = [];
+  let paragraphBuffer: string[] = [];
+  let index = 0;
+
+  const flushParagraph = () => {
+    if (!paragraphBuffer.length) return;
+    blocks.push({
+      type: "paragraph",
+      content: paragraphBuffer.join(" "),
+    });
+    paragraphBuffer = [];
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith("```")) {
+      flushParagraph();
+      const codeLines: string[] = [];
+      index += 1;
+
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+
+      if (index < lines.length) {
+        index += 1;
+      }
+
+      blocks.push({
+        type: "code",
+        content: codeLines.join("\n"),
+      });
+      continue;
+    }
+
+    const markdownHeadingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (markdownHeadingMatch) {
+      flushParagraph();
+      blocks.push({
+        type: "heading",
+        level: markdownHeadingMatch[1].length,
+        content: markdownHeadingMatch[2],
+      });
+      index += 1;
+      continue;
+    }
+
+    const boldHeadingMatch = trimmed.match(/^\*\*(.+?)\*\*$/);
+    if (boldHeadingMatch) {
+      flushParagraph();
+      blocks.push({
+        type: "heading",
+        level: 3,
+        content: boldHeadingMatch[1],
+      });
+      index += 1;
+      continue;
+    }
+
+    const unorderedItems: string[] = [];
+    while (index < lines.length) {
+      const unorderedMatch = lines[index].trim().match(/^[-*]\s+(.+)$/);
+      if (!unorderedMatch) break;
+      unorderedItems.push(unorderedMatch[1]);
+      index += 1;
+    }
+    if (unorderedItems.length) {
+      flushParagraph();
+      blocks.push({ type: "unordered-list", items: unorderedItems });
+      continue;
+    }
+
+    const orderedItems: string[] = [];
+    while (index < lines.length) {
+      const orderedMatch = lines[index].trim().match(/^\d+\.\s+(.+)$/);
+      if (!orderedMatch) break;
+      orderedItems.push(orderedMatch[1]);
+      index += 1;
+    }
+    if (orderedItems.length) {
+      flushParagraph();
+      blocks.push({ type: "ordered-list", items: orderedItems });
+      continue;
+    }
+
+    paragraphBuffer.push(trimmed);
+    index += 1;
+  }
+
+  flushParagraph();
+
+  return blocks;
+};
+
+const AssistantDocumentation = ({
+  content,
+  isStreaming,
+}: {
+  content: string;
+  isStreaming: boolean;
+}) => {
+  const blocks = parseDocumentationBlocks(content);
+
+  return (
+    <div className="space-y-4 text-sm leading-7 text-foreground/90">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const headingClass =
+            block.level <= 2
+              ? "font-display text-base font-semibold tracking-tight text-foreground"
+              : "font-display text-sm font-semibold tracking-wide text-foreground";
+
+          return (
+            <h3 key={index} className={headingClass}>
+              {parseInlineDocumentation(block.content)}
+            </h3>
+          );
+        }
+
+        if (block.type === "unordered-list") {
+          return (
+            <ul
+              key={index}
+              className="space-y-2 pl-5 text-muted-foreground marker:text-primary"
+              style={{ listStyleType: "disc" }}
+            >
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{parseInlineDocumentation(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (block.type === "ordered-list") {
+          return (
+            <ol
+              key={index}
+              className="space-y-2 pl-5 text-muted-foreground marker:text-primary"
+              style={{ listStyleType: "decimal" }}
+            >
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{parseInlineDocumentation(item)}</li>
+              ))}
+            </ol>
+          );
+        }
+
+        if (block.type === "code") {
+          return (
+            <pre
+              key={index}
+              className="overflow-x-auto rounded-xl border border-border/70 bg-background/80 p-4 text-xs leading-6 text-primary"
+            >
+              <code>{block.content}</code>
+            </pre>
+          );
+        }
+
+        return (
+          <p key={index} className="text-muted-foreground">
+            {parseInlineDocumentation(block.content)}
+          </p>
+        );
+      })}
+
+      {isStreaming && (
+        <span className="inline-block h-4 w-2 rounded-sm bg-primary align-middle animate-pulse" />
+      )}
+    </div>
+  );
 };
 
 const AIChat = () => {
@@ -72,6 +289,32 @@ const AIChat = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const getSessionWithRefresh = async (forceRefresh = false) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!forceRefresh && !shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return session ?? null;
+  };
+
+  const parseErrorResponse = async (response: Response) => {
+    const text = await response.text();
+    if (!text) return response.statusText || "Request failed";
+
+    try {
+      const parsed = JSON.parse(text);
+      return parsed?.error || parsed?.message || text;
+    } catch {
+      return text;
+    }
+  };
 
   const fetchUserCredits = async () => {
     if (!user) return;
@@ -146,13 +389,19 @@ const AIChat = () => {
     setIsStreaming(true);
 
     try {
+      const session = await getSessionWithRefresh();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({
             messages: [...messages, userMessage],
@@ -164,8 +413,19 @@ const AIChat = () => {
       );
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to get response");
+        throw new Error(await parseErrorResponse(response));
+      }
+
+      const responseType = response.headers.get("content-type") || "";
+      if (responseType.includes("application/json")) {
+        const data = await response.json();
+        const content = data?.content;
+        if (!content || typeof content !== "string") {
+          throw new Error("Empty AI response");
+        }
+
+        setMessages((prev) => [...prev, { role: "assistant", content }]);
+        return;
       }
 
       const reader = response.body?.getReader();
@@ -398,18 +658,22 @@ const AIChat = () => {
                         </div>
                       )}
                       <div
-                        className={`max-w-[80%] p-4 rounded-2xl ${
+                        className={`rounded-2xl ${
                           message.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "glass"
+                            ? "max-w-[80%] bg-primary p-4 text-primary-foreground"
+                            : "w-full max-w-4xl border border-border/70 bg-card/50 p-5 shadow-sm backdrop-blur-md"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                          {message.content}
-                          {message.role === "assistant" && isStreaming && index === messages.length - 1 && (
-                            <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
-                          )}
-                        </p>
+                        {message.role === "assistant" ? (
+                          <AssistantDocumentation
+                            content={message.content}
+                            isStreaming={isStreaming && index === messages.length - 1}
+                          />
+                        ) : (
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {message.content}
+                          </p>
+                        )}
                       </div>
                       {message.role === "user" && (
                         <div className="flex-shrink-0 p-2 rounded-xl bg-secondary h-fit">

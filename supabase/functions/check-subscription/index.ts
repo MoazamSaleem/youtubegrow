@@ -12,6 +12,28 @@ const logStep = (step: string, details?: any) => {
   console.log(`[CHECK-SUBSCRIPTION] ${step}${detailsStr}`);
 };
 
+const isFutureDate = (value?: string | null) => {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+};
+
+const isDbSubscriptionActive = (subscription?: {
+  plan?: string | null;
+  status?: string | null;
+  current_period_end?: string | null;
+  trial_ends_at?: string | null;
+} | null) => {
+  if (!subscription) return false;
+  if (subscription.status === "trialing") {
+    return isFutureDate(subscription.trial_ends_at || subscription.current_period_end);
+  }
+  if (subscription.status === "active") {
+    return subscription.plan === "free" || isFutureDate(subscription.current_period_end);
+  }
+  return false;
+};
+
 // AI Credits included with each plan
 const PLAN_AI_CREDITS: Record<string, number> = {
   free: 100, // Small amount for free trial
@@ -90,9 +112,8 @@ serve(async (req) => {
     if (!stripeKey) {
       logStep("Stripe key not set, returning current subscription");
       const fallbackPlan = currentSubData?.plan || "free";
-      const fallbackStatus = currentSubData?.status || "inactive";
       return new Response(JSON.stringify({
-        subscribed: fallbackStatus === "active" || fallbackStatus === "trialing",
+        subscribed: isDbSubscriptionActive(currentSubData),
         product_id: null,
         plan: fallbackPlan,
         subscription_end: currentSubData?.current_period_end ?? null,
@@ -106,9 +127,8 @@ serve(async (req) => {
     if (!adminClient) {
       logStep("Service role key not set, returning current subscription");
       const fallbackPlan = currentSubData?.plan || "free";
-      const fallbackStatus = currentSubData?.status || "inactive";
       return new Response(JSON.stringify({
-        subscribed: fallbackStatus === "active" || fallbackStatus === "trialing",
+        subscribed: isDbSubscriptionActive(currentSubData),
         product_id: null,
         plan: fallbackPlan,
         subscription_end: currentSubData?.current_period_end ?? null,
@@ -129,6 +149,7 @@ serve(async (req) => {
 
     if (customers.data.length === 0) {
       logStep("No Stripe customer found");
+      let plan = currentSubData?.plan || "free";
       
       // If they have pending status, it means payment failed or was cancelled
       if (previousStatus === "pending") {
@@ -138,14 +159,19 @@ serve(async (req) => {
           .update({
             plan: "free",
             status: "inactive",
+            billing_cycle: "monthly",
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date().toISOString(),
+            trial_ends_at: null,
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", user.id);
+        plan = "free";
       }
       
       return new Response(JSON.stringify({ 
         subscribed: false, 
-        plan: currentSubData?.plan || "free",
+        plan,
         has_used_free_trial: currentSubData?.has_used_free_trial || false
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -170,6 +196,9 @@ serve(async (req) => {
 
     if (hasActiveSub) {
       const subscription = activeSubscription!;
+      const stripeStatus = subscription.status === "trialing" ? "trialing" : "active";
+      const billingCycle = subscription.items.data[0].price.recurring?.interval === "year" ? "yearly" : "monthly";
+      const currentPeriodStart = new Date(subscription.current_period_start * 1000).toISOString();
       subscriptionEnd = new Date(subscription.current_period_end * 1000).toISOString();
       productId = subscription.items.data[0].price.product as string;
       const priceId = subscription.items.data[0].price.id;
@@ -191,6 +220,7 @@ serve(async (req) => {
       // Check if this is a new subscription or plan upgrade (status was pending or plan changed)
       const isNewSubscription = previousStatus === "pending" || previousStatus === "trialing";
       const isPlanUpgrade = previousPlan !== plan;
+      const billingCycleChanged = currentSubData?.billing_cycle !== billingCycle;
 
       if (isNewSubscription || isPlanUpgrade) {
         logStep("New subscription or plan change detected", { isNewSubscription, isPlanUpgrade, from: previousPlan, to: plan });
@@ -201,10 +231,11 @@ serve(async (req) => {
           .upsert({
             user_id: user.id,
             plan: plan,
-            status: "active",
+            status: stripeStatus,
             current_period_end: subscriptionEnd,
-            current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-            billing_cycle: subscription.items.data[0].price.recurring?.interval === "year" ? "yearly" : "monthly",
+            current_period_start: currentPeriodStart,
+            billing_cycle: billingCycle,
+            trial_ends_at: stripeStatus === "trialing" ? subscriptionEnd : null,
             updated_at: new Date().toISOString(),
           }, { onConflict: "user_id" });
 
@@ -293,13 +324,23 @@ serve(async (req) => {
           }
         }
       } else {
-        // Plan unchanged, just update subscription status if needed
-        if (currentSubData?.status !== "active") {
+        // Plan unchanged, keep status, billing cycle, and period boundaries synced.
+        if (
+          currentSubData?.status !== stripeStatus ||
+          currentSubData?.current_period_end !== subscriptionEnd ||
+          currentSubData?.current_period_start !== currentPeriodStart ||
+          billingCycleChanged ||
+          (stripeStatus === "trialing" && currentSubData?.trial_ends_at !== subscriptionEnd) ||
+          (stripeStatus !== "trialing" && currentSubData?.trial_ends_at)
+        ) {
           const { error: updateError } = await supabaseAdmin
             .from("subscriptions")
             .update({
-              status: "active",
+              status: stripeStatus,
               current_period_end: subscriptionEnd,
+              current_period_start: currentPeriodStart,
+              billing_cycle: billingCycle,
+              trial_ends_at: stripeStatus === "trialing" ? subscriptionEnd : null,
               updated_at: new Date().toISOString(),
             })
             .eq("user_id", user.id);
@@ -320,6 +361,10 @@ serve(async (req) => {
           .update({
             plan: "free",
             status: "inactive",
+            billing_cycle: "monthly",
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date().toISOString(),
+            trial_ends_at: null,
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", user.id);
@@ -327,7 +372,7 @@ serve(async (req) => {
       }
       
       // If user had a paid plan but no longer has active subscription, downgrade to free
-      if (previousPlan !== "free" && previousStatus === "active") {
+      if (previousPlan !== "free" && (previousStatus === "active" || previousStatus === "trialing")) {
         logStep("Downgrading to free plan", { from: previousPlan });
         
         await supabaseAdmin
@@ -335,6 +380,10 @@ serve(async (req) => {
           .update({
             plan: "free",
             status: "inactive",
+            billing_cycle: "monthly",
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date().toISOString(),
+            trial_ends_at: null,
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", user.id);

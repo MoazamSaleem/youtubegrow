@@ -21,6 +21,12 @@ interface Profile {
   avatar_url: string | null;
 }
 
+const isFutureDate = (value?: string | null) => {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+};
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
@@ -45,6 +51,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const pendingSyncAttempted = useRef<string | null>(null);
+
+  const getSessionWithRefresh = useCallback(async (forceRefresh = false) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+      const shouldRefresh = expiresAt > 0 && expiresAt - Date.now() < 60_000;
+      if (!forceRefresh && !shouldRefresh) return session;
+    }
+
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session?.access_token) return refreshed.session;
+
+    return session ?? null;
+  }, []);
 
   const fetchUserData = async (userId: string) => {
     try {
@@ -178,8 +198,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const run = (async () => {
       try {
+        const activeSession = await getSessionWithRefresh();
         // First check Stripe and sync server-side subscription
-        const { data: stripeData, error } = await supabase.functions.invoke("check-subscription");
+        const { data: stripeData, error } = await supabase.functions.invoke("check-subscription", {
+          headers: activeSession?.access_token
+            ? {
+                Authorization: `Bearer ${activeSession.access_token}`,
+                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              }
+            : undefined,
+        });
         if (!error && stripeData) {
           // The check-subscription function syncs the subscription in DB, so fetch the updated local data
           console.log("[useAuth] check-subscription returned:", stripeData);
@@ -207,13 +235,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     refreshInFlight.current = run;
     await run;
-  }, [user]);
+  }, [getSessionWithRefresh, user]);
 
   useEffect(() => {
     if (!user || !subscription) return;
     if (pendingSyncAttempted.current === user.id) return;
-    if (subscription.plan === "free") return;
-    if (subscription.status === "active" || subscription.status === "trialing") return;
+
+    const shouldRefresh =
+      subscription.status === "pending" ||
+      subscription.status === "inactive" ||
+      subscription.status === "cancelled" ||
+      subscription.status === "expired" ||
+      (subscription.status === "active" &&
+        subscription.plan !== "free" &&
+        !isFutureDate(subscription.current_period_end)) ||
+      (subscription.status === "trialing" &&
+        !isFutureDate(subscription.trial_ends_at || subscription.current_period_end));
+
+    if (!shouldRefresh) return;
 
     pendingSyncAttempted.current = user.id;
     refreshSubscription();

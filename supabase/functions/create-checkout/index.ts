@@ -34,9 +34,16 @@ serve(async (req) => {
     logStep("Function started");
     
     const payload = await req.json();
-    const { priceId, email, userId } = payload ?? {};
-    if (!priceId) throw new Error("Price ID is required");
-    logStep("Price ID received", { priceId });
+    const {
+      priceId,
+      productId,
+      billingCycle: requestedBillingCycle,
+      amountUsd,
+      email,
+      userId,
+    } = payload ?? {};
+    const billingCycle = requestedBillingCycle === "yearly" ? "yearly" : "monthly";
+    logStep("Checkout payload received", { priceId, productId, billingCycle, amountUsd });
 
     const authHeader = req.headers.get("Authorization");
     let resolvedEmail = email as string | undefined;
@@ -71,6 +78,39 @@ serve(async (req) => {
     }
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
+
+    let resolvedPriceId = priceId as string | undefined;
+    if (!resolvedPriceId) {
+      if (!productId) {
+        throw new Error("Product ID is required when price ID is not provided");
+      }
+
+      const expectedInterval = billingCycle === "yearly" ? "year" : "month";
+      const expectedAmountCents =
+        typeof amountUsd === "number" && Number.isFinite(amountUsd)
+          ? Math.round(amountUsd * 100)
+          : null;
+
+      const prices = await stripe.prices.list({
+        product: productId,
+        active: true,
+        limit: 100,
+      });
+
+      const recurringPrices = prices.data.filter(
+        (price) =>
+          price.type === "recurring" &&
+          price.recurring?.interval === expectedInterval &&
+          (expectedAmountCents === null || price.unit_amount === expectedAmountCents)
+      );
+
+      if (recurringPrices.length === 0) {
+        throw new Error(`No active ${billingCycle} Stripe price found for product ${productId}`);
+      }
+
+      resolvedPriceId = recurringPrices[0].id;
+      logStep("Resolved Stripe price", { resolvedPriceId, billingCycle, productId });
+    }
     
     const customers = await stripe.customers.list({ email: resolvedEmail, limit: 1 });
     let customerId;
@@ -86,8 +126,10 @@ serve(async (req) => {
       customer: customerId,
       customer_email: customerId ? undefined : resolvedEmail,
       client_reference_id: resolvedUserId,
-      metadata: resolvedUserId ? { supabase_user_id: resolvedUserId } : undefined,
-      line_items: [{ price: priceId, quantity: 1 }],
+      metadata: resolvedUserId
+        ? { supabase_user_id: resolvedUserId, billing_cycle: billingCycle }
+        : { billing_cycle: billingCycle },
+      line_items: [{ price: resolvedPriceId, quantity: 1 }],
       mode: "subscription",
       success_url: `${req.headers.get("origin")}${successPath}`,
       cancel_url: `${req.headers.get("origin")}${cancelPath}`,

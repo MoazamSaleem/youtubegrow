@@ -66,8 +66,8 @@ const Blog = () => {
               <Youtube className="h-8 w-8 text-primary" />
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
-            <span className="font-display font-bold text-xl">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-base sm:text-xl leading-tight">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </Link>
           <Link to="/">
@@ -86,9 +86,9 @@ const Blog = () => {
           className="max-w-6xl mx-auto"
         >
           <div className="text-center mb-12">
-            <h1 className="font-display text-4xl font-bold mb-4">TubeGrow Blog</h1>
+            <h1 className="font-display text-4xl font-bold mb-4">YouTube Growth Planner Blog</h1>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Tips, strategies, and insights to help you grow your YouTube channel
+              Tips, strategies, and insights from YouTube Growth Planner to help you grow your YouTube channel
             </p>
           </div>
 

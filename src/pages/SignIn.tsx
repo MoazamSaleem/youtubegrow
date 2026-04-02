@@ -99,8 +99,8 @@ const SignIn = () => {
               <Youtube className="h-10 w-10 text-primary" />
               <Sparkles className="h-4 w-4 text-accent absolute -top-1 -right-1" />
             </div>
-            <span className="font-display font-bold text-2xl">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-xl sm:text-2xl leading-tight">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </div>
 

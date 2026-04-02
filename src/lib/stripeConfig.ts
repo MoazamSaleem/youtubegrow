@@ -1,8 +1,8 @@
 export const STRIPE_PLANS = {
   basic: {
     name: "Basic",
-    priceId: "price_1SmHf4IvqpEim8WgtxTKqyp0",
     productId: "prod_TjlB0qtrN0s4u6",
+    monthlyPriceId: "price_1SmHf4IvqpEim8WgtxTKqyp0",
     monthlyPrice: 7,
     yearlyPrice: 70,
     aiCredits: 1000,
@@ -19,8 +19,8 @@ export const STRIPE_PLANS = {
   },
   pro: {
     name: "Pro",
-    priceId: "price_1SmHfXIvqpEim8Wg9JtMKO3J",
     productId: "prod_TjlBgvbmpocKMF",
+    monthlyPriceId: "price_1SmHfXIvqpEim8Wg9JtMKO3J",
     monthlyPrice: 15,
     yearlyPrice: 120,
     aiCredits: 10000,
@@ -40,8 +40,8 @@ export const STRIPE_PLANS = {
   },
   advanced: {
     name: "Advanced",
-    priceId: "price_1SmHfeIvqpEim8WgyUq2VpbB",
     productId: "prod_TjlCT4ijKq11hk",
+    monthlyPriceId: "price_1SmHfeIvqpEim8WgyUq2VpbB",
     monthlyPrice: 25,
     yearlyPrice: 230,
     aiCredits: 25000,

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -59,10 +60,13 @@ const SignUp = () => {
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; agreed?: string }>({});
   const [freeTrialEligible, setFreeTrialEligible] = useState(true);
   const [checkingEligibility, setCheckingEligibility] = useState(false);
+  const [isYearly, setIsYearly] = useState(false);
+
+  const selectedBillingCycle = isYearly ? "yearly" : "monthly";
 
   const getPlanPrice = (plan: SubscriptionPlan) => {
     if (plan === "free") return PLAN_LIMITS.free.price.monthly;
-    return STRIPE_PLANS[plan].monthlyPrice;
+    return isYearly ? STRIPE_PLANS[plan].yearlyPrice : STRIPE_PLANS[plan].monthlyPrice;
   };
 
   // Check free trial eligibility when email changes
@@ -205,7 +209,7 @@ const SignUp = () => {
         toast.success("Check your email to confirm your account, then sign in to start your free trial.");
         navigate("/signin");
       } else {
-        toast.success("Welcome to TubeGrow! Your 1-month free trial has started.");
+        toast.success("Welcome to YouTube Growth Planner! Your 1-month free trial has started.");
         navigate("/dashboard");
       }
     } else {
@@ -214,7 +218,7 @@ const SignUp = () => {
         user_id: userId,
         plan: selectedPlan,
         status: "pending",
-        billing_cycle: "monthly",
+        billing_cycle: selectedBillingCycle,
         has_used_free_trial: false,
         current_period_start: now.toISOString(),
         current_period_end: now.toISOString(),
@@ -234,9 +238,21 @@ const SignUp = () => {
         const cancelPath = "/signup?checkout=cancelled";
 
         const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
-          body: { priceId: stripePlan.priceId, email, userId, successPath, cancelPath },
+          body: {
+            priceId: selectedBillingCycle === "monthly" ? stripePlan.monthlyPriceId : undefined,
+            productId: stripePlan.productId,
+            billingCycle: selectedBillingCycle,
+            amountUsd: selectedBillingCycle === "yearly" ? stripePlan.yearlyPrice : stripePlan.monthlyPrice,
+            email,
+            userId,
+            successPath,
+            cancelPath,
+          },
           headers: hasSession && session?.access_token
-            ? { Authorization: `Bearer ${session.access_token}` }
+            ? {
+                Authorization: `Bearer ${session.access_token}`,
+                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              }
             : undefined,
         });
 
@@ -379,8 +395,8 @@ const SignUp = () => {
               <Youtube className="h-8 w-8 text-primary" />
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
-            <span className="font-display font-bold text-xl">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-base sm:text-xl leading-tight">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </Link>
           <Link
@@ -416,6 +432,23 @@ const SignUp = () => {
                     Note: You've already used your free trial. Please choose a paid plan.
                   </p>
                 )}
+                <div className="flex items-center justify-center gap-4 mt-6">
+                  <span className={!isYearly ? "font-semibold" : "text-muted-foreground"}>
+                    Monthly
+                  </span>
+                  <Switch
+                    checked={isYearly}
+                    onCheckedChange={setIsYearly}
+                  />
+                  <span className={isYearly ? "font-semibold" : "text-muted-foreground"}>
+                    Yearly
+                  </span>
+                  {isYearly && (
+                    <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20">
+                      Save up to 23%
+                    </Badge>
+                  )}
+                </div>
               </div>
 
               {/* Plan Cards */}
@@ -462,7 +495,9 @@ const SignUp = () => {
 
                       <div className="flex items-baseline gap-1 mb-4">
                         <span className="text-2xl font-bold">${getPlanPrice(config.key)}</span>
-                        <span className="text-muted-foreground text-sm">/month</span>
+                        <span className="text-muted-foreground text-sm">
+                          /{config.key === "free" ? "month" : isYearly ? "year" : "month"}
+                        </span>
                       </div>
 
                       <ul className="space-y-2 mb-4">
@@ -555,7 +590,7 @@ const SignUp = () => {
                           <p className="text-sm text-muted-foreground">
                             {selectedPlan === "free" 
                               ? "1 month free trial" 
-                              : `$${getPlanPrice(selectedPlan)}/month`}
+                              : `$${getPlanPrice(selectedPlan)}/${isYearly ? "year" : "month"}`}
                           </p>
                         </div>
                         {selectedPlan !== "free" && (

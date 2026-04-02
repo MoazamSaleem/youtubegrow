@@ -8,6 +8,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const AI_CHAT_PROMPT_ID = "pmpt_69cebdfa48008193809dc3d80f91cdc808154296f967624c";
+const AI_CHAT_PROMPT_VERSION = "1";
+
+const extractOutputText = (data: any) => {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  const content = data?.output
+    ?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+      item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+    )
+    .filter(Boolean)
+    .join("");
+
+  return typeof content === "string" && content.trim() ? content.trim() : null;
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -23,24 +41,39 @@ serve(async (req) => {
       });
     }
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+    if (!supabaseUrl || (!supabaseAnonKey && !supabaseServiceKey)) {
+      console.error("Supabase keys are not configured");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      supabaseUrl,
+      supabaseServiceKey || supabaseAnonKey,
+      {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: claimsData, error: claimsError } = await supabaseClient.auth.getClaims(token);
+    const { data: userData, error: userError } = await supabaseClient.auth.getUser(token);
     
-    if (claimsError || !claimsData?.claims) {
-      console.error('Auth error:', claimsError);
+    if (userError || !userData?.user) {
+      console.error("Auth error:", userError?.message || userError);
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    const userId = claimsData.claims.sub as string;
+    const userId = userData.user.id;
     console.log('Authenticated user:', userId);
 
     const { messages, channelContext } = await req.json();
@@ -81,10 +114,10 @@ serve(async (req) => {
       });
     }
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? Deno.env.get("ANALYSIS_AI_API");
     
     if (!OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is not configured");
+      console.error("Neither OPENAI_API_KEY nor ANALYSIS_AI_API is configured");
       // Refund credits if API not configured
       await refundCredits(userId, creditCheck.cost!, "AI service not configured - refund");
       return new Response(JSON.stringify({ error: "AI service not configured" }), {
@@ -93,41 +126,41 @@ serve(async (req) => {
       });
     }
 
-    const systemPrompt = `You are an expert YouTube growth strategist and consultant. Your role is to provide personalized, actionable advice to help YouTube creators grow their channels.
+    const serializedMessages = messages
+      .map((msg: { role?: string; content?: string }, index: number) => {
+        const role = msg.role || "user";
+        return `${index + 1}. ${role.toUpperCase()}: ${msg.content ?? ""}`;
+      })
+      .join("\n\n");
 
-${channelContext ? `
-Channel Context:
-- Channel Name: ${channelContext.channelName || 'Not specified'}
-- Niche: ${channelContext.niche || 'General'}
-- Subscribers: ${channelContext.subscribers || 'Not specified'}
-- Main Topics: ${channelContext.topics || 'Various'}
-` : ''}
+    const contextBlock = channelContext
+      ? [
+          `Channel Name: ${channelContext.channelName || "Not specified"}`,
+          `Niche: ${channelContext.niche || "General"}`,
+          `Subscribers: ${channelContext.subscribers || "Not specified"}`,
+          `Main Topics: ${channelContext.topics || "Various"}`,
+        ].join("\n")
+      : "No channel context provided.";
 
-Guidelines:
-1. Provide specific, actionable advice tailored to the creator's situation
-2. Focus on practical strategies that work in the current YouTube landscape
-3. Consider SEO, thumbnails, titles, content strategy, audience engagement, and monetization
-4. Be encouraging but honest about what it takes to succeed
-5. Reference current trends and best practices when relevant
-6. If asked about analytics, help interpret the data and suggest improvements
-7. For video ideas, consider the creator's niche and audience
-8. Keep responses concise but comprehensive
+    const input = [
+      "You are continuing an AI chat session for a YouTube creator.",
+      `Channel Context:\n${contextBlock}`,
+      `Conversation:\n${serializedMessages}`,
+      "Respond to the latest user message with practical, concise YouTube growth advice.",
+    ].join("\n\n");
 
-Remember: You're their personal YouTube strategist. Be supportive, insightful, and results-oriented.`;
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
-        ],
-        stream: true,
+        prompt: {
+          id: AI_CHAT_PROMPT_ID,
+          version: AI_CHAT_PROMPT_VERSION,
+        },
+        input,
       }),
     });
 
@@ -141,7 +174,7 @@ Remember: You're their personal YouTube strategist. Be supportive, insightful, a
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (response.status === 402 || response.status === 401) {
+      if (response.status === 402 || response.status === 401 || response.status === 403) {
         return new Response(JSON.stringify({ error: "AI API key error. Please check your OpenAI API key." }), {
           status: 402,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -155,8 +188,19 @@ Remember: You're their personal YouTube strategist. Be supportive, insightful, a
       });
     }
 
-    return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+    const data = await response.json();
+    const content = extractOutputText(data);
+
+    if (!content) {
+      await refundCredits(userId, creditCheck.cost!, "Empty AI chat response - refund");
+      return new Response(JSON.stringify({ error: "Empty AI response" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ content }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Chat error:", error);

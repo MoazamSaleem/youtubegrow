@@ -40,8 +40,8 @@ const Navbar = () => {
               <Youtube className="h-8 w-8 text-primary transition-transform group-hover:scale-110" />
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1 animate-pulse" />
             </div>
-            <span className="font-display font-bold text-xl text-foreground">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-base sm:text-xl leading-tight text-foreground">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </Link>
 

@@ -408,8 +408,8 @@ const AdminDashboard = () => {
                   <Youtube className="h-8 w-8 text-primary" />
                   <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
                 </div>
-                <span className="font-display font-bold text-lg">
-                  Tube<span className="gradient-text">Grow</span>
+                <span className="font-display font-bold text-sm sm:text-lg leading-tight">
+                  YouTube <span className="gradient-text">Growth Planner</span>
                 </span>
               </Link>
               <Badge className="bg-primary/10 text-primary border-primary/20">

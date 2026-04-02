@@ -14,8 +14,8 @@ const Terms = () => {
               <Youtube className="h-8 w-8 text-primary" />
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
-            <span className="font-display font-bold text-xl">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-base sm:text-xl leading-tight">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </Link>
           <Link to="/">
@@ -39,7 +39,7 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">1. Agreement to Terms</h2>
               <p className="text-muted-foreground">
-                By accessing or using TubeGrow, you agree to be bound by these Terms of Service. 
+                By accessing or using YouTube Growth Planner, you agree to be bound by these Terms of Service. 
                 If you do not agree to these terms, please do not use our services.
               </p>
             </section>
@@ -47,7 +47,7 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">2. Description of Service</h2>
               <p className="text-muted-foreground">
-                TubeGrow is an AI-powered YouTube growth platform that provides analytics, content suggestions, 
+                YouTube Growth Planner is an AI-powered YouTube growth platform that provides analytics, content suggestions, 
                 keyword research, thumbnail generation, and other tools to help creators grow their channels.
               </p>
             </section>
@@ -67,7 +67,7 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">4. Subscription and Payments</h2>
               <p className="text-muted-foreground mb-4">
-                TubeGrow offers various subscription plans. By subscribing, you agree to:
+                YouTube Growth Planner offers various subscription plans. By subscribing, you agree to:
               </p>
               <ul className="list-disc list-inside text-muted-foreground space-y-2">
                 <li>Pay the applicable fees for your chosen plan</li>
@@ -93,7 +93,7 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">6. YouTube API</h2>
               <p className="text-muted-foreground">
-                Our service uses the YouTube API. By using TubeGrow, you also agree to be bound by 
+                Our service uses the YouTube API. By using YouTube Growth Planner, you also agree to be bound by 
                 YouTube's Terms of Service (youtube.com/t/terms) and Google's Privacy Policy 
                 (google.com/policies/privacy).
               </p>
@@ -102,7 +102,7 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">7. Intellectual Property</h2>
               <p className="text-muted-foreground">
-                All content, features, and functionality of TubeGrow are owned by us and protected by 
+                All content, features, and functionality of YouTube Growth Planner are owned by us and protected by 
                 intellectual property laws. You may not copy, modify, distribute, or create derivative 
                 works without our express permission.
               </p>
@@ -111,7 +111,7 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">8. Disclaimer of Warranties</h2>
               <p className="text-muted-foreground">
-                TubeGrow is provided "as is" without warranties of any kind. We do not guarantee 
+                YouTube Growth Planner is provided "as is" without warranties of any kind. We do not guarantee 
                 specific results or that the service will be uninterrupted or error-free.
               </p>
             </section>
@@ -119,7 +119,7 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">9. Limitation of Liability</h2>
               <p className="text-muted-foreground">
-                To the maximum extent permitted by law, TubeGrow shall not be liable for any indirect, 
+                To the maximum extent permitted by law, YouTube Growth Planner shall not be liable for any indirect, 
                 incidental, special, consequential, or punitive damages arising from your use of the service.
               </p>
             </section>
@@ -145,7 +145,7 @@ const Terms = () => {
               <p className="text-muted-foreground">
                 For questions about these Terms, please contact us at:
               </p>
-              <p className="text-primary mt-2">legal@tubegrow.com</p>
+              <p className="text-primary mt-2">legal@youtubegrowth.cloud</p>
             </section>
           </div>
         </motion.div>

@@ -14,8 +14,8 @@ const Privacy = () => {
               <Youtube className="h-8 w-8 text-primary" />
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
-            <span className="font-display font-bold text-xl">
-              Tube<span className="gradient-text">Grow</span>
+            <span className="font-display font-bold text-base sm:text-xl leading-tight">
+              YouTube <span className="gradient-text">Growth Planner</span>
             </span>
           </Link>
           <Link to="/">
@@ -39,7 +39,7 @@ const Privacy = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">1. Introduction</h2>
               <p className="text-muted-foreground">
-                Welcome to TubeGrow ("we," "our," or "us"). We are committed to protecting your personal information 
+                Welcome to YouTube Growth Planner ("we," "our," or "us"). We are committed to protecting your personal information 
                 and your right to privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard 
                 your information when you use our platform.
               </p>
@@ -114,7 +114,7 @@ const Privacy = () => {
               <p className="text-muted-foreground">
                 If you have questions about this Privacy Policy or our data practices, please contact us at:
               </p>
-              <p className="text-primary mt-2">privacy@tubegrow.com</p>
+              <p className="text-primary mt-2">privacy@youtubegrowth.cloud</p>
             </section>
           </div>
         </motion.div>
