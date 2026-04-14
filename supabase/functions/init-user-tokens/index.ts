@@ -6,8 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const FREE_TRIAL_CREDITS = 100;
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -62,12 +60,11 @@ serve(async (req) => {
       .maybeSingle();
 
     if (!existing) {
-      const startingCredits = reason === "free_trial" ? FREE_TRIAL_CREDITS : 0;
       const { data: created, error: createError } = await supabase
         .from("user_tokens")
         .insert({
           user_id: userId,
-          ai_credits_balance: startingCredits,
+          ai_credits_balance: 0,
           balance: 0,
           total_earned: 0,
           total_spent: 0,
@@ -84,41 +81,7 @@ serve(async (req) => {
         });
       }
 
-      if (startingCredits > 0) {
-        await supabase.from("credits_history").insert({
-          user_id: userId,
-          amount: startingCredits,
-          type: "subscription",
-          description: "Free trial signup bonus",
-          balance_after: startingCredits,
-        });
-      }
-
       return new Response(JSON.stringify({ tokens: created }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (reason === "free_trial" && existing.ai_credits_balance === 0) {
-      const { data: updated } = await supabase
-        .from("user_tokens")
-        .update({
-          ai_credits_balance: FREE_TRIAL_CREDITS,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId)
-        .select()
-        .single();
-
-      await supabase.from("credits_history").insert({
-        user_id: userId,
-        amount: FREE_TRIAL_CREDITS,
-        type: "subscription",
-        description: "Free trial signup bonus",
-        balance_after: FREE_TRIAL_CREDITS,
-      });
-
-      return new Response(JSON.stringify({ tokens: updated }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

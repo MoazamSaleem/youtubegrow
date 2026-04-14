@@ -1,9 +1,32 @@
 -- Harden credits and OAuth token permissions
 
 -- Prevent client updates to OAuth token fields
-REVOKE UPDATE (access_token, refresh_token, token_expires_at)
-  ON public.youtube_channels
-  FROM anon, authenticated;
+DO $$
+DECLARE
+  oauth_columns text;
+BEGIN
+  IF to_regclass('public.youtube_channels') IS NULL THEN
+    RAISE NOTICE 'Skipping youtube_channels OAuth privilege hardening because public.youtube_channels does not exist.';
+    RETURN;
+  END IF;
+
+  SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position)
+  INTO oauth_columns
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'youtube_channels'
+    AND column_name IN ('access_token', 'refresh_token', 'token_expires_at');
+
+  IF oauth_columns IS NULL THEN
+    RAISE NOTICE 'Skipping youtube_channels OAuth privilege hardening because token columns do not exist.';
+    RETURN;
+  END IF;
+
+  EXECUTE format(
+    'REVOKE UPDATE (%s) ON public.youtube_channels FROM anon, authenticated',
+    oauth_columns
+  );
+END $$;
 
 -- Prevent client-side manipulation of token balances/credits
 REVOKE INSERT, UPDATE, DELETE

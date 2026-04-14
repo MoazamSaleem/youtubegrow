@@ -8,7 +8,7 @@
 -- ============================================
 
 CREATE TYPE public.app_role AS ENUM ('admin', 'moderator', 'user');
-CREATE TYPE public.subscription_plan AS ENUM ('free', 'starter', 'creator', 'pro');
+CREATE TYPE public.subscription_plan AS ENUM ('basic', 'pro', 'advanced');
 
 -- ============================================
 -- 2. CREATE TABLES
@@ -38,7 +38,7 @@ CREATE TABLE public.user_roles (
 CREATE TABLE public.subscriptions (
     id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id uuid NOT NULL UNIQUE,
-    plan subscription_plan NOT NULL DEFAULT 'free'::subscription_plan,
+    plan subscription_plan NOT NULL,
     status text NOT NULL DEFAULT 'active'::text,
     billing_cycle text NOT NULL DEFAULT 'monthly'::text,
     stripe_customer_id text,
@@ -47,7 +47,6 @@ CREATE TABLE public.subscriptions (
     current_period_end timestamp with time zone NOT NULL DEFAULT (now() + '1 mon'::interval),
     trial_started_at timestamp with time zone,
     trial_ends_at timestamp with time zone,
-    has_used_free_trial boolean DEFAULT false,
     created_at timestamp with time zone NOT NULL DEFAULT now(),
     updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
@@ -381,17 +380,13 @@ BEGIN
   INSERT INTO public.profiles (user_id, email, full_name)
   VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data ->> 'full_name');
   
-  -- Create free subscription with 1 month trial
-  INSERT INTO public.subscriptions (user_id, plan, status, trial_ends_at, current_period_end)
-  VALUES (NEW.id, 'free', 'trialing', now() + interval '1 month', now() + interval '1 month');
-  
   -- Assign default user role
   INSERT INTO public.user_roles (user_id, role)
   VALUES (NEW.id, 'user');
   
   -- Create user tokens record
   INSERT INTO public.user_tokens (user_id, balance, ai_credits_balance)
-  VALUES (NEW.id, 0, 50);
+  VALUES (NEW.id, 0, 0);
   
   RETURN NEW;
 END;

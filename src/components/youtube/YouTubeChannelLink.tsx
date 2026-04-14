@@ -6,6 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { getPlanLimits } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import {
   Youtube,
   Link2,
@@ -53,8 +55,9 @@ export const YouTubeChannelLink = () => {
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [analyticsSummary, setAnalyticsSummary] = useState<ChannelAnalyticsSummary | null>(null);
 
-  const planLimits = getPlanLimits(subscription?.plan || "free");
-  const maxChannelsReached = channels.length >= planLimits.maxChannels;
+  const activePlan = getActiveSubscriptionPlan(subscription);
+  const planLimits = activePlan ? getPlanLimits(activePlan) : null;
+  const maxChannelsReached = !planLimits || channels.length >= planLimits.maxChannels;
 
   const getSessionWithRefresh = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -68,6 +71,47 @@ export const YouTubeChannelLink = () => {
     if (refreshed.session?.access_token) return refreshed.session;
 
     return null;
+  };
+
+  const normalizeFunctionError = async (error: any) => {
+    if (!error) return null;
+    const responseLike = error?.context;
+
+    if (responseLike && typeof responseLike?.clone === "function") {
+      try {
+        const parsed = await responseLike.clone().json();
+        return parsed?.error || parsed?.message || error.message;
+      } catch {
+        try {
+          const text = await responseLike.clone().text();
+          if (!text) return error.message;
+          try {
+            const parsed = JSON.parse(text);
+            return parsed?.error || parsed?.message || text;
+          } catch {
+            return text;
+          }
+        } catch {
+          return error.message;
+        }
+      }
+    }
+
+    const rawBody = error?.context?.body;
+    if (typeof rawBody === "string") {
+      try {
+        const parsed = JSON.parse(rawBody);
+        return parsed?.error || parsed?.message || error.message;
+      } catch {
+        return rawBody || error.message;
+      }
+    }
+
+    if (rawBody && typeof rawBody === "object") {
+      return rawBody.error || rawBody.message || error.message;
+    }
+
+    return error.message;
   };
 
   const invokeWithAuthRetry = async <T,>(payload: {
@@ -150,7 +194,7 @@ export const YouTubeChannelLink = () => {
       });
 
       if (error) {
-        throw new Error(error.message || "Failed to get auth URL");
+        throw new Error(await normalizeFunctionError(error) || "Failed to get auth URL");
       }
 
       const { authUrl } = data || {};
@@ -352,6 +396,17 @@ export const YouTubeChannelLink = () => {
     return (
       <div className="glass rounded-xl p-6 flex items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!activePlan || !planLimits) {
+    return (
+      <div className="glass rounded-xl p-6">
+        <SubscriptionRequiredState
+          title="Connect channels with a paid plan"
+          description="An active subscription is required to connect channels, load analytics, and use AI channel workflows."
+        />
       </div>
     );
   }

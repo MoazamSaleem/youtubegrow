@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { PLAN_LIMITS, SubscriptionPlan, getPlanDisplayName } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import { STRIPE_PLANS } from "@/lib/stripeConfig";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -16,7 +17,6 @@ import {
   X,
   Crown,
   Zap,
-  Star,
   Rocket,
   Loader2,
   Settings,
@@ -33,8 +33,9 @@ const Billing = () => {
   const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
   const [managingSubscription, setManagingSubscription] = useState(false);
 
-  const currentPlan = subscription?.plan || "free";
-  const currentBillingCycle = subscription?.billing_cycle === "yearly" ? "yearly" : "monthly";
+  const currentPlan = getActiveSubscriptionPlan(subscription);
+  const currentBillingCycle =
+    currentPlan && subscription?.billing_cycle === "yearly" ? "yearly" : "monthly";
   const selectedBillingCycle = isYearly ? "yearly" : "monthly";
 
   useEffect(() => {
@@ -46,20 +47,25 @@ const Billing = () => {
   // Handle checkout success/cancel
   useEffect(() => {
     const checkout = searchParams.get("checkout");
+    const portal = searchParams.get("portal");
     if (checkout === "success") {
-      toast({
-        title: "Subscription successful!",
-        description: "Your subscription has been activated. Refreshing...",
-      });
-      refreshSubscription();
+      navigate("/payment-success", { replace: true });
     } else if (checkout === "cancelled") {
       toast({
         title: "Checkout cancelled",
         description: "Your subscription was not changed.",
         variant: "destructive",
       });
+      navigate("/dashboard/billing", { replace: true });
+    } else if (portal === "1") {
+      toast({
+        title: "Syncing subscription",
+        description: "Refreshing your latest billing changes.",
+      });
+      refreshSubscription();
+      navigate("/dashboard/billing", { replace: true });
     }
-  }, [searchParams, toast, refreshSubscription]);
+  }, [searchParams, toast, refreshSubscription, navigate]);
 
   const getSessionWithRefresh = async (forceRefresh = false) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -76,30 +82,13 @@ const Billing = () => {
   };
 
   const plans: { key: SubscriptionPlan; icon: React.ElementType; color: string; description: string; cta: string; popular?: boolean }[] = [
-    { key: "free", icon: Star, color: "from-slate-500 to-slate-600", description: "1 month trial", cta: "Start Free Trial" },
     { key: "basic", icon: Zap, color: "from-teal-500 to-teal-600", description: "For growing creators", cta: "Get Started" },
     { key: "pro", icon: Crown, color: "from-teal-500 to-cyan-500", description: "Most popular choice", cta: "Get Pro", popular: true },
     { key: "advanced", icon: Rocket, color: "from-amber-500 to-orange-500", description: "For serious creators", cta: "Go Advanced" },
   ];
 
   const getPlanFeatures = (plan: SubscriptionPlan) => {
-    if (plan !== "free") {
-      return STRIPE_PLANS[plan].features.map((text) => ({ text, included: true }));
-    }
-
-    const limits = PLAN_LIMITS[plan];
-    const features: { text: string; included: boolean }[] = [];
-    
-    features.push({ text: limits.maxChannels === 1 ? "Link 1 channel" : `Link up to ${limits.maxChannels} channels`, included: true });
-    features.push({ text: limits.hasAdvancedAnalytics ? "Advanced analytics" : "View basic analytics", included: true });
-    features.push({ text: limits.keywordsPerDay === -1 ? "Unlimited keywords" : `${limits.keywordsPerDay} keywords/day`, included: true });
-    features.push({ text: `${limits.topicsPerDay} topic suggestions/day`, included: true });
-    features.push({ text: limits.channelAnalysisFrequency === "never" ? "AI channel analysis" : limits.channelAnalysisFrequency === "unlimited" ? "Unlimited AI analysis" : `AI analysis ${limits.channelAnalysisFrequency}`, included: limits.channelAnalysisFrequency !== "never" });
-    features.push({ text: limits.competitorAnalysisFrequency === "never" ? "Competitor analysis" : limits.competitorAnalysisFrequency === "daily" ? "Daily competitor analysis" : `Competitor analysis ${limits.competitorAnalysisFrequency}`, included: limits.competitorAnalysisFrequency !== "never" });
-    features.push({ text: "Script writer", included: limits.hasScriptWriter });
-    features.push({ text: limits.thumbnailsPerDay === -1 ? "Unlimited thumbnails" : limits.thumbnailsPerDay > 0 ? `${limits.thumbnailsPerDay} thumbnails/day` : "Thumbnail generator", included: limits.thumbnailsPerDay !== 0 });
-
-    return features;
+    return STRIPE_PLANS[plan].features.map((text) => ({ text, included: true }));
   };
 
   const features = [
@@ -110,6 +99,8 @@ const Billing = () => {
     { name: "Channel Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].channelAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].channelAnalysisFrequency },
     { name: "Competitor Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].competitorAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].competitorAnalysisFrequency },
     { name: "Script Writer", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasScriptWriter },
+    { name: "Text to Speech", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasTextToSpeech },
+    { name: "Voice Clone", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasVoiceClone },
     { name: "Thumbnails/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].thumbnailsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].thumbnailsPerDay || "None" },
     { name: "YouTube Strategist AI", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasYoutubeStrategist },
     { name: "Growth Tasks", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].growthTasksTier === "none" ? false : true },
@@ -117,24 +108,9 @@ const Billing = () => {
 
   const handleUpgrade = async (plan: SubscriptionPlan) => {
     const isSamePlan = plan === currentPlan;
-    const isSameSelection =
-      plan === "free"
-        ? isSamePlan
-        : isSamePlan && currentBillingCycle === selectedBillingCycle;
+    const isSameSelection = isSamePlan && currentBillingCycle === selectedBillingCycle;
 
     if (isSameSelection) return;
-    
-    // Free plan changes must go through Stripe so the external subscription is cancelled correctly.
-    if (plan === "free") {
-      if (currentPlan !== "free") {
-        toast({
-          title: "Manage cancellation in Stripe",
-          description: "Use the customer portal to cancel or downgrade your paid subscription safely.",
-        });
-        await handleManageSubscription();
-      }
-      return;
-    }
 
     const stripePlan = STRIPE_PLANS[plan as keyof typeof STRIPE_PLANS];
     if (!stripePlan) return;
@@ -148,6 +124,8 @@ const Billing = () => {
           productId: stripePlan.productId,
           billingCycle: selectedBillingCycle,
           amountUsd: selectedBillingCycle === "yearly" ? stripePlan.yearlyPrice : stripePlan.monthlyPrice,
+          successPath: "/payment-success",
+          cancelPath: "/dashboard/billing?checkout=cancelled",
         },
         headers: session?.access_token
           ? {
@@ -202,12 +180,10 @@ const Billing = () => {
   };
 
   const getPrice = (plan: SubscriptionPlan) => {
-    if (plan === "free") return 0;
     return isYearly ? STRIPE_PLANS[plan].yearlyPrice : STRIPE_PLANS[plan].monthlyPrice;
   };
 
   const getSavings = (plan: SubscriptionPlan) => {
-    if (plan === "free") return 0;
     const monthly = STRIPE_PLANS[plan].monthlyPrice;
     const yearly = STRIPE_PLANS[plan].yearlyPrice;
     const yearlyEquivalent = monthly * 12;
@@ -247,7 +223,7 @@ const Billing = () => {
             </p>
 
             {/* Current Plan Info & Manage Button */}
-            {currentPlan !== "free" && (
+            {currentPlan && (
               <div className="mt-4 flex items-center justify-center gap-3">
                 <Badge className="bg-primary/10 text-primary border-primary/20">
                   <Sparkles className="h-3 w-3 mr-1" />
@@ -290,16 +266,12 @@ const Billing = () => {
           </motion.div>
 
           {/* Plans Grid */}
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
             {plans.map((plan, index) => {
               const isCurrentPlan =
-                plan.key === "free"
-                  ? currentPlan === "free"
-                  : currentPlan === plan.key && currentBillingCycle === selectedBillingCycle;
+                currentPlan === plan.key && currentBillingCycle === selectedBillingCycle;
               const isSamePlanDifferentCycle =
-                plan.key !== "free" &&
-                currentPlan === plan.key &&
-                currentBillingCycle !== selectedBillingCycle;
+                currentPlan === plan.key && currentBillingCycle !== selectedBillingCycle;
               const price = getPrice(plan.key);
               const savings = getSavings(plan.key);
 
@@ -373,8 +345,6 @@ const Billing = () => {
                       "Current Plan"
                     ) : isSamePlanDifferentCycle ? (
                       selectedBillingCycle === "yearly" ? "Switch to Yearly" : "Switch to Monthly"
-                    ) : plan.key === "free" ? (
-                      currentPlan === "free" ? "Start Free Trial" : "Cancel Paid Plan"
                     ) : (
                       plan.cta
                     )}
@@ -396,7 +366,7 @@ const Billing = () => {
               <h2 className="font-display text-xl font-bold">AI Strategist Credits</h2>
             </div>
             <p className="text-muted-foreground mb-4">
-              AI Strategist credits power personalized YouTube growth recommendations. Each query consumes credits based on complexity:
+              AI Strategist credits power personalized AI tools across the platform, including text to speech and voice cloning. Text to speech uses 80-180 credits depending on character length, while strategist queries still consume credits based on complexity:
             </p>
             <div className="grid sm:grid-cols-3 gap-4">
               <div className="p-4 rounded-lg bg-muted/30">

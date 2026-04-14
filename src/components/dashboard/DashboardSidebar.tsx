@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { PLAN_LIMITS, getPlanDisplayName, SubscriptionPlan } from "@/lib/planLimits";
+import { getPlanDisplayName, PLAN_ORDER, SubscriptionPlan } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import { UpgradeModal } from "./UpgradeModal";
 import {
   Tooltip,
@@ -26,6 +27,7 @@ import {
   Lock,
   FileText,
   Image,
+  AudioLines,
   Target,
   Shield,
   User,
@@ -52,24 +54,25 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
   const { user, profile, subscription, isAdmin, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const currentPlan = (subscription?.plan || "free") as SubscriptionPlan;
+  const currentPlan = getActiveSubscriptionPlan(subscription);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [selectedFeature, setSelectedFeature] = useState<string>("");
   const [requiredPlanForFeature, setRequiredPlanForFeature] = useState<SubscriptionPlan>("basic");
   const isTestUser = user?.email?.toLowerCase() === "moazamm.dev@gmail.com";
 
   const navigation: NavItem[] = [
-    { name: "Overview", icon: BarChart3, href: "/dashboard", description: "Your channel dashboard" },
+    { name: "Overview", icon: BarChart3, href: "/dashboard", requiredPlan: ["basic", "pro", "advanced"], description: "Your channel dashboard" },
     { name: "Channel Analysis", icon: Brain, href: "/dashboard/analysis", requiredPlan: ["basic", "pro", "advanced"], description: "AI-powered channel insights" },
-    { name: "Keywords", icon: Search, href: "/dashboard/keywords", description: "Research trending keywords" },
-    { name: "Topic Ideas", icon: Lightbulb, href: "/dashboard/topics", description: "Get video topic suggestions" },
+    { name: "Keywords", icon: Search, href: "/dashboard/keywords", requiredPlan: ["basic", "pro", "advanced"], description: "Research trending keywords" },
+    { name: "Topic Ideas", icon: Lightbulb, href: "/dashboard/topics", requiredPlan: ["basic", "pro", "advanced"], description: "Get video topic suggestions" },
     { name: "Script Writer", icon: FileText, href: "/dashboard/scripts", requiredPlan: ["pro", "advanced"], description: "AI-generated video scripts" },
+    { name: "Text to Speech", icon: AudioLines, href: "/dashboard/text-to-speech", requiredPlan: ["pro", "advanced"], description: "Generate voiceovers with preset voices or voice clones" },
     { name: "Thumbnails", icon: Image, href: "/dashboard/thumbnails", requiredPlan: ["pro", "advanced"], description: "Generate eye-catching thumbnails" },
     { name: "Competitors", icon: Users, href: "/dashboard/competitors", requiredPlan: ["basic", "pro", "advanced"], description: "Analyze competitor channels" },
     { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"], description: "Track your growth journey" },
     { name: "AI Credits", icon: Sparkles, href: "/dashboard/credits", description: "Manage your AI credits" },
     { name: "Profile", icon: User, href: "/dashboard/profile", description: "Your account settings" },
-    { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat", description: "Chat with AI strategist" },
+    { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat", requiredPlan: ["pro", "advanced"], description: "Chat with AI strategist" },
   ];
 
   const isLocked = (item: NavItem): boolean => {
@@ -79,11 +82,10 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
   };
 
   const getMinRequiredPlan = (item: NavItem): SubscriptionPlan => {
-    if (!item.requiredPlan || item.requiredPlan.length === 0) return "free";
-    const planOrder: SubscriptionPlan[] = ["free", "basic", "pro", "advanced"];
+    if (!item.requiredPlan || item.requiredPlan.length === 0) return "basic";
     let minPlan: SubscriptionPlan = "advanced";
     for (const plan of item.requiredPlan) {
-      if (planOrder.indexOf(plan) < planOrder.indexOf(minPlan)) {
+      if (PLAN_ORDER.indexOf(plan) < PLAN_ORDER.indexOf(minPlan)) {
         minPlan = plan;
       }
     }
@@ -102,8 +104,6 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     }
     return location.pathname.startsWith(href);
   };
-
-  const planLimits = PLAN_LIMITS[currentPlan];
 
   return (
     <>
@@ -130,7 +130,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
               </div>
               {sidebarOpen && (
                 <span className="font-display font-bold text-sm leading-tight max-w-[132px]">
-                  YouTube <span className="gradient-text">Growth Planner</span>
+                  YouTube <span className="gradient-text">Growth Partner</span>
                 </span>
               )}
             </Link>
@@ -241,7 +241,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
                     {profile?.full_name || "User"}
                   </p>
                   <p className="text-xs text-muted-foreground capitalize">
-                    {getPlanDisplayName(currentPlan)} Plan
+                    {currentPlan ? `${getPlanDisplayName(currentPlan)} Plan` : "No active subscription"}
                   </p>
                 </div>
               )}

@@ -31,6 +31,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { SubscriptionPlan } from "@/lib/planLimits";
 import {
   Youtube,
   Sparkles,
@@ -58,14 +59,12 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-type SubscriptionPlan = "free" | "basic" | "pro" | "advanced";
-
 interface User {
   id: string;
   email: string;
   full_name: string | null;
   created_at: string;
-  plan: SubscriptionPlan;
+  plan: SubscriptionPlan | null;
   status: string;
 }
 
@@ -224,12 +223,17 @@ const AdminDashboard = () => {
           email: profile.email || "",
           full_name: profile.full_name,
           created_at: profile.created_at,
-          plan: (sub?.plan as SubscriptionPlan) || "free",
-          status: sub?.status || "unknown",
+          plan: (sub?.plan as SubscriptionPlan) || null,
+          status: sub?.status || "inactive",
         };
       });
 
-      const filtered = planFilter === "all" ? usersWithSubs : usersWithSubs.filter((u) => u.plan === planFilter);
+      const filtered =
+        planFilter === "all"
+          ? usersWithSubs
+          : planFilter === "none"
+            ? usersWithSubs.filter((u) => !u.plan)
+            : usersWithSubs.filter((u) => u.plan === planFilter);
       setUsers(filtered);
       setTotalUsers(count || 0);
     }
@@ -491,7 +495,7 @@ const AdminDashboard = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Plans</SelectItem>
-                    <SelectItem value="free">Free</SelectItem>
+                    <SelectItem value="none">No Active Plan</SelectItem>
                     <SelectItem value="basic">Basic</SelectItem>
                     <SelectItem value="pro">Pro</SelectItem>
                     <SelectItem value="advanced">Advanced</SelectItem>
@@ -519,12 +523,18 @@ const AdminDashboard = () => {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Select value={u.plan} onValueChange={(v) => handleUpdatePlan(u.id, v as SubscriptionPlan)}>
+                          <Select
+                            value={u.plan ?? "none"}
+                            onValueChange={(v) => {
+                              if (v === "none") return;
+                              handleUpdatePlan(u.id, v as SubscriptionPlan);
+                            }}
+                          >
                             <SelectTrigger className="w-[120px]">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="free">Free</SelectItem>
+                              <SelectItem value="none">No Active Plan</SelectItem>
                               <SelectItem value="basic">Basic</SelectItem>
                               <SelectItem value="pro">Pro</SelectItem>
                               <SelectItem value="advanced">Advanced</SelectItem>

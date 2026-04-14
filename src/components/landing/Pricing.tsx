@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Button } from "@/components/ui/button";
-import { Check, X, Sparkles, Crown, Zap, Star } from "lucide-react";
+import { Check, X, Sparkles, Crown, Zap } from "lucide-react";
 import { PLAN_LIMITS, SubscriptionPlan } from "@/lib/planLimits";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -14,8 +14,7 @@ const Pricing = () => {
   const headerRef = useRef<HTMLDivElement>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
 
-  const planConfigs: { key: SubscriptionPlan; description: string; icon: typeof Star; cta: string; variant: "outline" | "default" | "hero" | "premium"; popular: boolean }[] = [
-    { key: "free", description: "1 month trial", icon: Star, cta: "Start Free Trial", variant: "outline", popular: false },
+  const planConfigs: { key: SubscriptionPlan; description: string; icon: typeof Zap; cta: string; variant: "default" | "hero" | "premium"; popular: boolean }[] = [
     { key: "basic", description: "For growing creators", icon: Zap, cta: "Get Started", variant: "default", popular: false },
     { key: "pro", description: "Most popular choice", icon: Crown, cta: "Get Pro", variant: "hero", popular: true },
     { key: "advanced", description: "For serious creators", icon: Sparkles, cta: "Go Advanced", variant: "premium", popular: false },
@@ -74,6 +73,11 @@ const Pricing = () => {
       text: "Script writer", 
       included: limits.hasScriptWriter 
     });
+
+    if (plan === "pro" || plan === "advanced") {
+      features.push({ text: "Text to Speech", included: limits.hasTextToSpeech });
+      features.push({ text: "Voice Clone", included: limits.hasVoiceClone });
+    }
     
     // Thumbnails
     features.push({ 
@@ -90,10 +94,7 @@ const Pricing = () => {
       features.push({ text: "YouTube Strategist AI", included: limits.hasYoutubeStrategist });
     }
     
-    // Growth tasks (only show for paid plans)
-    if (plan !== "free") {
-      features.push({ text: "Growth tasks & milestones", included: limits.growthTasksTier !== "none" });
-    }
+    features.push({ text: "Growth tasks & milestones", included: limits.growthTasksTier !== "none" });
     
     // AI credits (only show for paid plans)
     if (limits.aiStrategistCredits > 0) {
@@ -199,7 +200,7 @@ const Pricing = () => {
         {/* Pricing Cards */}
         <div
           ref={cardsRef}
-          className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 max-w-7xl mx-auto"
+          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 max-w-6xl mx-auto"
         >
           {planConfigs.map((config) => {
             const limits = PLAN_LIMITS[config.key];

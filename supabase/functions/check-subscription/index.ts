@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { selectBestSubscriptionRecord } from "../_shared/subscription.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,21 +26,130 @@ const isDbSubscriptionActive = (subscription?: {
   trial_ends_at?: string | null;
 } | null) => {
   if (!subscription) return false;
-  if (subscription.status === "trialing") {
-    return isFutureDate(subscription.trial_ends_at || subscription.current_period_end);
+
+  switch (subscription.status) {
+    case "active":
+    case "trialing":
+      return true;
+    case "cancelled":
+    case "canceled":
+      return isFutureDate(subscription.trial_ends_at || subscription.current_period_end);
+    default:
+      return false;
   }
-  if (subscription.status === "active") {
-    return subscription.plan === "free" || isFutureDate(subscription.current_period_end);
-  }
-  return false;
+};
+
+const hasSubscriptionWindowEnded = (subscription?: {
+  current_period_end?: string | null;
+  trial_ends_at?: string | null;
+} | null) => {
+  if (!subscription) return true;
+  return !isFutureDate(subscription.trial_ends_at || subscription.current_period_end);
 };
 
 // AI Credits included with each plan
 const PLAN_AI_CREDITS: Record<string, number> = {
-  free: 100, // Small amount for free trial
   basic: 1000,
   pro: 10000,
   advanced: 25000,
+};
+
+const persistSubscriptionRecord = async ({
+  supabaseAdmin,
+  userId,
+  values,
+}: {
+  supabaseAdmin: ReturnType<typeof createClient>;
+  userId: string;
+  values: Record<string, unknown>;
+}) => {
+  const payload = {
+    ...values,
+    updated_at: values.updated_at ?? new Date().toISOString(),
+  };
+
+  const { data: updatedRows, error: updateError } = await supabaseAdmin
+    .from("subscriptions")
+    .update(payload)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (updateError) {
+    return { error: updateError };
+  }
+
+  if (updatedRows && updatedRows.length > 0) {
+    return { error: null };
+  }
+
+  const { error: insertError } = await supabaseAdmin
+    .from("subscriptions")
+    .insert({
+      user_id: userId,
+      ...payload,
+    });
+
+  return { error: insertError ?? null };
+};
+
+const PLAN_RANK: Record<string, number> = {
+  basic: 0,
+  pro: 1,
+  advanced: 2,
+};
+
+const getPlanRank = (plan?: string | null) => {
+  if (!plan) return -1;
+  return PLAN_RANK[plan] ?? -1;
+};
+
+const resolvePlanFromStripeSubscription = (
+  subscription: Stripe.Subscription,
+  previousPlan: string | null
+) => {
+  const productId = subscription.items.data[0].price.product as string;
+  const priceId = subscription.items.data[0].price.id;
+
+  const productPlanMap: Record<string, string> = {
+    "prod_TjlB0qtrN0s4u6": "basic",
+    "prod_TjlBgvbmpocKMF": "pro",
+    "prod_TjlCT4ijKq11hk": "advanced",
+  };
+  const pricePlanMap: Record<string, string> = {
+    "price_1SmHf4IvqpEim8WgtxTKqyp0": "basic",
+    "price_1SmHfXIvqpEim8Wg9JtMKO3J": "pro",
+    "price_1SmHfeIvqpEim8WgyUq2VpbB": "advanced",
+  };
+
+  return productPlanMap[productId] || pricePlanMap[priceId] || previousPlan;
+};
+
+const pickPreferredStripeSubscription = (
+  subscriptions: Stripe.Subscription[],
+  previousPlan: string | null
+) => {
+  const activeSubscriptions = subscriptions
+    .filter((subscription) => subscription.status === "active" || subscription.status === "trialing")
+    .sort((left, right) => {
+      const createdDiff = right.created - left.created;
+      if (createdDiff !== 0) return createdDiff;
+
+      const statusDiff =
+        (right.status === "active" ? 1 : 0) - (left.status === "active" ? 1 : 0);
+      if (statusDiff !== 0) return statusDiff;
+
+      const planDiff =
+        getPlanRank(resolvePlanFromStripeSubscription(right, previousPlan)) -
+        getPlanRank(resolvePlanFromStripeSubscription(left, previousPlan));
+      if (planDiff !== 0) return planDiff;
+
+      return right.current_period_end - left.current_period_end;
+    });
+
+  return {
+    activeSubscriptions,
+    preferredSubscription: activeSubscriptions[0] ?? null,
+  };
 };
 
 serve(async (req) => {
@@ -103,21 +213,22 @@ serve(async (req) => {
     logStep("User authenticated", { userId: user.id, email: user.email });
 
     // Get current subscription from database to check for plan changes
-    const { data: currentSubData } = await userClient
+    const { data: currentSubRows } = await userClient
       .from("subscriptions")
       .select("*")
       .eq("user_id", user.id)
-      .maybeSingle();
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false });
+    const currentSubData = selectBestSubscriptionRecord(currentSubRows ?? []);
     
     if (!stripeKey) {
       logStep("Stripe key not set, returning current subscription");
-      const fallbackPlan = currentSubData?.plan || "free";
+      const fallbackPlan = currentSubData?.plan || null;
       return new Response(JSON.stringify({
         subscribed: isDbSubscriptionActive(currentSubData),
         product_id: null,
         plan: fallbackPlan,
         subscription_end: currentSubData?.current_period_end ?? null,
-        has_used_free_trial: currentSubData?.has_used_free_trial || false,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
@@ -126,13 +237,12 @@ serve(async (req) => {
 
     if (!adminClient) {
       logStep("Service role key not set, returning current subscription");
-      const fallbackPlan = currentSubData?.plan || "free";
+      const fallbackPlan = currentSubData?.plan || null;
       return new Response(JSON.stringify({
         subscribed: isDbSubscriptionActive(currentSubData),
         product_id: null,
         plan: fallbackPlan,
         subscription_end: currentSubData?.current_period_end ?? null,
-        has_used_free_trial: currentSubData?.has_used_free_trial || false,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
@@ -141,23 +251,57 @@ serve(async (req) => {
 
     const supabaseAdmin = adminClient;
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
-    const customers = await stripe.customers.list({ email: user.email, limit: 1 });
+    let customerId: string | null = null;
+
+    const { data: storedCustomerId } = await supabaseAdmin.rpc("get_stripe_customer_id", {
+      p_user_id: user.id,
+    });
+
+    if (storedCustomerId) {
+      try {
+        const storedCustomer = await stripe.customers.retrieve(storedCustomerId);
+        if (!("deleted" in storedCustomer) || !storedCustomer.deleted) {
+          customerId = storedCustomer.id;
+          logStep("Resolved Stripe customer from secure storage", { customerId });
+        }
+      } catch (error) {
+        logStep("Stored Stripe customer lookup failed, falling back to email", {
+          userId: user.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (!customerId) {
+      const customers = await stripe.customers.list({ email: user.email, limit: 10 });
+      customerId = customers.data[0]?.id ?? null;
+      if (customerId) {
+        await supabaseAdmin.rpc("upsert_stripe_data", {
+          p_user_id: user.id,
+          p_stripe_customer_id: customerId,
+        });
+      }
+    }
     
-    const previousPlan = currentSubData?.plan || "free";
+    const previousPlan = currentSubData?.plan || null;
     const previousStatus = currentSubData?.status || null;
+    const previousBillingCycle = currentSubData?.billing_cycle ?? "monthly";
+    const previousSubscriptionEnd = currentSubData?.current_period_end ?? null;
     logStep("Current subscription data", { previousPlan, previousStatus });
 
-    if (customers.data.length === 0) {
+    if (!customerId) {
       logStep("No Stripe customer found");
-      let plan = currentSubData?.plan || "free";
+      let plan = currentSubData?.plan || null;
+      let status = currentSubData?.status ?? null;
+      let subscriptionEnd = previousSubscriptionEnd;
+      let billingCycle = previousBillingCycle;
+      let subscribed = isDbSubscriptionActive(currentSubData);
       
       // If they have pending status, it means payment failed or was cancelled
-      if (previousStatus === "pending") {
-        // Reset to free plan
+      if (previousStatus === "pending" && previousPlan) {
         await supabaseAdmin
           .from("subscriptions")
           .update({
-            plan: "free",
             status: "inactive",
             billing_cycle: "monthly",
             current_period_start: new Date().toISOString(),
@@ -166,33 +310,58 @@ serve(async (req) => {
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", user.id);
-        plan = "free";
+        plan = previousPlan;
+        status = "inactive";
+        subscriptionEnd = new Date().toISOString();
+        billingCycle = "monthly";
+        subscribed = false;
       }
       
       return new Response(JSON.stringify({ 
-        subscribed: false, 
+        subscribed,
+        product_id: null,
         plan,
-        has_used_free_trial: currentSubData?.has_used_free_trial || false
+        subscription_end: subscriptionEnd,
+        status,
+        billing_cycle: billingCycle,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
     }
 
-    const customerId = customers.data[0].id;
     logStep("Found Stripe customer", { customerId });
 
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
       status: "all",
-      limit: 5,
+      limit: 20,
     });
-    
-    const activeSubscription = subscriptions.data.find((sub: { status: string }) => sub.status === "active" || sub.status === "trialing") ?? null;
+
+    const { activeSubscriptions, preferredSubscription: activeSubscription } =
+      pickPreferredStripeSubscription(subscriptions.data, previousPlan);
     const hasActiveSub = !!activeSubscription;
     let productId = null;
     let plan = previousPlan;
-    let subscriptionEnd = null;
+    let subscriptionEnd = previousSubscriptionEnd;
+    let resolvedStatus = previousStatus;
+    let resolvedBillingCycle = previousBillingCycle;
+    let subscribed = isDbSubscriptionActive(currentSubData);
+
+    if (activeSubscriptions.length > 1) {
+      logStep("Multiple active Stripe subscriptions detected", {
+        customerId,
+        count: activeSubscriptions.length,
+        subscriptions: activeSubscriptions.map((subscription) => ({
+          id: subscription.id,
+          status: subscription.status,
+          created: subscription.created,
+          current_period_end: subscription.current_period_end,
+          plan: resolvePlanFromStripeSubscription(subscription, previousPlan),
+        })),
+        selectedSubscriptionId: activeSubscription?.id ?? null,
+      });
+    }
 
     if (hasActiveSub) {
       const subscription = activeSubscription!;
@@ -201,20 +370,10 @@ serve(async (req) => {
       const currentPeriodStart = new Date(subscription.current_period_start * 1000).toISOString();
       subscriptionEnd = new Date(subscription.current_period_end * 1000).toISOString();
       productId = subscription.items.data[0].price.product as string;
-      const priceId = subscription.items.data[0].price.id;
-      
-      // Map product IDs to plans
-      const productPlanMap: Record<string, string> = {
-        "prod_TjlB0qtrN0s4u6": "basic",
-        "prod_TjlBgvbmpocKMF": "pro",
-        "prod_TjlCT4ijKq11hk": "advanced",
-      };
-      const pricePlanMap: Record<string, string> = {
-        "price_1SmHf4IvqpEim8WgtxTKqyp0": "basic",
-        "price_1SmHfXIvqpEim8Wg9JtMKO3J": "pro",
-        "price_1SmHfeIvqpEim8WgyUq2VpbB": "advanced",
-      };
-      plan = productPlanMap[productId] || pricePlanMap[priceId] || "free";
+      plan = resolvePlanFromStripeSubscription(subscription, previousPlan);
+      resolvedStatus = stripeStatus;
+      resolvedBillingCycle = billingCycle;
+      subscribed = true;
       logStep("Active subscription found", { plan, subscriptionEnd, previousPlan, previousStatus });
 
       // Check if this is a new subscription or plan upgrade (status was pending or plan changed)
@@ -226,18 +385,18 @@ serve(async (req) => {
         logStep("New subscription or plan change detected", { isNewSubscription, isPlanUpgrade, from: previousPlan, to: plan });
         
         // Update subscription in database (without sensitive Stripe IDs)
-        const { error: upsertError } = await supabaseAdmin
-          .from("subscriptions")
-          .upsert({
-            user_id: user.id,
+        const { error: upsertError } = await persistSubscriptionRecord({
+          supabaseAdmin,
+          userId: user.id,
+          values: {
             plan: plan,
             status: stripeStatus,
             current_period_end: subscriptionEnd,
             current_period_start: currentPeriodStart,
             billing_cycle: billingCycle,
             trial_ends_at: stripeStatus === "trialing" ? subscriptionEnd : null,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "user_id" });
+          },
+        });
 
         // Store Stripe IDs in secure table using helper function
         await supabaseAdmin.rpc('upsert_stripe_data', {
@@ -353,13 +512,11 @@ serve(async (req) => {
     } else {
       logStep("No active Stripe subscription found");
       
-      // If user had a pending paid plan, it failed - revert to free
-      if (previousStatus === "pending") {
-        logStep("Reverting pending subscription to free");
+      if (previousStatus === "pending" && previousPlan) {
+        logStep("Marking pending subscription inactive", { plan: previousPlan });
         await supabaseAdmin
           .from("subscriptions")
           .update({
-            plan: "free",
             status: "inactive",
             billing_cycle: "monthly",
             current_period_start: new Date().toISOString(),
@@ -368,17 +525,26 @@ serve(async (req) => {
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", user.id);
-        plan = "free";
+        plan = previousPlan;
+        resolvedStatus = "inactive";
+        resolvedBillingCycle = "monthly";
+        subscriptionEnd = new Date().toISOString();
+        subscribed = false;
       }
       
-      // If user had a paid plan but no longer has active subscription, downgrade to free
-      if (previousPlan !== "free" && (previousStatus === "active" || previousStatus === "trialing")) {
-        logStep("Downgrading to free plan", { from: previousPlan });
+      if (
+        previousPlan &&
+        (previousStatus === "active" ||
+          previousStatus === "trialing" ||
+          previousStatus === "cancelled" ||
+          previousStatus === "canceled") &&
+        hasSubscriptionWindowEnded(currentSubData)
+      ) {
+        logStep("Marking expired subscription inactive", { from: previousPlan });
         
         await supabaseAdmin
           .from("subscriptions")
           .update({
-            plan: "free",
             status: "inactive",
             billing_cycle: "monthly",
             current_period_start: new Date().toISOString(),
@@ -387,23 +553,21 @@ serve(async (req) => {
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", user.id);
-        plan = "free";
+        plan = previousPlan;
+        resolvedStatus = "inactive";
+        resolvedBillingCycle = "monthly";
+        subscriptionEnd = new Date().toISOString();
+        subscribed = false;
       }
     }
 
-    // Get updated has_used_free_trial status
-    const { data: finalSubData } = await supabaseAdmin
-      .from("subscriptions")
-      .select("has_used_free_trial")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
     return new Response(JSON.stringify({
-      subscribed: hasActiveSub,
+      subscribed,
       product_id: productId,
       plan,
       subscription_end: subscriptionEnd,
-      has_used_free_trial: finalSubData?.has_used_free_trial || false
+      status: resolvedStatus,
+      billing_cycle: resolvedBillingCycle,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,

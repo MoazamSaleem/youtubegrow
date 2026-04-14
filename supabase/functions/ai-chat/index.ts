@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { checkAndDeductCredits, refundCredits } from "../_shared/credits.ts";
+import { requireMinimumPlan } from "../_shared/subscription.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,6 +76,17 @@ serve(async (req) => {
 
     const userId = userData.user.id;
     console.log('Authenticated user:', userId);
+
+    const accessResponse = await requireMinimumPlan({
+      supabaseClient,
+      userId,
+      minimumPlan: "pro",
+      corsHeaders,
+      message: "AI YouTube Strategist requires an active Pro or Advanced subscription.",
+    });
+    if (accessResponse) {
+      return accessResponse;
+    }
 
     const { messages, channelContext } = await req.json();
     

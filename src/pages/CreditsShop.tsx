@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { PLAN_LIMITS } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import {
   Sparkles,
   Coins,
@@ -55,8 +56,8 @@ const CreditsShop = () => {
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("tokens");
 
-  const currentPlan = subscription?.plan || "free";
-  const planLimits = PLAN_LIMITS[currentPlan];
+  const currentPlan = getActiveSubscriptionPlan(subscription);
+  const planLimits = currentPlan ? PLAN_LIMITS[currentPlan] : null;
 
   const getSessionWithRefresh = async (forceRefresh = false) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -319,7 +320,7 @@ const CreditsShop = () => {
   };
 
   const creditsPercentage =
-    planLimits.aiStrategistCredits > 0
+    planLimits && planLimits.aiStrategistCredits > 0
       ? Math.min((userCredits.ai_credits_balance / planLimits.aiStrategistCredits) * 100, 100)
       : 0;
 
@@ -409,6 +410,10 @@ const CreditsShop = () => {
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="bg-red-500/10 text-red-500">100</Badge>
                 <span>Extensive research</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="bg-cyan-500/10 text-cyan-500">80-180</Badge>
+                <span>Text to speech generation</span>
               </div>
             </div>
           </motion.div>

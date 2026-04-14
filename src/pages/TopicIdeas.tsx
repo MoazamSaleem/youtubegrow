@@ -3,12 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Lightbulb,
@@ -84,8 +86,8 @@ const TopicIdeas = () => {
   const [realtimeContext, setRealtimeContext] = useState<RealtimeChannelContext | null>(null);
   const autoRunRef = useRef(false);
 
-  const currentPlan = subscription?.plan || "free";
-  const limits = getPlanLimits(currentPlan);
+  const currentPlan = getActiveSubscriptionPlan(subscription);
+  const limits = currentPlan ? getPlanLimits(currentPlan) : null;
   const canGenerateScript = canAccessFeature(currentPlan, "hasScriptWriter");
 
   const getSessionWithRefresh = async () => {
@@ -343,6 +345,17 @@ const TopicIdeas = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!currentPlan || !limits) {
+    return (
+      <div className="min-h-screen bg-background flex">
+        <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <main className="flex-1 flex items-center justify-center p-4 lg:p-8">
+          <SubscriptionRequiredState description="AI topic generation now requires an active Basic, Pro, or Advanced subscription." />
+        </main>
       </div>
     );
   }

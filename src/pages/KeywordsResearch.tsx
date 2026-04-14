@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { getPlanLimits } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Search,
@@ -96,8 +98,8 @@ const KeywordsResearch = () => {
   const [lastNiche, setLastNiche] = useState("");
   const autoRunRef = useRef(false);
 
-  const currentPlan = subscription?.plan || "free";
-  const limits = getPlanLimits(currentPlan);
+  const currentPlan = getActiveSubscriptionPlan(subscription);
+  const limits = currentPlan ? getPlanLimits(currentPlan) : null;
 
   const getSessionWithRefresh = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -162,13 +164,22 @@ const KeywordsResearch = () => {
   const fetchUsage = async () => {
     if (!user) return;
     const today = new Date().toISOString().split("T")[0];
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("usage_tracking")
       .select("keywords_used")
       .eq("user_id", user.id)
       .eq("date", today)
-      .maybeSingle();
-    setKeywordsUsedToday(data?.keywords_used || 0);
+      .order("keywords_used", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("Keyword usage fetch error:", error);
+      setKeywordsUsedToday(0);
+      return;
+    }
+
+    setKeywordsUsedToday(data?.[0]?.keywords_used || 0);
   };
 
   const buildAutoQuery = () => {
@@ -363,25 +374,14 @@ const KeywordsResearch = () => {
       const today = new Date().toISOString().split("T")[0];
       const addedCount = incoming.length;
       const nextUsed = keywordsUsedToday + addedCount;
-      const { data: existing } = await supabase
-        .from("usage_tracking")
-        .select("user_id")
-        .eq("user_id", user?.id)
-        .eq("date", today)
-        .maybeSingle();
-      if (existing) {
-        await supabase
-          .from("usage_tracking")
-          .update({ keywords_used: nextUsed })
-          .eq("user_id", user?.id)
-          .eq("date", today);
-      } else {
-        await supabase.from("usage_tracking").insert({
+      await supabase.from("usage_tracking").upsert(
+        {
           user_id: user?.id,
           date: today,
           keywords_used: nextUsed,
-        });
-      }
+        },
+        { onConflict: "user_id,date" }
+      );
       setKeywordsUsedToday(nextUsed);
       if (!append) {
         setLastQuery(effectiveQuery);
@@ -459,6 +459,17 @@ const KeywordsResearch = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!currentPlan || !limits) {
+    return (
+      <div className="min-h-screen bg-background flex">
+        <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <main className="flex-1 flex items-center justify-center p-4 lg:p-8">
+          <SubscriptionRequiredState description="Keyword research now requires an active Basic, Pro, or Advanced subscription." />
+        </main>
       </div>
     );
   }

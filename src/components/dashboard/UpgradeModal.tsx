@@ -16,15 +16,15 @@ import {
   ArrowRight,
   Sparkles,
   Zap,
-  Star,
   Rocket,
+  Lock,
 } from "lucide-react";
-import { PLAN_LIMITS, SubscriptionPlan, getPlanDisplayName } from "@/lib/planLimits";
+import { PLAN_LIMITS, PLAN_ORDER, SubscriptionPlan, getPlanDisplayName } from "@/lib/planLimits";
 
 interface UpgradeModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  currentPlan: SubscriptionPlan;
+  currentPlan: SubscriptionPlan | null;
   targetFeature?: string;
   requiredPlan?: SubscriptionPlan;
 }
@@ -36,20 +36,16 @@ export function UpgradeModal({
   targetFeature,
   requiredPlan,
 }: UpgradeModalProps) {
-  const planOrder: SubscriptionPlan[] = ["free", "basic", "pro", "advanced"];
-  const currentIndex = planOrder.indexOf(currentPlan);
-  
-  const nextPlans = planOrder.filter((_, index) => index > currentIndex);
+  const currentIndex = currentPlan ? PLAN_ORDER.indexOf(currentPlan) : -1;
+  const nextPlans = PLAN_ORDER.filter((_, index) => index > currentIndex);
   
   const planIcons: Record<SubscriptionPlan, React.ElementType> = {
-    free: Star,
     basic: Zap,
     pro: Crown,
     advanced: Rocket,
   };
 
   const planColors: Record<SubscriptionPlan, string> = {
-    free: "from-slate-500 to-slate-600",
     basic: "from-teal-500 to-teal-600",
     pro: "from-teal-500 to-cyan-500",
     advanced: "from-amber-500 to-orange-500",
@@ -57,6 +53,53 @@ export function UpgradeModal({
 
   const getUnlockedFeatures = (plan: SubscriptionPlan): string[] => {
     const limits = PLAN_LIMITS[plan];
+    if (!currentPlan) {
+      const features = [
+        `Link up to ${limits.maxChannels} channels`,
+        limits.hasAdvancedAnalytics ? "Advanced analytics" : "Basic analytics",
+        limits.keywordsPerDay === -1 ? "Unlimited keywords/day" : `${limits.keywordsPerDay} keywords/day`,
+        `${limits.topicsPerDay} topic suggestions/day`,
+      ];
+
+      if (limits.channelAnalysisFrequency !== "never") {
+        features.push(
+          limits.channelAnalysisFrequency === "unlimited"
+            ? "Unlimited AI analysis"
+            : `AI analysis ${limits.channelAnalysisFrequency}`
+        );
+      }
+      if (limits.competitorAnalysisFrequency !== "never") {
+        features.push(
+          limits.competitorAnalysisFrequency === "daily"
+            ? "Daily competitor analysis"
+            : `Competitor analysis ${limits.competitorAnalysisFrequency}`
+        );
+      }
+      if (limits.hasScriptWriter) {
+        features.push("AI Script Writer");
+      }
+      if (limits.hasTextToSpeech) {
+        features.push("Text to Speech");
+      }
+      if (limits.hasVoiceClone) {
+        features.push("Voice Clone");
+      }
+      if (limits.thumbnailsPerDay === -1) {
+        features.push("Unlimited thumbnails");
+      } else if (limits.thumbnailsPerDay > 0) {
+        features.push(`${limits.thumbnailsPerDay} thumbnails/day`);
+      }
+      if (limits.hasYoutubeStrategist) {
+        features.push("YouTube Strategist AI");
+      }
+      if (limits.hasGrowthTasks) {
+        features.push("Growth tasks & milestones");
+      }
+      features.push(`${limits.aiStrategistCredits.toLocaleString()} AI Credits`);
+
+      return features;
+    }
+
     const currentLimits = PLAN_LIMITS[currentPlan];
     const features: string[] = [];
 
@@ -86,6 +129,12 @@ export function UpgradeModal({
     }
     if (limits.hasScriptWriter && !currentLimits.hasScriptWriter) {
       features.push("AI Script Writer");
+    }
+    if (limits.hasTextToSpeech && !currentLimits.hasTextToSpeech) {
+      features.push("Text to Speech");
+    }
+    if (limits.hasVoiceClone && !currentLimits.hasVoiceClone) {
+      features.push("Voice Clone");
     }
     if (limits.thumbnailsPerDay === -1 && currentLimits.thumbnailsPerDay !== -1) {
       features.push("Unlimited thumbnails");
@@ -123,19 +172,29 @@ export function UpgradeModal({
         <div className="py-4">
           {/* Current Plan */}
           <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 mb-6">
-            <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${planColors[currentPlan]} flex items-center justify-center`}>
-              {(() => {
-                const Icon = planIcons[currentPlan];
-                return <Icon className="h-5 w-5 text-white" />;
-              })()}
-            </div>
+            {currentPlan ? (
+              <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${planColors[currentPlan]} flex items-center justify-center`}>
+                {(() => {
+                  const Icon = planIcons[currentPlan];
+                  return <Icon className="h-5 w-5 text-white" />;
+                })()}
+              </div>
+            ) : (
+              <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                <Lock className="h-5 w-5 text-muted-foreground" />
+              </div>
+            )}
             <div className="flex-1">
-              <p className="text-sm text-muted-foreground">Current Plan</p>
-              <p className="font-semibold">{getPlanDisplayName(currentPlan)}</p>
+              <p className="text-sm text-muted-foreground">
+                {currentPlan ? "Current Plan" : "Subscription Status"}
+              </p>
+              <p className="font-semibold">
+                {currentPlan ? getPlanDisplayName(currentPlan) : "No active subscription"}
+              </p>
             </div>
             {currentPlan !== "advanced" && (
               <Badge variant="outline" className="text-muted-foreground">
-                Upgrade available
+                {currentPlan ? "Upgrade available" : "Choose a plan"}
               </Badge>
             )}
           </div>

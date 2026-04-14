@@ -19,6 +19,7 @@ serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -29,6 +30,9 @@ serve(async (req) => {
   }
 
   const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+  const supabaseAdmin = supabaseServiceRoleKey
+    ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } })
+    : null;
 
   try {
     logStep("Function started");
@@ -112,14 +116,78 @@ serve(async (req) => {
       logStep("Resolved Stripe price", { resolvedPriceId, billingCycle, productId });
     }
     
-    const customers = await stripe.customers.list({ email: resolvedEmail, limit: 1 });
-    let customerId;
-    if (customers.data.length > 0) {
-      customerId = customers.data[0].id;
-      logStep("Existing customer found", { customerId });
+    let customerId: string | undefined;
+
+    if (resolvedUserId && supabaseAdmin) {
+      const { data: storedCustomerId } = await supabaseAdmin.rpc("get_stripe_customer_id", {
+        p_user_id: resolvedUserId,
+      });
+
+      if (storedCustomerId) {
+        try {
+          const storedCustomer = await stripe.customers.retrieve(storedCustomerId);
+          if (!("deleted" in storedCustomer) || !storedCustomer.deleted) {
+            customerId = storedCustomer.id;
+            logStep("Resolved Stripe customer from secure storage", { customerId });
+          }
+        } catch (error) {
+          logStep("Stored customer lookup failed, falling back to email", {
+            userId: resolvedUserId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
 
-    const successPath = typeof payload?.successPath === "string" ? payload.successPath : "/dashboard?checkout=success";
+    if (!customerId) {
+      const customers = await stripe.customers.list({ email: resolvedEmail, limit: 10 });
+      if (customers.data.length > 0) {
+        customerId = customers.data[0].id;
+        logStep("Existing customer found", { customerId });
+      }
+    }
+
+    if (customerId && resolvedUserId && supabaseAdmin) {
+      await supabaseAdmin.rpc("upsert_stripe_data", {
+        p_user_id: resolvedUserId,
+        p_stripe_customer_id: customerId,
+      });
+    }
+
+    if (customerId) {
+      const existingSubscriptions = await stripe.subscriptions.list({
+        customer: customerId,
+        status: "all",
+        limit: 20,
+      });
+
+      const activeSubscriptions = existingSubscriptions.data.filter(
+        (subscription) => subscription.status === "active" || subscription.status === "trialing"
+      );
+
+      if (activeSubscriptions.length > 0) {
+        const origin = req.headers.get("origin") || "http://localhost:3000";
+        const portalSession = await stripe.billingPortal.sessions.create({
+          customer: customerId,
+          return_url: `${origin}/dashboard/billing?portal=1`,
+        });
+
+        logStep("Existing active subscription found, redirecting to portal", {
+          customerId,
+          activeSubscriptionCount: activeSubscriptions.length,
+        });
+
+        return new Response(JSON.stringify({
+          url: portalSession.url,
+          mode: "portal",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+    }
+
+    const successPath = typeof payload?.successPath === "string" ? payload.successPath : "/payment-success";
     const cancelPath = typeof payload?.cancelPath === "string" ? payload.cancelPath : "/dashboard/billing?checkout=cancelled";
 
     const session = await stripe.checkout.sessions.create({

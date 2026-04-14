@@ -3,11 +3,13 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { FeatureCard } from "@/components/dashboard/FeatureCard";
 import { UsageProgress } from "@/components/dashboard/UsageProgress";
 import { Button } from "@/components/ui/button";
-import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
+import { getPlanDisplayName, getPlanLimits, canAccessFeature } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { YouTubeChannelLink } from "@/components/youtube/YouTubeChannelLink";
@@ -22,6 +24,7 @@ import {
   Brain,
   Sparkles,
   ChevronDown,
+  AudioLines,
 } from "lucide-react";
 import {
   AreaChart,
@@ -54,17 +57,16 @@ const UserDashboard = () => {
     competitor_analyses: 0,
   });
 
-  const currentPlan = subscription?.plan || "free";
-  const limits = getPlanLimits(currentPlan);
+  const currentPlan = getActiveSubscriptionPlan(subscription);
+  const limits = currentPlan ? getPlanLimits(currentPlan) : null;
 
   // Handle checkout success
   useEffect(() => {
     const checkout = searchParams.get("checkout");
     if (checkout === "success") {
-      toast.success("Subscription activated! Your features are now unlocked.");
-      refreshSubscription();
+      navigate("/payment-success", { replace: true });
     }
-  }, [searchParams, refreshSubscription]);
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -251,13 +253,20 @@ const UserDashboard = () => {
   const fetchUsage = async () => {
     if (!user) return;
     const today = new Date().toISOString().split("T")[0];
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("usage_tracking")
       .select("*")
       .eq("user_id", user.id)
       .eq("date", today)
-      .maybeSingle();
-    if (data) setUsage(data);
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("Usage fetch error:", error);
+      return;
+    }
+
+    if (data?.[0]) setUsage(data[0]);
   };
 
   const formatNumber = (value: number, options?: Intl.NumberFormatOptions) => {
@@ -323,6 +332,17 @@ const UserDashboard = () => {
     );
   }
 
+  if (!currentPlan || !limits) {
+    return (
+      <div className="min-h-screen bg-background flex">
+        <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <div className="flex-1 flex items-center justify-center p-4">
+          <SubscriptionRequiredState description="Overview analytics, channel linking, keyword research, and topic generation now require an active paid subscription." />
+        </div>
+      </div>
+    );
+  }
+
   if (channels.length === 0) {
     return (
       <div className="min-h-screen bg-background flex">
@@ -344,7 +364,7 @@ const UserDashboard = () => {
                 Connect your channel to start tracking analytics and get AI-powered growth insights.
               </p>
               <p className="text-sm text-muted-foreground mb-4">
-                You can link up to {limits.maxChannels} channel{limits.maxChannels > 1 ? "s" : ""} with your {currentPlan} plan.
+                You can link up to {limits.maxChannels} channel{limits.maxChannels > 1 ? "s" : ""} with your {getPlanDisplayName(currentPlan)} plan.
               </p>
             </div>
             <div className="max-w-3xl mx-auto">
@@ -502,7 +522,7 @@ const UserDashboard = () => {
           </div>
 
           {/* Usage & Features */}
-          <div className="grid lg:grid-cols-3 gap-6 mb-8">
+          <div className="grid lg:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
             {/* Usage */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -553,6 +573,19 @@ const UserDashboard = () => {
             >
               <p className="text-sm">
                 <span className="text-primary font-semibold">{limits.topicsPerDay}</span> topics per day
+              </p>
+            </FeatureCard>
+
+            <FeatureCard
+              title="Text to Speech"
+              description="Convert scripts, hooks, and voiceovers into polished audio with preset voices or voice clones."
+              icon={<AudioLines className="h-5 w-5 text-primary" />}
+              locked={!limits.hasTextToSpeech}
+              requiredPlan="Pro or Advanced"
+              action={{ label: "Open TTS", href: "/dashboard/text-to-speech" }}
+            >
+              <p className="text-sm">
+                <span className="text-primary font-semibold">80-180</span> AI credits per generation
               </p>
             </FeatureCard>
           </div>

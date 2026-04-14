@@ -50,6 +50,22 @@ interface ChannelTokenData {
   token_expires_at: string | null;
 }
 
+const OAUTH_COLUMNS_MISSING_MESSAGE =
+  "YouTube OAuth database columns are missing. Apply the latest YouTube OAuth migration and retry.";
+
+const isMissingOauthColumnError = (
+  error: { code?: string; message?: string; details?: string } | null | undefined
+) => {
+  const message = `${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
+  return (
+    error?.code === "PGRST204" ||
+    (message.includes("youtube_channels") &&
+      (message.includes("access_token") ||
+        message.includes("refresh_token") ||
+        message.includes("token_expires_at")))
+  );
+};
+
 // deno-lint-ignore no-explicit-any
 const getChannelAccessToken = async (
   supabase: any,
@@ -67,7 +83,13 @@ const getChannelAccessToken = async (
 
   const typedData = channelData as ChannelTokenData | null;
 
-  if (fetchError || !typedData?.access_token) {
+  if (fetchError) {
+    if (isMissingOauthColumnError(fetchError)) {
+      throw new Error(OAUTH_COLUMNS_MISSING_MESSAGE);
+    }
+    throw new Error("Channel not found");
+  }
+  if (!typedData?.access_token) {
     throw new Error("Channel not found");
   }
 
@@ -97,7 +119,7 @@ const getChannelAccessToken = async (
     accessToken = tokens.access_token;
     const encryptedAccessToken = await encryptToken(tokens.access_token);
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("youtube_channels")
       .update({
         access_token: encryptedAccessToken,
@@ -105,6 +127,13 @@ const getChannelAccessToken = async (
       })
       .eq("user_id", userId)
       .eq("channel_id", channelId);
+
+    if (updateError) {
+      if (isMissingOauthColumnError(updateError)) {
+        throw new Error(OAUTH_COLUMNS_MISSING_MESSAGE);
+      }
+      throw new Error("Failed to store refreshed YouTube token");
+    }
   }
 
   return accessToken;
@@ -316,7 +345,11 @@ serve(async (req) => {
       
       if (upsertError) {
         console.error("Database error:", upsertError);
-        return new Response(JSON.stringify({ error: "Failed to save channel" }), {
+        return new Response(JSON.stringify({
+          error: isMissingOauthColumnError(upsertError)
+            ? OAUTH_COLUMNS_MISSING_MESSAGE
+            : "Failed to save channel",
+        }), {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -353,8 +386,21 @@ serve(async (req) => {
         .eq("user_id", userId)
         .eq("channel_id", channelId)
         .single();
-      
-      if (fetchError || !channelData?.refresh_token) {
+
+      if (fetchError) {
+        if (isMissingOauthColumnError(fetchError)) {
+          return new Response(JSON.stringify({ error: OAUTH_COLUMNS_MISSING_MESSAGE }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ error: "Channel not found or no refresh token" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (!channelData?.refresh_token) {
         return new Response(JSON.stringify({ error: "Channel not found or no refresh token" }), {
           status: 404,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -384,7 +430,7 @@ serve(async (req) => {
       const tokens = await tokenResponse.json();
       const encryptedAccessToken = await encryptToken(tokens.access_token);
       
-      await supabase
+      const { error: updateError } = await supabase
         .from("youtube_channels")
         .update({
           access_token: encryptedAccessToken,
@@ -392,6 +438,17 @@ serve(async (req) => {
         })
         .eq("user_id", userId)
         .eq("channel_id", channelId);
+
+      if (updateError) {
+        return new Response(JSON.stringify({
+          error: isMissingOauthColumnError(updateError)
+            ? OAUTH_COLUMNS_MISSING_MESSAGE
+            : "Failed to store refreshed YouTube token",
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -419,6 +476,7 @@ serve(async (req) => {
         accessToken = await getChannelAccessToken(supabase, userId, channelId, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Channel not found";
+        const isSchemaIssue = message === OAUTH_COLUMNS_MISSING_MESSAGE;
         const isAuthIssue = [
           "Refresh token missing",
           "Failed to refresh token",
@@ -427,12 +485,14 @@ serve(async (req) => {
         ].some((needle) => message.includes(needle));
         return new Response(
           JSON.stringify({
-            error: isAuthIssue
+            error: isSchemaIssue
+              ? OAUTH_COLUMNS_MISSING_MESSAGE
+              : isAuthIssue
               ? "YouTube authorization expired. Please reconnect your channel."
               : message,
           }),
           {
-            status: isAuthIssue ? 401 : 404,
+            status: isSchemaIssue ? 500 : isAuthIssue ? 401 : 404,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           }
         );

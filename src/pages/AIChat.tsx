@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,6 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { PLAN_LIMITS } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import {
   MessageSquare,
   Send,
@@ -271,8 +273,9 @@ const AIChat = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const currentPlan = subscription?.plan || "free";
-  const planLimits = PLAN_LIMITS[currentPlan];
+  const currentPlan = getActiveSubscriptionPlan(subscription);
+  const planLimits = currentPlan ? PLAN_LIMITS[currentPlan] : null;
+  const hasAccess = currentPlan ? planLimits.hasYoutubeStrategist : false;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -499,6 +502,24 @@ const AIChat = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  if (!hasAccess || !planLimits) {
+    return (
+      <div className="min-h-screen bg-background flex">
+        <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <main className="flex-1 flex items-center justify-center p-4 lg:p-8">
+          <SubscriptionRequiredState
+            title={currentPlan ? "Upgrade to unlock AI Chat" : "Active subscription required"}
+            description={
+              currentPlan
+                ? "AI YouTube Strategist is available on Pro and Advanced plans."
+                : "AI YouTube Strategist is available on Pro and Advanced plans after you activate a paid subscription."
+            }
+          />
+        </main>
       </div>
     );
   }

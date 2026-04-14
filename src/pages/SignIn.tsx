@@ -55,7 +55,16 @@ const SignIn = () => {
     setLoading(false);
 
     if (error) {
-      if (error.message.includes("Invalid login credentials")) {
+      const message = error.message.toLowerCase();
+
+      if (
+        message.includes("failed to fetch") ||
+        message.includes("networkerror") ||
+        message.includes("err_name_not_resolved") ||
+        message.includes("load failed")
+      ) {
+        toast.error("Cannot reach Supabase right now. Check your DNS or internet connection and try again.");
+      } else if (error.message.includes("Invalid login credentials")) {
         toast.error("Invalid email or password");
       } else if (error.message.includes("Email not confirmed")) {
         toast.error("Please confirm your email address first");

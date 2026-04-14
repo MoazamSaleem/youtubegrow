@@ -8,8 +8,8 @@ const corsHeaders = {
 };
 
 const logStep = (step: string, details?: any) => {
-  const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
-  console.log(`[CHECK-TRIAL-EXPIRATION] ${step}${detailsStr}`);
+  const detailsStr = details ? ` - ${JSON.stringify(details)}` : "";
+  console.log(`[CHECK-TRIAL-STATUS] ${step}${detailsStr}`);
 };
 
 serve(async (req) => {
@@ -30,13 +30,9 @@ serve(async (req) => {
     logStep("Function started");
 
     const now = new Date();
-    const threeDaysFromNow = new Date(now);
-    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
-    
     const sevenDaysFromNow = new Date(now);
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
-    // Find trialing subscriptions that are about to expire (within 3 or 7 days)
     const { data: expiringTrials, error: fetchError } = await supabaseClient
       .from("subscriptions")
       .select(`
@@ -52,9 +48,6 @@ serve(async (req) => {
       throw fetchError;
     }
 
-    logStep("Found expiring trials", { count: expiringTrials?.length || 0 });
-
-    // Find expired trials that need to be downgraded
     const { data: expiredTrials, error: expiredError } = await supabaseClient
       .from("subscriptions")
       .select("*")
@@ -63,31 +56,30 @@ serve(async (req) => {
 
     if (expiredError) {
       logStep("Error fetching expired trials", { error: expiredError.message });
+      throw expiredError;
     }
 
-    // Downgrade expired trials
     if (expiredTrials && expiredTrials.length > 0) {
-      logStep("Downgrading expired trials", { count: expiredTrials.length });
+      logStep("Expiring elapsed trials", { count: expiredTrials.length });
 
       for (const trial of expiredTrials) {
         const { error: updateError } = await supabaseClient
           .from("subscriptions")
           .update({
-            status: "expired",
-            plan: "free",
+            status: "inactive",
+            trial_ends_at: null,
             updated_at: now.toISOString(),
           })
           .eq("id", trial.id);
 
         if (updateError) {
-          logStep("Error downgrading trial", { userId: trial.user_id, error: updateError.message });
+          logStep("Error expiring trial", { userId: trial.user_id, error: updateError.message });
         } else {
-          logStep("Trial downgraded", { userId: trial.user_id });
+          logStep("Trial expired", { userId: trial.user_id });
         }
       }
     }
 
-    // Send reminder emails for expiring trials
     const emailsSent = [];
     const emailErrors = [];
 
@@ -99,57 +91,47 @@ serve(async (req) => {
         const trialEndsAt = new Date(trial.trial_ends_at);
         const daysLeft = Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
-        if (!email) {
-          logStep("No email for user", { userId: trial.user_id });
-          continue;
-        }
-
-        // Only send at 7 days and 3 days
-        if (daysLeft !== 7 && daysLeft !== 3 && daysLeft !== 1) {
+        if (!email || ![7, 3, 1].includes(daysLeft)) {
           continue;
         }
 
         try {
-          const { data: emailResult, error: emailError } = await resend.emails.send({
+          const { error: emailError } = await resend.emails.send({
             from: "YouTube Growth Planner <noreply@resend.dev>",
             to: [email],
-            subject: daysLeft === 1 
-              ? "⚠️ Your YouTube Growth Planner trial expires tomorrow!" 
-              : `Your YouTube Growth Planner trial expires in ${daysLeft} days`,
+            subject:
+              daysLeft === 1
+                ? "Your YouTube Growth Planner trial ends tomorrow"
+                : `Your YouTube Growth Planner trial ends in ${daysLeft} days`,
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h1 style="color: #6366f1;">Hi ${name}! 👋</h1>
-                
-                <p>Your free trial of YouTube Growth Planner ${daysLeft === 1 ? "expires <strong>tomorrow</strong>" : `expires in <strong>${daysLeft} days</strong>`}!</p>
-                
-                <p>Don't lose access to:</p>
+                <h1 style="color: #6366f1;">Hi ${name}!</h1>
+                <p>Your YouTube Growth Planner trial ${
+                  daysLeft === 1
+                    ? "ends <strong>tomorrow</strong>"
+                    : `ends in <strong>${daysLeft} days</strong>`
+                }.</p>
+                <p>Keep access to:</p>
                 <ul>
-                  <li>🔍 Keyword Research Tools</li>
-                  <li>💡 AI Topic Ideas</li>
-                  <li>📊 Channel Analytics</li>
-                  <li>🤖 AI Strategist</li>
+                  <li>Keyword Research Tools</li>
+                  <li>AI Topic Ideas</li>
+                  <li>Channel Analytics</li>
+                  <li>AI Strategist</li>
                 </ul>
-                
                 <p style="margin: 20px 0;">
-                  <a href="https://tubegrow.lovable.app/dashboard/billing" 
-                     style="background: linear-gradient(135deg, #6366f1, #8b5cf6); 
-                            color: white; 
-                            padding: 12px 24px; 
-                            text-decoration: none; 
-                            border-radius: 8px;
-                            display: inline-block;">
-                    Upgrade Now →
+                  <a
+                    href="https://tubegrow.lovable.app/dashboard/billing"
+                    style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block;"
+                  >
+                    Manage Plan
                   </a>
                 </p>
-                
                 <p style="color: #666;">
-                  Upgrade to any paid plan and get up to 25,000 AI credits!
+                  Update your subscription before the trial ends to keep your workspace active.
                 </p>
-                
                 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                
                 <p style="color: #999; font-size: 12px;">
-                  You're receiving this because you signed up for a YouTube Growth Planner free trial.
+                  You're receiving this because your account currently has a trialing subscription.
                 </p>
               </div>
             `,
@@ -162,25 +144,28 @@ serve(async (req) => {
             emailsSent.push({ userId: trial.user_id, email, daysLeft });
             logStep("Email sent", { userId: trial.user_id, email, daysLeft });
           }
-        } catch (err) {
-          emailErrors.push({ userId: trial.user_id, email, error: err });
-          logStep("Email exception", { userId: trial.user_id, error: String(err) });
+        } catch (error) {
+          emailErrors.push({ userId: trial.user_id, email, error });
+          logStep("Email exception", { userId: trial.user_id, error: String(error) });
         }
       }
     } else if (!resend) {
       logStep("Resend not configured - skipping emails");
     }
 
-    return new Response(JSON.stringify({
-      success: true,
-      expiredDowngraded: expiredTrials?.length || 0,
-      expiringFound: expiringTrials?.length || 0,
-      emailsSent: emailsSent.length,
-      emailErrors: emailErrors.length,
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 200,
-    });
+    return new Response(
+      JSON.stringify({
+        success: true,
+        expiredTrials: expiredTrials?.length || 0,
+        expiringFound: expiringTrials?.length || 0,
+        emailsSent: emailsSent.length,
+        emailErrors: emailErrors.length,
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      }
+    );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logStep("ERROR", { message: errorMessage });

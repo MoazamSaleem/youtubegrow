@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { UpgradeModal } from "@/components/dashboard/UpgradeModal";
 import { SubscriptionPlan, getPlanDisplayName } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import {
   User,
   Award,
@@ -400,7 +401,7 @@ const Profile = () => {
   };
 
   const earnedBadgeIds = new Set(userBadges.map((b) => b.badge_id));
-  const currentPlan = (subscription?.plan || "free") as SubscriptionPlan;
+  const currentPlan = getActiveSubscriptionPlan(subscription);
 
   if (loading) {
     return (
@@ -452,12 +453,12 @@ const Profile = () => {
               <div className="flex items-center gap-2">
                 <Crown className="h-5 w-5 text-warning" />
                 <span className="font-semibold text-sm">
-                  {getPlanDisplayName(currentPlan)} Plan
+                  {currentPlan ? `${getPlanDisplayName(currentPlan)} Plan` : "No active subscription"}
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                {currentPlan === "free"
-                  ? "Unlock AI analysis, competitors & more"
+                {!currentPlan
+                  ? "Activate a paid plan to unlock dashboard features and AI tools"
                   : currentPlan === "basic"
                     ? "Get Script Writer, Thumbnails & AI Chat"
                     : currentPlan === "pro"

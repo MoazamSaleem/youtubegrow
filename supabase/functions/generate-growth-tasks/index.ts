@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { requireMinimumPlan } from "../_shared/subscription.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,6 +42,17 @@ serve(async (req) => {
 
     const userId = claimsData.claims.sub as string;
     const { stepIndex } = await req.json().catch(() => ({}));
+
+    const accessResponse = await requireMinimumPlan({
+      supabaseClient,
+      userId,
+      minimumPlan: "basic",
+      corsHeaders,
+      message: "Growth tasks require an active Basic, Pro, or Advanced subscription.",
+    });
+    if (accessResponse) {
+      return accessResponse;
+    }
 
     const ANALYSIS_AI_API = Deno.env.get("ANALYSIS_AI_API");
     const PROMPT_ID = "pmpt_6977aa6904b08194bf630968a149cbc503b792e30340b804";

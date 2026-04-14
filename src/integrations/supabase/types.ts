@@ -495,7 +495,6 @@ export type Database = {
           created_at: string
           current_period_end: string
           current_period_start: string
-          has_used_free_trial: boolean | null
           id: string
           plan: Database["public"]["Enums"]["subscription_plan"]
           status: string
@@ -509,7 +508,6 @@ export type Database = {
           created_at?: string
           current_period_end?: string
           current_period_start?: string
-          has_used_free_trial?: boolean | null
           id?: string
           plan?: Database["public"]["Enums"]["subscription_plan"]
           status?: string
@@ -523,7 +521,6 @@ export type Database = {
           created_at?: string
           current_period_end?: string
           current_period_start?: string
-          has_used_free_trial?: boolean | null
           id?: string
           plan?: Database["public"]["Enums"]["subscription_plan"]
           status?: string
@@ -531,6 +528,66 @@ export type Database = {
           trial_started_at?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      tts_generations: {
+        Row: {
+          audio_path: string | null
+          audio_url: string | null
+          char_count: number
+          completed_at: string | null
+          created_at: string
+          credits_used: number
+          error_message: string | null
+          id: string
+          mood: string
+          output_format: string
+          speed: number
+          status: string
+          style: string
+          text_input: string
+          user_id: string
+          voice_id: string
+          voice_label: string
+        }
+        Insert: {
+          audio_path?: string | null
+          audio_url?: string | null
+          char_count: number
+          completed_at?: string | null
+          created_at?: string
+          credits_used: number
+          error_message?: string | null
+          id?: string
+          mood: string
+          output_format: string
+          speed?: number
+          status?: string
+          style: string
+          text_input: string
+          user_id: string
+          voice_id: string
+          voice_label: string
+        }
+        Update: {
+          audio_path?: string | null
+          audio_url?: string | null
+          char_count?: number
+          completed_at?: string | null
+          created_at?: string
+          credits_used?: number
+          error_message?: string | null
+          id?: string
+          mood?: string
+          output_format?: string
+          speed?: number
+          status?: string
+          style?: string
+          text_input?: string
+          user_id?: string
+          voice_id?: string
+          voice_label?: string
         }
         Relationships: []
       }
@@ -1026,7 +1083,7 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
-      subscription_plan: "free" | "basic" | "pro" | "advanced"
+      subscription_plan: "basic" | "pro" | "advanced"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1155,7 +1212,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "moderator", "user"],
-      subscription_plan: ["free", "basic", "pro", "advanced"],
+      subscription_plan: ["basic", "pro", "advanced"],
     },
   },
 } as const

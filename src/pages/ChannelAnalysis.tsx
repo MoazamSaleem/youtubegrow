@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { canAccessFeature, getPlanLimits } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import {
   Brain,
   Menu,
@@ -147,9 +149,13 @@ const ChannelAnalysis = () => {
   const selectedChannelParam = searchParams.get("channelId");
   const isTestUser = user?.email?.toLowerCase() === "moazamm.dev@gmail.com";
 
-  const currentPlan = subscription?.plan || "free";
+  const currentPlan = getActiveSubscriptionPlan(subscription);
   const hasAccess = isTestUser || canAccessFeature(currentPlan, "channelAnalysisFrequency");
-  const planLimits = getPlanLimits(currentPlan);
+  const planLimits = currentPlan
+    ? getPlanLimits(currentPlan)
+    : isTestUser
+      ? getPlanLimits("advanced")
+      : null;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -477,24 +483,15 @@ const ChannelAnalysis = () => {
 
         <div className="p-4 lg:p-8">
           {!hasAccess ? (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="w-full text-center py-16"
-            >
-              <div className="inline-flex p-6 rounded-3xl glass mb-8">
-                <Lock className="h-16 w-16 text-muted-foreground" />
-              </div>
-              <h2 className="font-display text-2xl font-bold mb-4">
-                Unlock Channel Analysis
-              </h2>
-              <p className="text-muted-foreground mb-8">
-                Get AI-powered insights to grow your channel. Available on Basic, Pro, and Advanced plans.
-              </p>
-              <Button variant="hero" onClick={() => navigate("/dashboard/billing")}>
-                <Sparkles className="h-4 w-4 mr-2" />
-                Upgrade Now
-              </Button>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+              <SubscriptionRequiredState
+                title={currentPlan ? "Unlock Channel Analysis" : "Active subscription required"}
+                description={
+                  currentPlan
+                    ? "Get AI-powered insights to grow your channel. Available on Basic, Pro, and Advanced plans."
+                    : "Channel Analysis now requires an active Basic, Pro, or Advanced subscription."
+                }
+              />
             </motion.div>
           ) : channelsLoading ? (
             <div className="flex items-center justify-center py-16">

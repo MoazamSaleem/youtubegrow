@@ -73,7 +73,7 @@ const Footer = () => {
                 <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
               </div>
               <span className="font-display font-bold text-base sm:text-xl leading-tight">
-                YouTube <span className="gradient-text">Growth Planner</span>
+                YouTube <span className="gradient-text">Growth Partner</span>
               </span>
             </Link>
             <p className="text-muted-foreground text-sm max-w-xs mb-6">

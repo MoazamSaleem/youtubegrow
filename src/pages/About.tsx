@@ -107,7 +107,7 @@ const About = () => {
               </p>
               <Link to="/signup">
                 <Button variant="hero" size="lg">
-                  Start Your Free Trial
+                  View Pricing
                 </Button>
               </Link>
             </div>

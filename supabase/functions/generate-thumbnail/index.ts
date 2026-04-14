@@ -1,10 +1,77 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { checkAndDeductCredits, refundCredits } from "../_shared/credits.ts";
+import { getActiveSubscriptionPlan, requireMinimumPlan } from "../_shared/subscription.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const THUMBNAIL_PROMPT_ID = "pmpt_69724b66d1e88197a387d3a65c2fd0c40e4cdde79801def6";
+const THUMBNAIL_IMAGE_MODEL = "gpt-image-1";
+
+const extractOutputText = (data: any) => {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  const content = data?.output
+    ?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
+      item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
+    )
+    .filter(Boolean)
+    .join("");
+
+  return typeof content === "string" && content.trim() ? content.trim() : null;
+};
+
+const extractProviderErrorMessage = (raw: string, fallback: string) => {
+  if (!raw.trim()) return fallback;
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      error?: {
+        message?: string;
+        type?: string;
+        code?: string;
+      };
+      message?: string;
+      detail?: string;
+    };
+
+    if (typeof parsed.error?.message === "string" && parsed.error.message.trim()) {
+      return parsed.error.message.trim();
+    }
+    if (typeof parsed.message === "string" && parsed.message.trim()) {
+      return parsed.message.trim();
+    }
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail.trim();
+    }
+  } catch {
+    // Fall back to the raw response below.
+  }
+
+  return raw.trim() || fallback;
+};
+
+const getCurrentThumbnailUsage = async (userClient: ReturnType<typeof createClient>, userId: string, date: string) => {
+  const { data, error } = await userClient
+    .from("usage_tracking")
+    .select("thumbnails_generated, created_at")
+    .eq("user_id", userId)
+    .eq("date", date)
+    .order("thumbnails_generated", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.[0]?.thumbnails_generated || 0;
 };
 
 serve(async (req) => {
@@ -13,104 +80,120 @@ serve(async (req) => {
   }
 
   try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { topic, style, channelNiche } = await req.json();
 
-    if (!topic) {
-      return new Response(
-        JSON.stringify({ error: "Topic is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!topic || typeof topic !== "string" || !topic.trim()) {
+      return new Response(JSON.stringify({ error: "Topic is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Get authorization header for user verification
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Authorization required" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const thumbnailAiApi =
+      Deno.env.get("OPENAI_API_KEY") ??
+      Deno.env.get("ANALYSIS_AI_API") ??
+      "";
+
+    if (!supabaseUrl || (!supabaseAnonKey && !supabaseServiceKey)) {
+      console.error("Supabase environment variables are not configured");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    const token = authHeader.replace("Bearer ", "");
+    const authClient = createClient(supabaseUrl, supabaseAnonKey || supabaseServiceKey, {
+      auth: { persistSession: false },
+    });
+    const userClient = createClient(supabaseUrl, supabaseAnonKey || supabaseServiceKey, {
+      auth: { persistSession: false },
       global: { headers: { Authorization: authHeader } },
     });
 
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: "User not authenticated" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const {
+      data: userData,
+      error: userError,
+    } = await authClient.auth.getUser(token);
+
+    if (userError || !userData?.user) {
+      console.error("generate-thumbnail auth error:", userError?.message ?? userError);
+      return new Response(JSON.stringify({ error: "User not authenticated" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Check subscription and usage limits
-    const { data: subscription } = await supabase
-      .from("subscriptions")
-      .select("plan")
-      .eq("user_id", user.id)
-      .single();
+    const user = userData.user;
 
-    const plan = subscription?.plan || "free";
-    
-    // Plan limits for thumbnails
+    const accessResponse = await requireMinimumPlan({
+      supabaseClient: userClient,
+      userId: user.id,
+      minimumPlan: "pro",
+      corsHeaders,
+      message: "Thumbnail generation requires an active Pro or Advanced subscription.",
+    });
+    if (accessResponse) {
+      return accessResponse;
+    }
+
+    const plan = await getActiveSubscriptionPlan(userClient, user.id);
     const thumbnailLimits: Record<string, number> = {
-      free: 0,
-      basic: 0,
       pro: 5,
-      advanced: -1, // unlimited
+      advanced: -1,
     };
-
-    const dailyLimit = thumbnailLimits[plan] ?? 0;
+    const dailyLimit = plan ? thumbnailLimits[plan] ?? 0 : 0;
 
     if (dailyLimit === 0) {
       return new Response(
         JSON.stringify({ error: "Thumbnail generation is not available on your plan. Please upgrade to Pro or Advanced." }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    // Check today's usage
     const today = new Date().toISOString().split("T")[0];
-    const { data: usage } = await supabase
-      .from("usage_tracking")
-      .select("thumbnails_generated")
-      .eq("user_id", user.id)
-      .eq("date", today)
-      .single();
-
-    const currentUsage = usage?.thumbnails_generated || 0;
-
+    const currentUsage = await getCurrentThumbnailUsage(userClient, user.id, today);
     if (dailyLimit !== -1 && currentUsage >= dailyLimit) {
       return new Response(
         JSON.stringify({ error: `Daily thumbnail limit reached (${dailyLimit}/day). Upgrade to Advanced for unlimited.` }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    // Check and deduct AI credits (thumbnails are expensive)
     const creditCheck = await checkAndDeductCredits(user.id, "generate-thumbnail", "extensive");
     if (!creditCheck.success) {
       return new Response(JSON.stringify({ error: creditCheck.error }), {
         status: 402,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const THUMBNAIL_AI_API = Deno.env.get("ANALYSIS_AI_API");
-    const THUMBNAIL_PROMPT_ID = "pmpt_69724b66d1e88197a387d3a65c2fd0c40e4cdde79801def6";
-    if (!THUMBNAIL_AI_API) {
-      console.error("ANALYSIS_AI_API is not configured");
+    if (!thumbnailAiApi) {
+      console.error("Neither OPENAI_API_KEY nor ANALYSIS_AI_API is configured");
       await refundCredits(user.id, creditCheck.cost!, "AI service not configured - refund");
-      return new Response(
-        JSON.stringify({ error: "AI service not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "AI service not configured" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Build the prompt for thumbnail generation
     const stylePrompts: Record<string, string> = {
       dramatic: "dramatic lighting, high contrast, bold colors, cinematic",
       minimal: "clean, minimalist, simple design, modern, sleek",
@@ -120,8 +203,7 @@ serve(async (req) => {
     };
 
     const styleDescription = stylePrompts[style] || stylePrompts.vibrant;
-    
-    const { data: competitorAnalyses } = await supabase
+    const { data: competitorAnalyses } = await userClient
       .from("competitor_analysis_results")
       .select("analysis")
       .eq("user_id", user.id)
@@ -132,7 +214,7 @@ serve(async (req) => {
       : "";
 
     const promptInput = [
-      `Topic: ${topic}`,
+      `Topic: ${topic.trim()}`,
       `Style: ${styleDescription}`,
       channelNiche ? `Channel niche: ${channelNiche}` : undefined,
       competitorText ? `Competitor analysis: ${competitorText}` : undefined,
@@ -144,7 +226,7 @@ serve(async (req) => {
     const promptResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${THUMBNAIL_AI_API}`,
+        Authorization: `Bearer ${thumbnailAiApi}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -157,39 +239,54 @@ serve(async (req) => {
       const errorText = await promptResponse.text();
       console.error("Thumbnail prompt error:", promptResponse.status, errorText);
       await refundCredits(user.id, creditCheck.cost!, "Thumbnail prompt error - refund");
+
+      if (promptResponse.status === 429) {
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if ([401, 402, 403].includes(promptResponse.status)) {
+        return new Response(
+          JSON.stringify({ error: extractProviderErrorMessage(errorText, "AI API key error. Please check your OpenAI API key and billing status.") }),
+          {
+            status: 402,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
       return new Response(
-        JSON.stringify({ error: "Failed to generate thumbnail prompt" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: extractProviderErrorMessage(errorText, "Failed to generate thumbnail prompt") }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
     const promptData = await promptResponse.json();
-    const promptContent =
-      promptData.output_text ||
-      promptData.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) =>
-        item.content?.map((part) => (part.type === "output_text" ? part.text : undefined))
-      ).find(Boolean);
+    const promptContent = extractOutputText(promptData);
 
     if (!promptContent) {
       await refundCredits(user.id, creditCheck.cost!, "Thumbnail prompt empty - refund");
-      return new Response(
-        JSON.stringify({ error: "Failed to generate thumbnail prompt" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Failed to generate thumbnail prompt" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const thumbnailPrompt = promptContent.trim();
 
-    console.log("Generating thumbnail with prompt:", thumbnailPrompt);
-
     const imageResponse = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${THUMBNAIL_AI_API}`,
+        Authorization: `Bearer ${thumbnailAiApi}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-image-1.5",
+        model: THUMBNAIL_IMAGE_MODEL,
         prompt: thumbnailPrompt,
         size: "1536x1024",
         quality: "medium",
@@ -199,45 +296,48 @@ serve(async (req) => {
     if (!imageResponse.ok) {
       const errorText = await imageResponse.text();
       console.error("OpenAI image error:", imageResponse.status, errorText);
-      
-      // Refund credits on error
-      await refundCredits(user.id, creditCheck.cost!, "AI gateway error - refund");
-      
+      await refundCredits(user.id, creditCheck.cost!, "Thumbnail image error - refund");
+
       if (imageResponse.status === 429) {
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if ([401, 402, 403].includes(imageResponse.status)) {
         return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: extractProviderErrorMessage(errorText, "AI API key error. Please check your OpenAI API key and billing status.") }),
+          {
+            status: 402,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
         );
       }
-      if (imageResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Please add more credits." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      
+
       return new Response(
-        JSON.stringify({ error: "Failed to generate thumbnail" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: extractProviderErrorMessage(errorText, "Failed to generate thumbnail") }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    const data = await imageResponse.json();
-    const b64Image = data.data?.[0]?.b64_json;
+    const imageData = await imageResponse.json();
+    const b64Image = imageData.data?.[0]?.b64_json;
     const imageUrl = b64Image ? `data:image/png;base64,${b64Image}` : undefined;
-    const textResponse = thumbnailPrompt;
 
     if (!imageUrl) {
-      console.error("No image in response:", data);
+      console.error("No image in response:", imageData);
       await refundCredits(user.id, creditCheck.cost!, "No image generated - refund");
-      return new Response(
-        JSON.stringify({ error: "No image generated" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "No image generated" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Update usage tracking
-    const { error: upsertError } = await supabase
+    const { error: upsertError } = await userClient
       .from("usage_tracking")
       .upsert(
         {
@@ -254,24 +354,24 @@ serve(async (req) => {
       console.error("Failed to update usage:", upsertError);
     }
 
-    console.log("Thumbnail generated successfully");
-
     return new Response(
       JSON.stringify({
         imageUrl,
-        description: textResponse,
+        description: thumbnailPrompt,
         usage: {
           used: currentUsage + 1,
           limit: dailyLimit === -1 ? "unlimited" : dailyLimit,
         },
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
     );
   } catch (error) {
     console.error("Thumbnail generation error:", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });

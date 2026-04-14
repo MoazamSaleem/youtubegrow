@@ -30,6 +30,29 @@ const YouTubeCallback = () => {
 
   const normalizeFunctionError = (error: any) => {
     if (!error) return null;
+    const responseLike = error?.context;
+
+    if (responseLike && typeof responseLike?.clone === "function") {
+      return responseLike
+        .clone()
+        .json()
+        .then((parsed: any) => parsed?.error || parsed?.message || error.message)
+        .catch(async () => {
+          try {
+            const text = await responseLike.clone().text();
+            if (!text) return error.message;
+            try {
+              const parsed = JSON.parse(text);
+              return parsed?.error || parsed?.message || text;
+            } catch {
+              return text;
+            }
+          } catch {
+            return error.message;
+          }
+        });
+    }
+
     const rawBody = error?.context?.body;
     if (typeof rawBody === "string") {
       try {
@@ -132,7 +155,7 @@ const YouTubeCallback = () => {
         });
 
         if (error) {
-          throw new Error(normalizeFunctionError(error) || "Failed to connect channel");
+          throw new Error(await normalizeFunctionError(error) || "Failed to connect channel");
         }
 
         setStatus("success");

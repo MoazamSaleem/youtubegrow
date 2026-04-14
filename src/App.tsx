@@ -16,6 +16,7 @@ import KeywordsResearch from "./pages/KeywordsResearch";
 import Billing from "./pages/Billing";
 import AIChat from "./pages/AIChat";
 import ScriptWriter from "./pages/ScriptWriter";
+import TextToSpeech from "./pages/TextToSpeech";
 import CompetitorAnalysis from "./pages/CompetitorAnalysis";
 import ChannelAnalysis from "./pages/ChannelAnalysis";
 import GrowthTasks from "./pages/GrowthTasks";
@@ -41,7 +42,12 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
           <AuthProvider>
             <Routes>
               <Route path="/" element={<Index />} />
@@ -54,6 +60,7 @@ const App = () => (
               <Route path="/dashboard/billing" element={<Billing />} />
               <Route path="/dashboard/chat" element={<AIChat />} />
               <Route path="/dashboard/scripts" element={<ScriptWriter />} />
+              <Route path="/dashboard/text-to-speech" element={<TextToSpeech />} />
               <Route path="/dashboard/competitors" element={<CompetitorAnalysis />} />
               <Route path="/dashboard/analysis" element={<ChannelAnalysis />} />
               <Route path="/dashboard/growth" element={<GrowthTasks />} />

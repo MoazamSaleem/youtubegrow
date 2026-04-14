@@ -41,7 +41,7 @@ const Navbar = () => {
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1 animate-pulse" />
             </div>
             <span className="font-display font-bold text-base sm:text-xl leading-tight text-foreground">
-              YouTube <span className="gradient-text">Growth Planner</span>
+              YouTube <span className="gradient-text">Growth Partner</span>
             </span>
           </Link>
 
@@ -66,7 +66,7 @@ const Navbar = () => {
               <Link to="/signin">Sign In</Link>
             </Button>
             <Button variant="hero" asChild>
-              <Link to="/signup">Start Free Trial</Link>
+              <Link to="/signup">View Plans</Link>
             </Button>
           </div>
 
@@ -108,7 +108,7 @@ const Navbar = () => {
                   <Link to="/signin">Sign In</Link>
                 </Button>
                 <Button variant="hero" className="w-full" asChild>
-                  <Link to="/signup">Start Free Trial</Link>
+                  <Link to="/signup">View Plans</Link>
                 </Button>
               </div>
             </div>

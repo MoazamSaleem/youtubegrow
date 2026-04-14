@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { canAccessFeature } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Users,
@@ -93,7 +95,7 @@ const CompetitorAnalysisPage = () => {
     yourChannelInfo: "",
   });
 
-  const currentPlan = subscription?.plan || "free";
+  const currentPlan = getActiveSubscriptionPlan(subscription);
   const hasAccess = canAccessFeature(currentPlan, "competitorAnalysisFrequency");
   const saveLimit = currentPlan === "pro" ? 3 : currentPlan === "advanced" ? 5 : 0;
   const hasSaveAccess = saveLimit > 0;
@@ -462,24 +464,15 @@ const CompetitorAnalysisPage = () => {
 
         <div className="p-4 lg:p-8">
           {!hasAccess ? (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="w-full text-center py-16"
-            >
-              <div className="inline-flex p-6 rounded-3xl glass mb-8">
-                <Users className="h-16 w-16 text-accent" />
-              </div>
-              <h2 className="font-display text-2xl font-bold mb-4">
-                Unlock Competitor Analysis
-              </h2>
-              <p className="text-muted-foreground mb-8">
-                Study competitor strategies and discover opportunities. Available on paid plans.
-              </p>
-              <Button variant="hero" onClick={() => navigate("/dashboard/billing")}>
-                <Sparkles className="h-4 w-4 mr-2" />
-                Upgrade Now
-              </Button>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+              <SubscriptionRequiredState
+                title={currentPlan ? "Unlock Competitor Analysis" : "Active subscription required"}
+                description={
+                  currentPlan
+                    ? "Study competitor strategies and discover opportunities. Available on paid plans."
+                    : "Competitor Analysis now requires an active Basic, Pro, or Advanced subscription."
+                }
+              />
             </motion.div>
           ) : (
             <div className="space-y-8">

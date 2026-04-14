@@ -40,17 +40,42 @@ serve(async (req) => {
     logStep("User authenticated", { email: user.email });
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
-    const customers = await stripe.customers.list({ email: user.email, limit: 1 });
-    if (customers.data.length === 0) {
+
+    let customerId: string | null = null;
+    const { data: storedCustomerId } = await supabaseClient.rpc("get_stripe_customer_id", {
+      p_user_id: user.id,
+    });
+
+    if (storedCustomerId) {
+      try {
+        const storedCustomer = await stripe.customers.retrieve(storedCustomerId);
+        if (!("deleted" in storedCustomer) || !storedCustomer.deleted) {
+          customerId = storedCustomer.id;
+          logStep("Resolved Stripe customer from secure storage", { customerId });
+        }
+      } catch (error) {
+        logStep("Stored Stripe customer lookup failed, falling back to email", {
+          userId: user.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (!customerId) {
+      const customers = await stripe.customers.list({ email: user.email, limit: 10 });
+      customerId = customers.data[0]?.id ?? null;
+    }
+
+    if (!customerId) {
       throw new Error("No Stripe customer found for this user");
     }
-    const customerId = customers.data[0].id;
+
     logStep("Found Stripe customer", { customerId });
 
     const origin = req.headers.get("origin") || "http://localhost:3000";
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${origin}/dashboard/billing`,
+      return_url: `${origin}/dashboard/billing?portal=1`,
     });
     logStep("Portal session created", { url: portalSession.url });
 

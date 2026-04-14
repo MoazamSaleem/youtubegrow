@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -9,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { PLAN_LIMITS } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import {
   Check,
   Lock,
@@ -90,8 +92,8 @@ const GrowthTasks = () => {
   const [processingTask, setProcessingTask] = useState<string | null>(null);
   const aiGenerateRef = useRef(false);
 
-  const currentPlan = subscription?.plan || "free";
-  const planLimits = PLAN_LIMITS[currentPlan];
+  const currentPlan = getActiveSubscriptionPlan(subscription);
+  const planLimits = currentPlan ? PLAN_LIMITS[currentPlan] : null;
 
   useEffect(() => {
     fetchData();
@@ -379,6 +381,17 @@ const GrowthTasks = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!currentPlan || !planLimits) {
+    return (
+      <div className="min-h-screen bg-background flex">
+        <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <main className="flex-1 flex items-center justify-center p-4 lg:p-8">
+          <SubscriptionRequiredState description="Growth tasks and milestones now require an active Basic, Pro, or Advanced subscription." />
+        </main>
       </div>
     );
   }

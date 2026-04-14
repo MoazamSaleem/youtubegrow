@@ -68,6 +68,22 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+[functions.generate-speech]
+enabled = true
+verify_jwt = false
+
+[functions.list-tts-voices]
+enabled = true
+verify_jwt = false
+
+[functions.create-tts-voice]
+enabled = true
+verify_jwt = false
+
+[functions.update-tts-voice]
+enabled = true
+verify_jwt = false
+
 [functions.check-subscription]
 enabled = true
 verify_jwt = false
@@ -75,7 +91,3 @@ verify_jwt = false
 [functions.check-trial-expiration]
 enabled = true
 verify_jwt = true
-
-[functions.check-free-trial-eligibility]
-enabled = true
-verify_jwt = false

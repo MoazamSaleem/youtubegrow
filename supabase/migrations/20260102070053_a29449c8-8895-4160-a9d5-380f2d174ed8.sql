@@ -1,5 +1,5 @@
 -- Create subscription plan enum
-CREATE TYPE public.subscription_plan AS ENUM ('free', 'basic', 'pro', 'advanced');
+CREATE TYPE public.subscription_plan AS ENUM ('basic', 'pro', 'advanced');
 
 -- Create profiles table
 CREATE TABLE public.profiles (
@@ -16,7 +16,7 @@ CREATE TABLE public.profiles (
 CREATE TABLE public.subscriptions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  plan subscription_plan NOT NULL DEFAULT 'free',
+  plan subscription_plan NOT NULL,
   billing_cycle TEXT NOT NULL DEFAULT 'monthly' CHECK (billing_cycle IN ('monthly', 'yearly')),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'expired', 'trialing')),
   trial_ends_at TIMESTAMP WITH TIME ZONE,
@@ -206,10 +206,6 @@ BEGIN
   -- Create profile
   INSERT INTO public.profiles (user_id, email, full_name)
   VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data ->> 'full_name');
-  
-  -- Create free subscription with 1 month trial
-  INSERT INTO public.subscriptions (user_id, plan, status, trial_ends_at, current_period_end)
-  VALUES (NEW.id, 'free', 'trialing', now() + interval '1 month', now() + interval '1 month');
   
   -- Assign default user role
   INSERT INTO public.user_roles (user_id, role)

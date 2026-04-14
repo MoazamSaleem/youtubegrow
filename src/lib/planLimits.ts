@@ -1,4 +1,6 @@
-export type SubscriptionPlan = "free" | "basic" | "pro" | "advanced";
+export const PLAN_ORDER = ["basic", "pro", "advanced"] as const;
+
+export type SubscriptionPlan = (typeof PLAN_ORDER)[number];
 
 export interface PlanLimits {
   maxChannels: number;
@@ -8,6 +10,8 @@ export interface PlanLimits {
   channelAnalysisFrequency: "never" | "weekly" | "unlimited";
   competitorAnalysisFrequency: "never" | "weekly" | "daily";
   hasScriptWriter: boolean;
+  hasTextToSpeech: boolean;
+  hasVoiceClone: boolean;
   hasAdvancedAnalytics: boolean;
   hasGrowthTasks: boolean;
   hasYoutubeStrategist: boolean;
@@ -20,24 +24,6 @@ export interface PlanLimits {
 }
 
 export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
-  free: {
-    maxChannels: 1,
-    keywordsPerDay: 20,
-    topicsPerDay: 2,
-    thumbnailsPerDay: 0,
-    channelAnalysisFrequency: "never",
-    competitorAnalysisFrequency: "never",
-    hasScriptWriter: false,
-    hasAdvancedAnalytics: false,
-    hasGrowthTasks: false,
-    hasYoutubeStrategist: false,
-    aiStrategistCredits: 0,
-    growthTasksTier: "none",
-    price: {
-      monthly: 0,
-      yearly: 0,
-    },
-  },
   basic: {
     maxChannels: 1,
     keywordsPerDay: 50,
@@ -46,6 +32,8 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     channelAnalysisFrequency: "weekly",
     competitorAnalysisFrequency: "weekly",
     hasScriptWriter: false,
+    hasTextToSpeech: false,
+    hasVoiceClone: false,
     hasAdvancedAnalytics: false,
     hasGrowthTasks: true,
     hasYoutubeStrategist: false,
@@ -64,6 +52,8 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     channelAnalysisFrequency: "weekly",
     competitorAnalysisFrequency: "weekly",
     hasScriptWriter: true,
+    hasTextToSpeech: true,
+    hasVoiceClone: true,
     hasAdvancedAnalytics: true,
     hasGrowthTasks: true,
     hasYoutubeStrategist: true,
@@ -82,6 +72,8 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     channelAnalysisFrequency: "unlimited",
     competitorAnalysisFrequency: "daily",
     hasScriptWriter: true,
+    hasTextToSpeech: true,
+    hasVoiceClone: true,
     hasAdvancedAnalytics: true,
     hasGrowthTasks: true,
     hasYoutubeStrategist: true,
@@ -99,9 +91,11 @@ export function getPlanLimits(plan: SubscriptionPlan): PlanLimits {
 }
 
 export function canAccessFeature(
-  plan: SubscriptionPlan,
+  plan: SubscriptionPlan | null | undefined,
   feature: keyof PlanLimits
 ): boolean {
+  if (!plan) return false;
+
   const limits = PLAN_LIMITS[plan];
   const value = limits[feature];
   
@@ -111,6 +105,7 @@ export function canAccessFeature(
   return true;
 }
 
-export function getPlanDisplayName(plan: SubscriptionPlan): string {
+export function getPlanDisplayName(plan: SubscriptionPlan | null | undefined): string {
+  if (!plan) return "No Active Plan";
   return plan.charAt(0).toUpperCase() + plan.slice(1);
 }

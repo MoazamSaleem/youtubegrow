@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,6 @@ import {
   X,
   Crown, 
   Zap, 
-  Star, 
   Rocket,
   Loader2
 } from "lucide-react";
@@ -39,8 +38,7 @@ const signUpSchema = z.object({
   agreed: z.boolean().refine((val) => val === true, "You must agree to the terms"),
 });
 
-const planConfigs: { key: SubscriptionPlan; description: string; icon: typeof Star; color: string }[] = [
-  { key: "free", description: "1 month trial - First time only", icon: Star, color: "from-slate-500 to-slate-600" },
+const planConfigs: { key: SubscriptionPlan; description: string; icon: typeof Zap; color: string }[] = [
   { key: "basic", description: "For growing creators", icon: Zap, color: "from-blue-500 to-blue-600" },
   { key: "pro", description: "Most popular choice", icon: Crown, color: "from-purple-500 to-purple-600" },
   { key: "advanced", description: "For serious creators", icon: Rocket, color: "from-orange-500 to-orange-600" },
@@ -58,52 +56,15 @@ const SignUp = () => {
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; agreed?: string }>({});
-  const [freeTrialEligible, setFreeTrialEligible] = useState(true);
-  const [checkingEligibility, setCheckingEligibility] = useState(false);
   const [isYearly, setIsYearly] = useState(false);
 
   const selectedBillingCycle = isYearly ? "yearly" : "monthly";
 
   const getPlanPrice = (plan: SubscriptionPlan) => {
-    if (plan === "free") return PLAN_LIMITS.free.price.monthly;
     return isYearly ? STRIPE_PLANS[plan].yearlyPrice : STRIPE_PLANS[plan].monthlyPrice;
   };
 
-  // Check free trial eligibility when email changes
-  useEffect(() => {
-    const checkEligibility = async () => {
-      if (!email || !z.string().email().safeParse(email).success) {
-        return;
-      }
-
-      setCheckingEligibility(true);
-      try {
-        const { data, error } = await supabase.functions.invoke("check-free-trial-eligibility", {
-          body: { email },
-        });
-
-        if (!error && data) {
-          setFreeTrialEligible(data.eligible);
-          if (!data.eligible && selectedPlan === "free") {
-            setSelectedPlan(null);
-            toast.info("You've already used your free trial. Please choose a paid plan.");
-          }
-        }
-      } catch (err) {
-        console.error("Error checking eligibility:", err);
-      }
-      setCheckingEligibility(false);
-    };
-
-    const timeoutId = setTimeout(checkEligibility, 500);
-    return () => clearTimeout(timeoutId);
-  }, [email, selectedPlan]);
-
   const handlePlanSelect = (plan: SubscriptionPlan) => {
-    if (plan === "free" && !freeTrialEligible) {
-      toast.error("You've already used your free trial. Please choose a paid plan.");
-      return;
-    }
     setSelectedPlan(plan);
   };
 
@@ -129,21 +90,6 @@ const SignUp = () => {
       return;
     }
 
-    // Re-check free trial eligibility before signup
-    if (selectedPlan === "free") {
-      const { data: eligibilityData } = await supabase.functions.invoke("check-free-trial-eligibility", {
-        body: { email },
-      });
-
-      if (eligibilityData && !eligibilityData.eligible) {
-        toast.error("You've already used your free trial. Please choose a paid plan.");
-        setFreeTrialEligible(false);
-        setStep("plan");
-        setSelectedPlan(null);
-        return;
-      }
-    }
-
     setLoading(true);
     const { data, error } = await signUp(email, password, name);
 
@@ -151,7 +97,6 @@ const SignUp = () => {
       setLoading(false);
       if (error.message.includes("already registered")) {
         toast.error("This email is already registered. Please sign in instead.");
-        setFreeTrialEligible(false);
       } else {
         toast.error(error.message);
       }
@@ -170,155 +115,83 @@ const SignUp = () => {
       return;
     }
 
-    // Create subscription record
-    const now = new Date();
-    const trialEnd = new Date(now);
-    trialEnd.setMonth(trialEnd.getMonth() + 1);
+    // Create or refresh pending subscription
+    const now = new Date().toISOString();
+    const pendingSubscription = {
+      plan: selectedPlan,
+      status: "pending",
+      billing_cycle: selectedBillingCycle,
+      current_period_start: now,
+      current_period_end: now,
+      updated_at: now,
+    };
 
-    if (selectedPlan === "free") {
-      // Free trial - create subscription
-      const { error: subError } = await supabase.from("subscriptions").upsert({
+    const { data: updatedRows, error: updateSubError } = await supabase
+      .from("subscriptions")
+      .update(pendingSubscription)
+      .eq("user_id", userId)
+      .select("id");
+
+    let subError = updateSubError;
+
+    if (!subError && (!updatedRows || updatedRows.length === 0)) {
+      const { error: insertSubError } = await supabase.from("subscriptions").insert({
         user_id: userId,
-        plan: "free",
-        status: "trialing",
-        billing_cycle: "monthly",
-        has_used_free_trial: true,
-        trial_started_at: now.toISOString(),
-        trial_ends_at: trialEnd.toISOString(),
-        current_period_start: now.toISOString(),
-        current_period_end: trialEnd.toISOString(),
-      }, { onConflict: "user_id" });
-
-      if (subError) {
-        console.error("Subscription error:", subError);
-      }
-
-      if (hasSession && session?.access_token) {
-        await supabase.functions.invoke("init-user-tokens", {
-          body: { reason: "free_trial" },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-        });
-      }
-
-      setLoading(false);
-      
-      if (needsConfirmation) {
-        toast.success("Check your email to confirm your account, then sign in to start your free trial.");
-        navigate("/signin");
-      } else {
-        toast.success("Welcome to YouTube Growth Planner! Your 1-month free trial has started.");
-        navigate("/dashboard");
-      }
-    } else {
-      // Paid plan - create pending subscription
-      const { error: subError } = await supabase.from("subscriptions").upsert({
-        user_id: userId,
-        plan: selectedPlan,
-        status: "pending",
-        billing_cycle: selectedBillingCycle,
-        has_used_free_trial: false,
-        current_period_start: now.toISOString(),
-        current_period_end: now.toISOString(),
-      }, { onConflict: "user_id" });
-
-      if (subError) {
-        console.error("Subscription error:", subError);
-      }
-
-      // Redirect to Stripe checkout
-      const stripePlan = STRIPE_PLANS[selectedPlan as keyof typeof STRIPE_PLANS];
-      if (stripePlan) {
-        // Success path: go to payment success page with email confirmation flag
-        const successPath = needsConfirmation
-          ? "/payment-success?confirm=1"
-          : "/payment-success";
-        const cancelPath = "/signup?checkout=cancelled";
-
-        const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
-          body: {
-            priceId: selectedBillingCycle === "monthly" ? stripePlan.monthlyPriceId : undefined,
-            productId: stripePlan.productId,
-            billingCycle: selectedBillingCycle,
-            amountUsd: selectedBillingCycle === "yearly" ? stripePlan.yearlyPrice : stripePlan.monthlyPrice,
-            email,
-            userId,
-            successPath,
-            cancelPath,
-          },
-          headers: hasSession && session?.access_token
-            ? {
-                Authorization: `Bearer ${session.access_token}`,
-                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-              }
-            : undefined,
-        });
-
-        if (checkoutError) {
-          setLoading(false);
-          // Payment failed - convert to free trial for new users
-          toast.error("Payment setup failed. We've started you on a free trial instead.");
-          
-          // Update subscription to free trial
-          await supabase.from("subscriptions").upsert({
-            user_id: userId,
-            plan: "free",
-            status: "trialing",
-            billing_cycle: "monthly",
-            has_used_free_trial: true,
-            trial_started_at: now.toISOString(),
-            trial_ends_at: trialEnd.toISOString(),
-            current_period_start: now.toISOString(),
-            current_period_end: trialEnd.toISOString(),
-          }, { onConflict: "user_id" });
-
-          if (hasSession && session?.access_token) {
-            await supabase.functions.invoke("init-user-tokens", {
-              body: { reason: "free_trial" },
-              headers: {
-                Authorization: `Bearer ${session.access_token}`,
-                apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-              },
-            });
-          }
-
-          if (needsConfirmation) {
-            navigate("/signin");
-          } else {
-            navigate("/dashboard");
-          }
-          return;
-        }
-
-        if (checkoutData?.url) {
-          window.location.href = checkoutData.url;
-          return;
-        }
-      }
-
-      setLoading(false);
-      navigate(needsConfirmation ? "/signin" : "/dashboard/billing");
+        ...pendingSubscription,
+      });
+      subError = insertSubError;
     }
+
+    if (subError) {
+      console.error("Subscription error:", subError);
+    }
+
+    // Redirect to Stripe checkout
+    const stripePlan = STRIPE_PLANS[selectedPlan as keyof typeof STRIPE_PLANS];
+    if (stripePlan) {
+      const successPath = needsConfirmation
+        ? "/payment-success?confirm=1"
+        : "/payment-success";
+      const cancelPath = "/signup?checkout=cancelled";
+
+      const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
+        body: {
+          priceId: selectedBillingCycle === "monthly" ? stripePlan.monthlyPriceId : undefined,
+          productId: stripePlan.productId,
+          billingCycle: selectedBillingCycle,
+          amountUsd: selectedBillingCycle === "yearly" ? stripePlan.yearlyPrice : stripePlan.monthlyPrice,
+          email,
+          userId,
+          successPath,
+          cancelPath,
+        },
+        headers: hasSession && session?.access_token
+          ? {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            }
+          : undefined,
+      });
+
+      if (checkoutError) {
+        setLoading(false);
+        toast.error("Payment setup failed. Please try again.");
+        navigate(needsConfirmation ? "/signin" : "/dashboard/billing");
+        return;
+      }
+
+      if (checkoutData?.url) {
+        window.location.href = checkoutData.url;
+        return;
+      }
+    }
+
+    setLoading(false);
+    navigate(needsConfirmation ? "/signin" : "/dashboard/billing");
   };
 
   // Features exactly matching the reference image
   const planFeatures: Record<SubscriptionPlan, { included: string[]; excluded: string[] }> = {
-    free: {
-      included: [
-        "Link 1 channel",
-        "View basic analytics",
-        "20 keywords/day",
-        "2 topic suggestions/day",
-      ],
-      excluded: [
-        "AI channel analysis",
-        "Competitor analysis",
-        "Script writer",
-        "Thumbnail generator",
-      ],
-    },
     basic: {
       included: [
         "Link 1 channel",
@@ -332,6 +205,8 @@ const SignUp = () => {
       ],
       excluded: [
         "Script writer",
+        "Text to Speech",
+        "Voice Clone",
         "Thumbnail generator",
       ],
     },
@@ -344,6 +219,8 @@ const SignUp = () => {
         "AI analysis weekly",
         "Competitor analysis weekly",
         "Script writer",
+        "Text to Speech",
+        "Voice Clone",
         "5 thumbnails/day",
         "YouTube Strategist AI",
         "Growth tasks & milestones",
@@ -360,6 +237,8 @@ const SignUp = () => {
         "Unlimited AI analysis",
         "Daily competitor analysis",
         "Script writer",
+        "Text to Speech",
+        "Voice Clone",
         "Unlimited thumbnails",
         "YouTube Strategist AI",
         "Growth tasks & milestones",
@@ -376,14 +255,6 @@ const SignUp = () => {
   const getExcludedFeatures = (plan: SubscriptionPlan) => {
     return planFeatures[plan].excluded;
   };
-
-  // Filter plans based on eligibility
-  const availablePlans = planConfigs.filter(config => {
-    if (config.key === "free" && !freeTrialEligible) {
-      return false;
-    }
-    return true;
-  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -427,11 +298,6 @@ const SignUp = () => {
                 <p className="text-muted-foreground text-lg">
                   Select the plan that fits your YouTube growth goals
                 </p>
-                {!freeTrialEligible && (
-                  <p className="text-amber-500 text-sm mt-2">
-                    Note: You've already used your free trial. Please choose a paid plan.
-                  </p>
-                )}
                 <div className="flex items-center justify-center gap-4 mt-6">
                   <span className={!isYearly ? "font-semibold" : "text-muted-foreground"}>
                     Monthly
@@ -452,14 +318,13 @@ const SignUp = () => {
               </div>
 
               {/* Plan Cards */}
-              <div className={`grid sm:grid-cols-2 ${availablePlans.length === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4 mb-8`}>
-                {availablePlans.map((config) => {
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+                {planConfigs.map((config) => {
                   const isSelected = selectedPlan === config.key;
                   const includedFeatures = getFeatures(config.key);
                   const excludedFeatures = getExcludedFeatures(config.key);
                   const planName = config.key.charAt(0).toUpperCase() + config.key.slice(1);
-                  const buttonText = config.key === "free" ? "Start Free Trial" : 
-                                   config.key === "basic" ? "Get Started" :
+                  const buttonText = config.key === "basic" ? "Get Started" :
                                    config.key === "pro" ? "Get Pro" : "Go Advanced";
 
                   return (
@@ -480,12 +345,6 @@ const SignUp = () => {
                         </Badge>
                       )}
 
-                      {config.key === "free" && (
-                        <Badge variant="outline" className="absolute -top-3 left-1/2 -translate-x-1/2 border-amber-500/50 text-amber-400 text-xs">
-                          First Time Only
-                        </Badge>
-                      )}
-
                       <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${config.color} flex items-center justify-center mb-3`}>
                         <config.icon className="h-5 w-5 text-white" />
                       </div>
@@ -496,7 +355,7 @@ const SignUp = () => {
                       <div className="flex items-baseline gap-1 mb-4">
                         <span className="text-2xl font-bold">${getPlanPrice(config.key)}</span>
                         <span className="text-muted-foreground text-sm">
-                          /{config.key === "free" ? "month" : isYearly ? "year" : "month"}
+                          /{isYearly ? "year" : "month"}
                         </span>
                       </div>
 
@@ -518,9 +377,7 @@ const SignUp = () => {
                       <div className={`text-center py-2 rounded-lg text-sm font-medium ${
                         isSelected 
                           ? "bg-primary text-primary-foreground" 
-                          : config.key === "free" 
-                            ? "border border-border text-foreground" 
-                            : "bg-primary/10 text-primary"
+                          : "bg-primary/10 text-primary"
                       }`}>
                         {buttonText}
                       </div>
@@ -582,20 +439,16 @@ const SignUp = () => {
                     const limits = PLAN_LIMITS[selectedPlan];
                     return (
                       <>
-                        <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${config.color} flex items-center justify-center`}>
-                          <config.icon className="h-6 w-6 text-white" />
-                        </div>
+                            <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${config.color} flex items-center justify-center`}>
+                              <config.icon className="h-6 w-6 text-white" />
+                            </div>
                         <div className="flex-1">
                           <h3 className="font-semibold capitalize">{selectedPlan} Plan</h3>
                           <p className="text-sm text-muted-foreground">
-                            {selectedPlan === "free" 
-                              ? "1 month free trial" 
-                              : `$${getPlanPrice(selectedPlan)}/${isYearly ? "year" : "month"}`}
+                            ${getPlanPrice(selectedPlan)}/{isYearly ? "year" : "month"}
                           </p>
                         </div>
-                        {selectedPlan !== "free" && (
-                          <Badge variant="secondary">Paid</Badge>
-                        )}
+                        <Badge variant="secondary">Paid</Badge>
                       </>
                     );
                   })()}
@@ -606,9 +459,7 @@ const SignUp = () => {
               <div className="mb-6">
                 <h1 className="font-display text-2xl font-bold mb-2">Create your account</h1>
                 <p className="text-muted-foreground">
-                  {selectedPlan === "free"
-                    ? "Start your 1-month free trial"
-                    : "Complete your registration to continue to payment"}
+                  Complete your registration to continue to payment
                 </p>
               </div>
 
@@ -642,9 +493,6 @@ const SignUp = () => {
                       onChange={(e) => setEmail(e.target.value)}
                       className={`pl-10 h-12 bg-secondary border-border ${errors.email ? "border-destructive" : ""}`}
                     />
-                    {checkingEligibility && (
-                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-                    )}
                   </div>
                   {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
                 </div>
@@ -706,8 +554,6 @@ const SignUp = () => {
                 >
                   {loading ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : selectedPlan === "free" ? (
-                    "Start Free Trial"
                   ) : (
                     "Continue to Payment"
                   )}

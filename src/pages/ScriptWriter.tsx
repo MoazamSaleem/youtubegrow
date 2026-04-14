@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { canAccessFeature } from "@/lib/planLimits";
+import { getActiveSubscriptionPlan } from "@/lib/subscription";
 import { supabase } from "@/integrations/supabase/client";
 import {
   FileText,
@@ -67,7 +69,7 @@ const ScriptWriter = () => {
     includeCTA: true,
   });
 
-  const currentPlan = subscription?.plan || "free";
+  const currentPlan = getActiveSubscriptionPlan(subscription);
   const hasAccess = canAccessFeature(currentPlan, "hasScriptWriter");
 
   useEffect(() => {
@@ -272,24 +274,15 @@ Estimated Duration: ${data.estimatedDuration}${tips}
 
         <div className="p-4 lg:p-8">
           {!hasAccess ? (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="w-full text-center py-16"
-            >
-              <div className="inline-flex p-6 rounded-3xl glass mb-8">
-                <FileText className="h-16 w-16 text-warning" />
-              </div>
-              <h2 className="font-display text-2xl font-bold mb-4">
-                Unlock AI Script Writer
-              </h2>
-              <p className="text-muted-foreground mb-8">
-                Generate professional video scripts with AI. Available on Pro and Advanced plans.
-              </p>
-              <Button variant="hero" onClick={() => navigate("/dashboard/billing")}>
-                <Sparkles className="h-4 w-4 mr-2" />
-                Upgrade Now
-              </Button>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+              <SubscriptionRequiredState
+                title={currentPlan ? "Unlock AI Script Writer" : "Active subscription required"}
+                description={
+                  currentPlan
+                    ? "Generate professional video scripts with AI. Available on Pro and Advanced plans."
+                    : "Generate professional video scripts with AI after activating a paid subscription. Pro and Advanced include Script Writer access."
+                }
+              />
             </motion.div>
           ) : (
             <div className="grid lg:grid-cols-[400px,1fr] gap-8">
