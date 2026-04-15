@@ -85,6 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pendingSyncAttempted = useRef<string | null>(null);
   const authInitialized = useRef(false);
   const lastResolvedUserId = useRef<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  const currentLoadingRef = useRef(true);
+
+  useEffect(() => {
+    currentUserIdRef.current = user?.id ?? null;
+  }, [user]);
+
+  useEffect(() => {
+    currentLoadingRef.current = loading;
+  }, [loading]);
 
   const clearAuthState = useCallback(() => {
     pendingSyncAttempted.current = null;
@@ -273,7 +283,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return await run;
   }, [fetchSubscriptionFromDb, getSessionWithRefresh]);
 
-  const hydrateUserSession = useCallback(async (nextSession: Session | null) => {
+  const hydrateUserSession = useCallback(async (nextSession: Session | null, silent = false) => {
     setSession(nextSession);
 
     if (!nextSession?.access_token) {
@@ -318,7 +328,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await refreshSubscriptionForUser(authUser.id, resolvedSubscription);
       }
     } finally {
-      setLoading(false);
+      if (!silent || currentLoadingRef.current) {
+        setLoading(false);
+      }
     }
   }, [clearAuthState, fetchUserData, refreshSubscriptionForUser]);
 
@@ -340,8 +352,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        setLoading(true);
-        void hydrateUserSession(nextSession);
+        const sameUserSession =
+          !!nextSession?.user?.id &&
+          currentUserIdRef.current === nextSession.user.id;
+        const shouldHydrateSilently =
+          authInitialized.current &&
+          !currentLoadingRef.current &&
+          event !== "SIGNED_OUT" &&
+          sameUserSession;
+
+        if (!shouldHydrateSilently) {
+          setLoading(true);
+        }
+        void hydrateUserSession(nextSession, shouldHydrateSilently);
       }
     );
 

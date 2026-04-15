@@ -10,15 +10,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Image, Sparkles, Download, Loader2, Wand2, Menu } from "lucide-react";
+import { Image, Sparkles, Download, Loader2, Wand2, Menu, RefreshCw } from "lucide-react";
 import { getPlanLimits, canAccessFeature } from "@/lib/planLimits";
 import { getActiveSubscriptionPlan } from "@/lib/subscription";
 
 interface GeneratedThumbnail {
+  id: string;
   imageUrl: string;
   topic: string;
   style: string;
+  channelNiche?: string;
   createdAt: Date;
 }
 
@@ -31,7 +34,11 @@ const ThumbnailGenerator = () => {
   const [style, setStyle] = useState("vibrant");
   const [channelNiche, setChannelNiche] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(0);
   const [generatedThumbnails, setGeneratedThumbnails] = useState<GeneratedThumbnail[]>([]);
+  const [updatePrompts, setUpdatePrompts] = useState<Record<string, string>>({});
+  const [sectionUpdatePrompt, setSectionUpdatePrompt] = useState("");
+  const [updatingThumbnailId, setUpdatingThumbnailId] = useState<string | null>(null);
   const [dailyUsage, setDailyUsage] = useState(0);
   
   const userPlan = getActiveSubscriptionPlan(subscription);
@@ -47,6 +54,20 @@ const ThumbnailGenerator = () => {
       fetchUsageData();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!isGenerating) {
+      setGenerationProgress(0);
+      return;
+    }
+
+    setGenerationProgress(6);
+    const interval = window.setInterval(() => {
+      setGenerationProgress((prev) => Math.min(prev + Math.max(3, (95 - prev) * 0.12), 95));
+    }, 350);
+
+    return () => window.clearInterval(interval);
+  }, [isGenerating]);
 
   const normalizeFunctionError = useCallback(async (error: any) => {
     if (!error) return null;
@@ -188,6 +209,7 @@ const ThumbnailGenerator = () => {
   const dailyLimit = planLimits?.thumbnailsPerDay ?? 0;
   const isUnlimited = dailyLimit === -1;
   const hasReachedLimit = !isUnlimited && dailyUsage >= dailyLimit;
+  const latestThumbnail = generatedThumbnails[0] ?? null;
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
@@ -240,14 +262,16 @@ const ThumbnailGenerator = () => {
       }
 
       const newThumbnail: GeneratedThumbnail = {
+        id: crypto.randomUUID(),
         imageUrl: data.imageUrl,
         topic,
         style,
+        channelNiche,
         createdAt: new Date(),
       };
 
       setGeneratedThumbnails((prev) => [newThumbnail, ...prev]);
-      setDailyUsage((prev) => prev + 1);
+      setDailyUsage((prev) => (typeof data.usage?.used === "number" ? data.usage.used : prev + 1));
 
       toast({
         title: "Thumbnail generated!",
@@ -261,7 +285,70 @@ const ThumbnailGenerator = () => {
         variant: "destructive",
       });
     } finally {
+      setGenerationProgress(100);
+      window.setTimeout(() => setGenerationProgress(0), 500);
       setIsGenerating(false);
+    }
+  };
+
+  const handleUpdateThumbnail = async (thumbnail: GeneratedThumbnail, forcedPrompt?: string) => {
+    const updatePrompt = (forcedPrompt ?? updatePrompts[thumbnail.id] ?? "").trim();
+    if (!updatePrompt) {
+      toast({
+        title: "Update prompt required",
+        description: "Describe what should change in the thumbnail.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUpdatingThumbnailId(thumbnail.id);
+
+    try {
+      const { data, error } = await invokeWithAuthRetry<{
+        imageUrl?: string;
+        usage?: { used?: number; limit?: number | string };
+        error?: string;
+      }>({
+        topic: thumbnail.topic,
+        style: thumbnail.style,
+        channelNiche: thumbnail.channelNiche || channelNiche,
+        updatePrompt,
+      });
+
+      if (error) {
+        throw new Error(await normalizeFunctionError(error) || "Failed to update thumbnail");
+      }
+
+      if (data.error || !data.imageUrl) {
+        throw new Error(data.error || "Failed to update thumbnail");
+      }
+
+      setGeneratedThumbnails((prev) =>
+        prev.map((item) =>
+          item.id === thumbnail.id
+            ? { ...item, imageUrl: data.imageUrl!, createdAt: new Date() }
+            : item
+        )
+      );
+      setDailyUsage((prev) => (typeof data.usage?.used === "number" ? data.usage.used : prev + 1));
+      setUpdatePrompts((prev) => ({ ...prev, [thumbnail.id]: "" }));
+      if (forcedPrompt) {
+        setSectionUpdatePrompt("");
+      }
+
+      toast({
+        title: "Thumbnail updated",
+        description: "Your thumbnail was regenerated using your update prompt.",
+      });
+    } catch (error) {
+      toast({
+        title: "Update failed",
+        description: error instanceof Error ? error.message : "Failed to update thumbnail",
+        variant: "destructive",
+      });
+    } finally {
+      setUpdatingThumbnailId(null);
     }
   };
 
@@ -416,6 +503,15 @@ const ThumbnailGenerator = () => {
                       )}
                     </Button>
 
+                    {isGenerating && (
+                      <div className="space-y-2">
+                        <Progress value={generationProgress} className="h-2" />
+                        <p className="text-xs text-muted-foreground text-center">
+                          Generating thumbnail... {Math.round(generationProgress)}%
+                        </p>
+                      </div>
+                    )}
+
                     {hasReachedLimit && (
                       <p className="text-sm text-destructive text-center">
                         Daily limit reached. Upgrade for more.
@@ -427,6 +523,32 @@ const ThumbnailGenerator = () => {
                 {/* Generated Thumbnails */}
                 <div className="lg:col-span-2">
                   <h2 className="text-xl font-semibold mb-4">Generated Thumbnails</h2>
+                  {generatedThumbnails.length > 0 && (
+                    <div className="mb-4 flex flex-col sm:flex-row gap-2">
+                      <Input
+                        placeholder="Update latest thumbnail: e.g. add stronger contrast and brighter colors"
+                        value={sectionUpdatePrompt}
+                        onChange={(e) => setSectionUpdatePrompt(e.target.value)}
+                        disabled={updatingThumbnailId === latestThumbnail?.id}
+                      />
+                      <Button
+                        onClick={() => latestThumbnail && handleUpdateThumbnail(latestThumbnail, sectionUpdatePrompt)}
+                        disabled={!latestThumbnail || !sectionUpdatePrompt.trim() || updatingThumbnailId === latestThumbnail?.id}
+                      >
+                        {updatingThumbnailId === latestThumbnail?.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Updating...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Update Thumbnail
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
                   
                   {generatedThumbnails.length === 0 ? (
                     <Card className="border-dashed">
@@ -469,6 +591,44 @@ const ThumbnailGenerator = () => {
                               <p className="text-xs text-muted-foreground capitalize">
                                 {thumbnail.style} style
                               </p>
+                              <div className="mt-3 space-y-2">
+                                <Input
+                                  placeholder="Update prompt: e.g. make background red, add stronger contrast"
+                                  value={updatePrompts[thumbnail.id] || ""}
+                                  onChange={(e) =>
+                                    setUpdatePrompts((prev) => ({ ...prev, [thumbnail.id]: e.target.value }))
+                                  }
+                                  disabled={updatingThumbnailId === thumbnail.id}
+                                />
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    className="flex-1"
+                                    onClick={() => handleUpdateThumbnail(thumbnail)}
+                                    disabled={updatingThumbnailId === thumbnail.id || !updatePrompts[thumbnail.id]?.trim()}
+                                  >
+                                    {updatingThumbnailId === thumbnail.id ? (
+                                      <>
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        Updating...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <RefreshCw className="w-4 h-4 mr-2" />
+                                        Update by Prompt
+                                      </>
+                                    )}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => downloadThumbnail(thumbnail.imageUrl, thumbnail.topic)}
+                                  >
+                                    <Download className="w-4 h-4 mr-2" />
+                                    Download
+                                  </Button>
+                                </div>
+                              </div>
                             </CardContent>
                           </Card>
                         </motion.div>

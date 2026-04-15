@@ -88,7 +88,7 @@ serve(async (req) => {
       });
     }
 
-    const { topic, style, channelNiche } = await req.json();
+    const { topic, style, channelNiche, updatePrompt } = await req.json();
 
     if (!topic || typeof topic !== "string" || !topic.trim()) {
       return new Response(JSON.stringify({ error: "Topic is required" }), {
@@ -217,6 +217,9 @@ serve(async (req) => {
       `Topic: ${topic.trim()}`,
       `Style: ${styleDescription}`,
       channelNiche ? `Channel niche: ${channelNiche}` : undefined,
+      updatePrompt && typeof updatePrompt === "string" && updatePrompt.trim()
+        ? `User update request: ${updatePrompt.trim()}`
+        : undefined,
       competitorText ? `Competitor analysis: ${competitorText}` : undefined,
       "Aspect ratio: 16:9",
       "No text in image",
