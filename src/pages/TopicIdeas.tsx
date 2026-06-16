@@ -72,7 +72,7 @@ const TopicIdeas = () => {
   const navigate = useNavigate();
   const { user, subscription, loading } = useAuth();
   const { toast } = useToast();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [channelNiche, setChannelNiche] = useState("");
   const [channelDescription, setChannelDescription] = useState("");
   const [targetAudience, setTargetAudience] = useState("");

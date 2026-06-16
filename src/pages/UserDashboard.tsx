@@ -25,6 +25,7 @@ import {
   Sparkles,
   ChevronDown,
   AudioLines,
+  Film,
 } from "lucide-react";
 import {
   AreaChart,
@@ -42,7 +43,7 @@ const UserDashboard = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, subscription, loading, refreshSubscription } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [timeFilter, setTimeFilter] = useState<"live" | "daily" | "weekly" | "monthly">("weekly");
   const [channels, setChannels] = useState<any[]>([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -573,6 +574,19 @@ const UserDashboard = () => {
             >
               <p className="text-sm">
                 <span className="text-primary font-semibold">{limits.topicsPerDay}</span> topics per day
+              </p>
+            </FeatureCard>
+
+            <FeatureCard
+              title="Text to Video"
+              description="Turn prompts into short-form videos for Shorts, Reels, and landscape exports."
+              icon={<Film className="h-5 w-5 text-primary" />}
+              locked={!limits.hasTextToVideo}
+              requiredPlan="Basic or higher"
+              action={{ label: "Open Video", href: "/dashboard/text-to-video" }}
+            >
+              <p className="text-sm">
+                <span className="text-primary font-semibold">80</span> AI credits per 10 seconds
               </p>
             </FeatureCard>
 

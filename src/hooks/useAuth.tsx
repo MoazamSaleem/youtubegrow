@@ -74,6 +74,12 @@ const isNetworkAuthError = (error: unknown) => {
   );
 };
 
+const isInvalidRefreshTokenError = (error: unknown) => {
+  if (!error || typeof error !== "object") return false;
+  const message = (error as { message?: string }).message?.toLowerCase() ?? "";
+  return message.includes("invalid refresh token") || message.includes("refresh token not found");
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -144,6 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
     if (refreshError) {
+      if (isInvalidRefreshTokenError(refreshError)) {
+        clearAuthState();
+        await supabase.auth.signOut({ scope: "local" });
+      }
       console.warn("Auth session refresh failed:", refreshError.message);
       return null;
     }
@@ -153,7 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     return null;
-  }, [validateSession]);
+  }, [clearAuthState, validateSession]);
 
   const fetchSubscriptionFromDb = useCallback(async (userId: string) => {
     const { data: subscriptionRows, error: subscriptionError } = await supabase
@@ -387,7 +397,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const redirectUrl = `${window.location.origin}/dashboard`;
+    const redirectUrl = `${window.location.origin}/signin?confirm=1&redirect=${encodeURIComponent("/dashboard/billing")}`;
     
     const { data, error } = await supabase.auth.signUp({
       email,

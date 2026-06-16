@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
+import Stripe from "npm:stripe@14.21.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -41,13 +41,14 @@ serve(async (req) => {
     const {
       priceId,
       productId,
+      planKey,
       billingCycle: requestedBillingCycle,
       amountUsd,
       email,
       userId,
     } = payload ?? {};
     const billingCycle = requestedBillingCycle === "yearly" ? "yearly" : "monthly";
-    logStep("Checkout payload received", { priceId, productId, billingCycle, amountUsd });
+    logStep("Checkout payload received", { priceId, productId, planKey, billingCycle, amountUsd });
 
     const authHeader = req.headers.get("Authorization");
     let resolvedEmail = email as string | undefined;
@@ -85,35 +86,51 @@ serve(async (req) => {
 
     let resolvedPriceId = priceId as string | undefined;
     if (!resolvedPriceId) {
-      if (!productId) {
+      const lookupPlan = typeof planKey === "string" ? planKey.toLowerCase() : "";
+      const lookupInterval = billingCycle === "yearly" ? "year" : "month";
+      if (lookupPlan) {
+        const lookupKey = `ytgp_${lookupPlan}_${lookupInterval}_${amountUsd}usd`;
+        const lookupSearch = await stripe.prices.search({
+          query: `active:'true' AND lookup_key:'${lookupKey}'`,
+          limit: 1,
+        });
+        if (lookupSearch.data.length > 0) {
+          resolvedPriceId = lookupSearch.data[0].id;
+          logStep("Resolved Stripe price by lookup_key", { resolvedPriceId, lookupKey });
+        }
+      }
+
+      if (!resolvedPriceId && !productId) {
         throw new Error("Product ID is required when price ID is not provided");
       }
 
-      const expectedInterval = billingCycle === "yearly" ? "year" : "month";
-      const expectedAmountCents =
-        typeof amountUsd === "number" && Number.isFinite(amountUsd)
-          ? Math.round(amountUsd * 100)
-          : null;
+      if (!resolvedPriceId && productId) {
+        const expectedInterval = billingCycle === "yearly" ? "year" : "month";
+        const expectedAmountCents =
+          typeof amountUsd === "number" && Number.isFinite(amountUsd)
+            ? Math.round(amountUsd * 100)
+            : null;
 
-      const prices = await stripe.prices.list({
-        product: productId,
-        active: true,
-        limit: 100,
-      });
+        const prices = await stripe.prices.list({
+          product: productId,
+          active: true,
+          limit: 100,
+        });
 
-      const recurringPrices = prices.data.filter(
-        (price) =>
-          price.type === "recurring" &&
-          price.recurring?.interval === expectedInterval &&
-          (expectedAmountCents === null || price.unit_amount === expectedAmountCents)
-      );
+        const recurringPrices = prices.data.filter(
+          (price) =>
+            price.type === "recurring" &&
+            price.recurring?.interval === expectedInterval &&
+            (expectedAmountCents === null || price.unit_amount === expectedAmountCents)
+        );
 
-      if (recurringPrices.length === 0) {
-        throw new Error(`No active ${billingCycle} Stripe price found for product ${productId}`);
+        if (recurringPrices.length === 0) {
+          throw new Error(`No active ${billingCycle} Stripe price found for product ${productId}`);
+        }
+
+        resolvedPriceId = recurringPrices[0].id;
+        logStep("Resolved Stripe price by product", { resolvedPriceId, billingCycle, productId });
       }
-
-      resolvedPriceId = recurringPrices[0].id;
-      logStep("Resolved Stripe price", { resolvedPriceId, billingCycle, productId });
     }
     
     let customerId: string | undefined;
@@ -189,18 +206,23 @@ serve(async (req) => {
 
     const successPath = typeof payload?.successPath === "string" ? payload.successPath : "/payment-success";
     const cancelPath = typeof payload?.cancelPath === "string" ? payload.cancelPath : "/dashboard/billing?checkout=cancelled";
+    const origin =
+      req.headers.get("origin") ||
+      Deno.env.get("SITE_URL") ||
+      "https://ytgrowth.cloud";
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       customer_email: customerId ? undefined : resolvedEmail,
       client_reference_id: resolvedUserId,
+      payment_method_types: ["card"],
       metadata: resolvedUserId
         ? { supabase_user_id: resolvedUserId, billing_cycle: billingCycle }
         : { billing_cycle: billingCycle },
       line_items: [{ price: resolvedPriceId, quantity: 1 }],
       mode: "subscription",
-      success_url: `${req.headers.get("origin")}${successPath}`,
-      cancel_url: `${req.headers.get("origin")}${cancelPath}`,
+      success_url: `${origin}${successPath}`,
+      cancel_url: `${origin}${cancelPath}`,
     });
     logStep("Checkout session created", { sessionId: session.id });
 
@@ -210,9 +232,26 @@ serve(async (req) => {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logStep("ERROR", { message: errorMessage });
-    const status = errorMessage.toLowerCase().includes("no such price") ? 400 : 500;
-    return new Response(JSON.stringify({ error: errorMessage }), {
+    const stripeError = error as { type?: string; code?: string; message?: string };
+    logStep("ERROR", {
+      message: errorMessage,
+      type: stripeError?.type ?? null,
+      code: stripeError?.code ?? null,
+    });
+
+    const normalized = (errorMessage || "").toLowerCase();
+    const status =
+      normalized.includes("no such price") ||
+      normalized.includes("no such product") ||
+      stripeError?.type === "StripeInvalidRequestError"
+        ? 400
+        : 500;
+
+    return new Response(JSON.stringify({
+      error: errorMessage,
+      type: stripeError?.type ?? null,
+      code: stripeError?.code ?? null,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status,
     });

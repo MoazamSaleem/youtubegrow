@@ -147,7 +147,7 @@ const Footer = () => {
         {/* Bottom */}
         <div className="pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-sm text-muted-foreground">
-            © 2026 YouTube Growth Planner. All rights reserved.
+            © 2026 YouTube Growth Partner. All rights reserved.
           </p>
           <p className="text-sm text-muted-foreground">
             Made with ❤️ for YouTube creators

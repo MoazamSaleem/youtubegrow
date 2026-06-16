@@ -76,11 +76,11 @@ const Careers = () => {
             <p className="text-muted-foreground mb-4">
               We are not listing active openings right now, but we are still happy to hear from strong candidates.
             </p>
-            <a href="mailto:careers@youtubegrowth.cloud">
+            <Link to="/contact">
               <Button variant="hero">
-                Send Your Resume
+                Contact Hiring Team
               </Button>
-            </a>
+            </Link>
           </div>
         </motion.div>
       </div>

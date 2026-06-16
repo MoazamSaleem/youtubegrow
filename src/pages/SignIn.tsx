@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { hasActiveSubscription } from "@/lib/subscription";
 import { toast } from "sonner";
 import { Youtube, Sparkles, Mail, Lock, Eye, EyeOff, ArrowLeft, CheckCircle } from "lucide-react";
 import { z } from "zod";
@@ -16,7 +17,7 @@ const signInSchema = z.object({
 
 const SignIn = () => {
   const navigate = useNavigate();
-  const { signIn, refreshSubscription, user } = useAuth();
+  const { signIn, refreshSubscription, user, subscription, isAdmin, loading: authLoading } = useAuth();
   const [searchParams] = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
@@ -24,15 +25,21 @@ const SignIn = () => {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   
+  const redirectTarget = searchParams.get("redirect");
   const checkoutSuccess = searchParams.get("checkout") === "success";
   const needsConfirmation = searchParams.get("confirm") === "1";
+  const fallbackTarget = isAdmin
+    ? "/admin"
+    : hasActiveSubscription(subscription)
+      ? "/dashboard"
+      : "/dashboard/billing";
 
   // If user is already logged in, redirect to dashboard
   useEffect(() => {
-    if (user) {
-      navigate("/dashboard");
+    if (!authLoading && user) {
+      navigate(redirectTarget || fallbackTarget, { replace: true });
     }
-  }, [user, navigate]);
+  }, [authLoading, user, redirectTarget, fallbackTarget, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,11 +82,14 @@ const SignIn = () => {
       // Sync subscription if coming from checkout or email confirmation
       if (checkoutSuccess || needsConfirmation) {
         await refreshSubscription();
-        toast.success("Your subscription is now active!");
+        if (checkoutSuccess) {
+          toast.success("Your subscription is now active!");
+        } else {
+          toast.success("Email confirmed. Please complete your subscription.");
+        }
       } else {
         toast.success("Welcome back!");
       }
-      navigate("/dashboard");
     }
   };
 
@@ -109,7 +119,7 @@ const SignIn = () => {
               <Sparkles className="h-4 w-4 text-accent absolute -top-1 -right-1" />
             </div>
             <span className="font-display font-bold text-xl sm:text-2xl leading-tight">
-              YouTube <span className="gradient-text">Growth Planner</span>
+              YouTube <span className="gradient-text">Growth Partner</span>
             </span>
           </div>
 

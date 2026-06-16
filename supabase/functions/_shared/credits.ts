@@ -6,10 +6,12 @@ export const CREDIT_COSTS = {
   "generate-topics": { basic: 20, standard: 20, extensive: 20 },
   "generate-script": { basic: 50, standard: 50, extensive: 50 },
   "generate-speech": { basic: 80, standard: 120, extensive: 180 },
+  "generate-video": { basic: 80, standard: 80, extensive: 80 },
   "research-keywords": { basic: 20, standard: 20, extensive: 20 },
   "analyze-competitor": { basic: 50, standard: 50, extensive: 50 },
   "analyze-channel": { basic: 100, standard: 100, extensive: 100 },
   "generate-thumbnail": { basic: 100, standard: 100, extensive: 100 },
+  "analyze-seo-video": { basic: 20, standard: 20, extensive: 20 },
 };
 
 export type QueryType = keyof typeof CREDIT_COSTS;

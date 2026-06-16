@@ -412,31 +412,31 @@ export const YouTubeChannelLink = () => {
   }
 
   return (
-    <div className="glass rounded-xl p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
+    <div className="glass rounded-xl p-4 sm:p-6 w-full max-w-full overflow-x-hidden">
+      <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3 min-w-0">
           <div className="p-2 rounded-lg bg-red-500/10">
             <Youtube className="h-5 w-5 text-red-500" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="font-display text-lg font-bold">YouTube Channels</h2>
             <p className="text-sm text-muted-foreground">
               Connect your YouTube channel for personalized AI insights
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+          <span className="text-xs text-muted-foreground sm:text-right">
             {channels.length}/{planLimits.maxChannels} channels connected
           </span>
-          <Button onClick={initiateOAuth} disabled={linking || maxChannelsReached} className="gap-2">
-          {linking ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Link2 className="h-4 w-4" />
-          )}
+          <Button onClick={initiateOAuth} disabled={linking || maxChannelsReached} className="gap-2 w-full sm:w-auto">
+            {linking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Link2 className="h-4 w-4" />
+            )}
             {maxChannelsReached ? "Limit Reached" : channels.length > 0 ? "Add Channel" : "Connect YouTube"}
-        </Button>
+          </Button>
         </div>
       </div>
 
@@ -466,7 +466,7 @@ export const YouTubeChannelLink = () => {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ delay: index * 0.1 }}
                 onClick={() => loadAnalytics(channel)}
-                className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer ${
+                className={`flex flex-col items-start gap-4 p-4 rounded-xl border cursor-pointer sm:flex-row sm:items-center ${
                   channel.is_primary
                     ? "border-primary bg-primary/5"
                     : "border-border bg-card"
@@ -513,11 +513,12 @@ export const YouTubeChannelLink = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                   {!channel.is_primary && (
                     <Button
                       size="sm"
                       variant="outline"
+                      className="w-full sm:w-auto"
                       onClick={(event) => {
                         event.stopPropagation();
                         setPrimaryChannel(channel.channel_id);
@@ -529,6 +530,7 @@ export const YouTubeChannelLink = () => {
                   <Button
                     size="sm"
                     variant="secondary"
+                    className="w-full sm:w-auto"
                     onClick={(event) => {
                       event.stopPropagation();
                       loadAnalytics(channel);
@@ -544,6 +546,7 @@ export const YouTubeChannelLink = () => {
                   <Button
                     size="sm"
                     variant="default"
+                    className="w-full sm:w-auto"
                     onClick={(event) => {
                       event.stopPropagation();
                       navigate(`/dashboard/analysis?channelId=${channel.channel_id}`);
@@ -554,7 +557,7 @@ export const YouTubeChannelLink = () => {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="text-destructive hover:text-destructive"
+                    className="text-destructive hover:text-destructive w-full sm:w-auto"
                     onClick={(event) => {
                       event.stopPropagation();
                       unlinkChannel(channel.channel_id);

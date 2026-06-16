@@ -25,11 +25,24 @@ interface GeneratedThumbnail {
   createdAt: Date;
 }
 
+interface StoredThumbnail {
+  id: string;
+  imageUrl: string;
+  topic: string;
+  style: string;
+  channelNiche?: string;
+  createdAt: string;
+}
+
+const getTodayKey = () => new Date().toISOString().split("T")[0];
+const getThumbnailStorageKey = (userId: string, dayKey: string) =>
+  `thumbnail-history:${userId}:${dayKey}`;
+
 const ThumbnailGenerator = () => {
   const { user, loading, subscription } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [topic, setTopic] = useState("");
   const [style, setStyle] = useState("vibrant");
   const [channelNiche, setChannelNiche] = useState("");
@@ -54,6 +67,55 @@ const ThumbnailGenerator = () => {
       fetchUsageData();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setGeneratedThumbnails([]);
+      return;
+    }
+
+    const todayKey = getTodayKey();
+    const storageKey = getThumbnailStorageKey(user.id, todayKey);
+    const storagePrefix = `thumbnail-history:${user.id}:`;
+
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(storagePrefix)) continue;
+      if (key !== storageKey) {
+        localStorage.removeItem(key);
+      }
+    }
+
+    try {
+      const storedRaw = localStorage.getItem(storageKey);
+      if (!storedRaw) return;
+
+      const stored = JSON.parse(storedRaw) as StoredThumbnail[];
+      const hydrated = stored
+        .map((item) => ({
+          ...item,
+          createdAt: new Date(item.createdAt),
+        }))
+        .filter((item) => !Number.isNaN(item.createdAt.getTime()));
+
+      setGeneratedThumbnails(hydrated);
+    } catch (error) {
+      console.warn("Failed to restore thumbnail history:", error);
+      localStorage.removeItem(storageKey);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const storageKey = getThumbnailStorageKey(user.id, getTodayKey());
+    const payload: StoredThumbnail[] = generatedThumbnails.map((item) => ({
+      ...item,
+      createdAt: item.createdAt.toISOString(),
+    }));
+
+    localStorage.setItem(storageKey, JSON.stringify(payload));
+  }, [generatedThumbnails, user?.id]);
 
   useEffect(() => {
     if (!isGenerating) {
@@ -375,14 +437,14 @@ const ThumbnailGenerator = () => {
 
       <main className="flex-1 transition-all duration-300">
         {/* Header */}
-        <header className="sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
+        <header className="hidden lg:block sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="lg:hidden"
+                className="hidden"
               >
                 <Menu className="h-5 w-5" />
               </Button>

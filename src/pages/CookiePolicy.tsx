@@ -129,9 +129,9 @@ const CookiePolicy = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">Contact Us</h2>
               <p className="text-muted-foreground">
-                If you have questions about our use of cookies, please contact us at:
+                If you have questions about our use of cookies, please contact us through our contact page.
               </p>
-              <p className="text-primary mt-2">privacy@youtubegrowth.cloud</p>
+              <Link to="/contact" className="text-primary mt-2 inline-block hover:underline">/contact</Link>
             </section>
           </div>
         </motion.div>

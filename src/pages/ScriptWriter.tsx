@@ -54,7 +54,7 @@ const ScriptWriter = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [script, setScript] = useState<GeneratedScript | null>(null);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
@@ -250,13 +250,13 @@ Estimated Duration: ${data.estimatedDuration}${tips}
 
       <main className="flex-1 transition-all duration-300">
         {/* Header */}
-        <header className="sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
+        <header className="hidden lg:block sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="lg:hidden"
+              className="hidden"
             >
               <Menu className="h-5 w-5" />
             </Button>

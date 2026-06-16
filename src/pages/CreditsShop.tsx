@@ -43,10 +43,10 @@ const CreditsShop = () => {
   const { user, subscription } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchParams] = useSearchParams();
   const confirmHandledRef = useRef(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [packages, setPackages] = useState<CreditPackage[]>([]);
   const [userCredits, setUserCredits] = useState<UserCredits>({
     ai_credits_balance: 0,
@@ -323,14 +323,6 @@ const CreditsShop = () => {
     planLimits && planLimits.aiStrategistCredits > 0
       ? Math.min((userCredits.ai_credits_balance / planLimits.aiStrategistCredits) * 100, 100)
       : 0;
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background flex">

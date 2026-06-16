@@ -28,7 +28,7 @@ const Billing = () => {
   const [searchParams] = useSearchParams();
   const { subscription, loading, refreshSubscription } = useAuth();
   const { toast } = useToast();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isYearly, setIsYearly] = useState(false);
   const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
   const [managingSubscription, setManagingSubscription] = useState(false);
@@ -88,7 +88,13 @@ const Billing = () => {
   ];
 
   const getPlanFeatures = (plan: SubscriptionPlan) => {
-    return STRIPE_PLANS[plan].features.map((text) => ({ text, included: true }));
+    const base = STRIPE_PLANS[plan].features.map((text) => ({ text, included: true }));
+    if (plan === "basic") {
+      base.push({ text: "AI Script Writer", included: false });
+      base.push({ text: "Text to Speech", included: false });
+      base.push({ text: "Voice Clone", included: false });
+    }
+    return base;
   };
 
   const features = [
@@ -98,6 +104,8 @@ const Billing = () => {
     { name: "AI Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "None" : PLAN_LIMITS[p].aiStrategistCredits.toLocaleString() },
     { name: "Channel Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].channelAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].channelAnalysisFrequency },
     { name: "Competitor Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].competitorAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].competitorAnalysisFrequency },
+    { name: "SEO Analyzer", getValue: (_p: SubscriptionPlan) => "Included (20 credits/query)" },
+    { name: "Text to Video", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasTextToVideo ? "80 credits/10 sec" : false },
     { name: "Script Writer", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasScriptWriter },
     { name: "Text to Speech", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasTextToSpeech },
     { name: "Voice Clone", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasVoiceClone },
@@ -120,8 +128,8 @@ const Billing = () => {
       const session = await getSessionWithRefresh();
       const { data, error } = await supabase.functions.invoke("create-checkout", {
         body: {
-          priceId: selectedBillingCycle === "monthly" ? stripePlan.monthlyPriceId : undefined,
-          productId: stripePlan.productId,
+          planKey: plan,
+          productId: selectedBillingCycle === "monthly" ? stripePlan.productId : stripePlan.yearlyProductId,
           billingCycle: selectedBillingCycle,
           amountUsd: selectedBillingCycle === "yearly" ? stripePlan.yearlyPrice : stripePlan.monthlyPrice,
           successPath: "/payment-success",
@@ -366,7 +374,7 @@ const Billing = () => {
               <h2 className="font-display text-xl font-bold">AI Strategist Credits</h2>
             </div>
             <p className="text-muted-foreground mb-4">
-              AI Strategist credits power personalized AI tools across the platform, including text to speech and voice cloning. Text to speech uses 80-180 credits depending on character length, while strategist queries still consume credits based on complexity:
+              AI Strategist credits power personalized AI tools across the platform, including text to video, text to speech, and voice cloning. Text to video uses 80 credits per 10 seconds, text to speech uses 80-180 credits depending on character length, and strategist queries consume credits based on complexity:
             </p>
             <div className="grid sm:grid-cols-3 gap-4">
               <div className="p-4 rounded-lg bg-muted/30">

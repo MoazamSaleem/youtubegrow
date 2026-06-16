@@ -78,8 +78,8 @@ interface AiTask {
 const GrowthTasks = () => {
   const { user, subscription } = useAuth();
   const { toast } = useToast();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [aiTasks, setAiTasks] = useState<AiTask[]>([]);
   const [aiStepIndex, setAiStepIndex] = useState<number | null>(null);
@@ -377,15 +377,7 @@ const GrowthTasks = () => {
   const claimedAiCount = aiTasks.filter((task) => task.claimed_at).length;
   const totalTasksDone = claimedAiCount;
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!currentPlan || !planLimits) {
+  if (!loading && (!currentPlan || !planLimits)) {
     return (
       <div className="min-h-screen bg-background flex">
         <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />

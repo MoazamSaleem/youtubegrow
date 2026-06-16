@@ -56,6 +56,8 @@ import {
   Coins,
   Zap,
   RefreshCw,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -66,6 +68,11 @@ interface User {
   created_at: string;
   plan: SubscriptionPlan | null;
   status: string;
+}
+
+interface AdminListUsersResponse {
+  users: User[];
+  total: number;
 }
 
 interface GrowthTask {
@@ -103,6 +110,23 @@ interface BadgeData {
   rarity: string;
 }
 
+interface SupportChatSession {
+  id: string;
+  user_id: string;
+  status: "open" | "closed";
+  created_at: string;
+  updated_at: string;
+  last_message_at: string;
+}
+
+interface SupportChatMessage {
+  id: string;
+  session_id: string;
+  sender: "user" | "agent" | "system";
+  content: string;
+  created_at: string;
+}
+
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user, isAdmin, loading } = useAuth();
@@ -123,6 +147,14 @@ const AdminDashboard = () => {
   const [isMilestoneDialogOpen, setIsMilestoneDialogOpen] = useState(false);
   const [isBadgeDialogOpen, setIsBadgeDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [chatSessions, setChatSessions] = useState<SupportChatSession[]>([]);
+  const [selectedChatSessionId, setSelectedChatSessionId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<SupportChatMessage[]>([]);
+  const [chatReply, setChatReply] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatSessionUserMap, setChatSessionUserMap] = useState<Record<string, { email: string; full_name: string | null }>>({});
+  const [usersLoading, setUsersLoading] = useState(false);
 
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -149,8 +181,56 @@ const AdminDashboard = () => {
       fetchTasks();
       fetchMilestones();
       fetchBadges();
+      fetchChatSessions();
     }
   }, [isAdmin, currentPage, planFilter, searchTerm]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [planFilter, searchTerm]);
+
+  useEffect(() => {
+    if (!selectedChatSessionId) {
+      setChatMessages([]);
+      return;
+    }
+    void fetchChatMessages(selectedChatSessionId);
+  }, [selectedChatSessionId]);
+
+  useEffect(() => {
+    if (!selectedChatSessionId) return;
+
+    const channel = supabase
+      .channel(`admin-support-chat-${selectedChatSessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "support_chat_messages",
+          filter: `session_id=eq.${selectedChatSessionId}`,
+        },
+        (payload) => {
+          const incoming = payload.new as SupportChatMessage;
+          setChatMessages((prev) => {
+            if (prev.some((item) => item.id === incoming.id)) return prev;
+            return [...prev, incoming];
+          });
+          setChatSessions((prev) =>
+            prev.map((session) =>
+              session.id === incoming.session_id
+                ? { ...session, updated_at: incoming.created_at, last_message_at: incoming.created_at }
+                : session
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedChatSessionId]);
 
   const fetchStats = async () => {
     const [
@@ -200,43 +280,28 @@ const AdminDashboard = () => {
   };
 
   const fetchUsers = async () => {
-    let query = supabase
-      .from("profiles")
-      .select("id, user_id, email, full_name, created_at")
-      .order("created_at", { ascending: false })
-      .range((currentPage - 1) * usersPerPage, currentPage * usersPerPage - 1);
+    setUsersLoading(true);
+    const { data, error } = await supabase.functions.invoke<AdminListUsersResponse>("account-actions", {
+      body: {
+        action: "admin-list-users",
+        search: searchTerm,
+        planFilter,
+        page: currentPage,
+        perPage: usersPerPage,
+      },
+    });
 
-    if (searchTerm) {
-      query = query.or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%`);
+    if (error) {
+      toast.error(`Failed to load users: ${error.message}`);
+      setUsers([]);
+      setTotalUsers(0);
+      setUsersLoading(false);
+      return;
     }
 
-    const { data: profiles, count } = await query;
-
-    if (profiles) {
-      const userIds = profiles.map((p) => p.user_id);
-      const { data: subscriptions } = await supabase.from("subscriptions").select("user_id, plan, status").in("user_id", userIds);
-
-      const usersWithSubs: User[] = profiles.map((profile) => {
-        const sub = subscriptions?.find((s) => s.user_id === profile.user_id);
-        return {
-          id: profile.user_id,
-          email: profile.email || "",
-          full_name: profile.full_name,
-          created_at: profile.created_at,
-          plan: (sub?.plan as SubscriptionPlan) || null,
-          status: sub?.status || "inactive",
-        };
-      });
-
-      const filtered =
-        planFilter === "all"
-          ? usersWithSubs
-          : planFilter === "none"
-            ? usersWithSubs.filter((u) => !u.plan)
-            : usersWithSubs.filter((u) => u.plan === planFilter);
-      setUsers(filtered);
-      setTotalUsers(count || 0);
-    }
+    setUsers(data?.users || []);
+    setTotalUsers(data?.total || 0);
+    setUsersLoading(false);
   };
 
   const fetchTasks = async () => {
@@ -254,6 +319,125 @@ const AdminDashboard = () => {
     setBadges(data || []);
   };
 
+  const fetchChatSessions = async () => {
+    setChatLoading(true);
+    const db = supabase as any;
+
+    const { data: sessions, error } = await db
+      .from("support_chat_sessions")
+      .select("id, user_id, status, created_at, updated_at, last_message_at")
+      .order("last_message_at", { ascending: false });
+
+    if (error) {
+      toast.error("Failed to load live chats");
+      setChatLoading(false);
+      return;
+    }
+
+    const sessionRows = (sessions || []) as SupportChatSession[];
+    setChatSessions(sessionRows);
+
+    if (!selectedChatSessionId && sessionRows.length > 0) {
+      setSelectedChatSessionId(sessionRows[0].id);
+    }
+
+    const userIds = Array.from(new Set(sessionRows.map((s) => s.user_id)));
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, email, full_name")
+        .in("user_id", userIds);
+
+      const map: Record<string, { email: string; full_name: string | null }> = {};
+      (profiles || []).forEach((p: any) => {
+        map[p.user_id] = {
+          email: p.email || "",
+          full_name: p.full_name || null,
+        };
+      });
+      setChatSessionUserMap(map);
+    } else {
+      setChatSessionUserMap({});
+    }
+
+    setChatLoading(false);
+  };
+
+  const fetchChatMessages = async (sessionId: string) => {
+    const db = supabase as any;
+    const { data, error } = await db
+      .from("support_chat_messages")
+      .select("id, session_id, sender, content, created_at")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      toast.error("Failed to load chat messages");
+      return;
+    }
+
+    setChatMessages((data || []) as SupportChatMessage[]);
+  };
+
+  const handleSendAdminReply = async () => {
+    if (!selectedChatSessionId || !chatReply.trim()) return;
+    setChatSending(true);
+
+    const { error } = await supabase.functions.invoke("send-support-chat-message", {
+      body: {
+        sessionId: selectedChatSessionId,
+        content: chatReply.trim(),
+      },
+    });
+
+    if (error) {
+      toast.error("Failed to send reply");
+    } else {
+      setChatReply("");
+      toast.success("Reply sent");
+    }
+
+    setChatSending(false);
+  };
+
+  const handleToggleChatSessionStatus = async (session: SupportChatSession) => {
+    const db = supabase as any;
+    const nextStatus = session.status === "open" ? "closed" : "open";
+    const { error } = await db
+      .from("support_chat_sessions")
+      .update({ status: nextStatus, updated_at: new Date().toISOString() })
+      .eq("id", session.id);
+
+    if (error) {
+      toast.error("Failed to update chat status");
+      return;
+    }
+
+    setChatSessions((prev) =>
+      prev.map((item) => (item.id === session.id ? { ...item, status: nextStatus } : item))
+    );
+    toast.success(`Chat marked as ${nextStatus}`);
+  };
+
+  const handleOpenUserChat = async (targetUserId: string) => {
+    const db = supabase as any;
+    setActiveTab("chats");
+    const { data: session } = await db
+      .from("support_chat_sessions")
+      .select("id")
+      .eq("user_id", targetUserId)
+      .order("last_message_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (session?.id) {
+      setSelectedChatSessionId(session.id);
+      return;
+    }
+
+    toast.error("No chat found for this user.");
+  };
+
   const handleUpdatePlan = async (userId: string, newPlan: SubscriptionPlan) => {
     const { error } = await supabase.from("subscriptions").update({ plan: newPlan }).eq("user_id", userId);
     if (error) {
@@ -263,6 +447,52 @@ const AdminDashboard = () => {
       fetchUsers();
       fetchStats();
     }
+  };
+
+  const handleEditUser = async (targetUser: User) => {
+    const nextName = prompt("Update full name", targetUser.full_name || "");
+    if (nextName === null) return;
+    const nextEmail = prompt("Update email", targetUser.email || "");
+    if (nextEmail === null) return;
+
+    const { error } = await supabase.functions.invoke("account-actions", {
+      body: {
+        action: "admin-update-user",
+        targetUserId: targetUser.id,
+        fullName: nextName,
+        email: nextEmail,
+      },
+    });
+
+    if (error) {
+      toast.error(`Failed to update user: ${error.message}`);
+      return;
+    }
+
+    toast.success("User updated");
+    fetchUsers();
+    fetchStats();
+  };
+
+  const handleDeleteUser = async (targetUser: User) => {
+    const confirmed = confirm(`Delete user ${targetUser.email}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    const { error } = await supabase.functions.invoke("account-actions", {
+      body: {
+        action: "delete-account",
+        targetUserId: targetUser.id,
+      },
+    });
+
+    if (error) {
+      toast.error(`Failed to delete user: ${error.message}`);
+      return;
+    }
+
+    toast.success("User deleted");
+    fetchUsers();
+    fetchStats();
   };
 
   const saveTask = async (task: Partial<GrowthTask>) => {
@@ -439,6 +669,10 @@ const AdminDashboard = () => {
               <Users className="h-4 w-4" />
               Users
             </TabsTrigger>
+            <TabsTrigger value="chats" className="gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Live Chats
+            </TabsTrigger>
             <TabsTrigger value="tasks" className="gap-2">
               <Target className="h-4 w-4" />
               Tasks
@@ -495,6 +729,7 @@ const AdminDashboard = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Plans</SelectItem>
+                    <SelectItem value="active">Active Subscribers</SelectItem>
                     <SelectItem value="none">No Active Plan</SelectItem>
                     <SelectItem value="basic">Basic</SelectItem>
                     <SelectItem value="pro">Pro</SelectItem>
@@ -511,10 +746,23 @@ const AdminDashboard = () => {
                       <TableHead>Plan</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Joined</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((u) => (
+                    {usersLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          Loading users...
+                        </TableCell>
+                      </TableRow>
+                    ) : users.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No users found for this filter.
+                        </TableCell>
+                      </TableRow>
+                    ) : users.map((u) => (
                       <TableRow key={u.id}>
                         <TableCell>
                           <div>
@@ -556,6 +804,32 @@ const AdminDashboard = () => {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleOpenUserChat(u.id)}
+                            >
+                              <MessageSquare className="h-4 w-4 mr-2" />
+                              Open Chat
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleEditUser(u)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => void handleDeleteUser(u)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -579,6 +853,123 @@ const AdminDashboard = () => {
                     <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="chats">
+            <div className="grid lg:grid-cols-3 gap-6">
+              <div className="glass rounded-xl p-4 lg:col-span-1">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-display text-lg font-bold">Conversations</h2>
+                  <Button size="sm" variant="outline" onClick={() => void fetchChatSessions()}>
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="space-y-2 max-h-[520px] overflow-auto">
+                  {chatLoading ? (
+                    <div className="text-sm text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading chats...
+                    </div>
+                  ) : chatSessions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No live chats yet.</p>
+                  ) : (
+                    chatSessions.map((session) => {
+                      const profile = chatSessionUserMap[session.user_id];
+                      const isSelected = selectedChatSessionId === session.id;
+
+                      return (
+                        <button
+                          key={session.id}
+                          className={`w-full text-left rounded-lg border p-3 transition ${isSelected ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/50"}`}
+                          onClick={() => setSelectedChatSessionId(session.id)}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-medium truncate">{profile?.full_name || profile?.email || session.user_id.slice(0, 8)}</p>
+                            <Badge variant="outline" className={session.status === "open" ? "text-green-500 border-green-500/30" : "text-muted-foreground"}>
+                              {session.status}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">{profile?.email || session.user_id}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Last activity: {new Date(session.last_message_at).toLocaleString()}
+                          </p>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="glass rounded-xl p-4 lg:col-span-2">
+                {!selectedChatSessionId ? (
+                  <div className="h-[520px] flex items-center justify-center text-muted-foreground">
+                    Select a chat conversation
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <p className="font-semibold">
+                          {chatSessionUserMap[chatSessions.find((s) => s.id === selectedChatSessionId)?.user_id || ""]?.full_name ||
+                            chatSessionUserMap[chatSessions.find((s) => s.id === selectedChatSessionId)?.user_id || ""]?.email ||
+                            "User Chat"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Session: {selectedChatSessionId}</p>
+                      </div>
+                      {(() => {
+                        const current = chatSessions.find((s) => s.id === selectedChatSessionId);
+                        if (!current) return null;
+                        return (
+                          <Button
+                            size="sm"
+                            variant={current.status === "open" ? "outline" : "default"}
+                            onClick={() => void handleToggleChatSessionStatus(current)}
+                          >
+                            {current.status === "open" ? "Close Chat" : "Reopen Chat"}
+                          </Button>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="h-[420px] overflow-auto rounded-lg border border-border bg-secondary/20 p-4 space-y-3 mb-4">
+                      {chatMessages.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No messages yet.</p>
+                      ) : (
+                        chatMessages.map((msg) => {
+                          const isAgent = msg.sender === "agent";
+                          return (
+                            <div key={msg.id} className={`flex ${isAgent ? "justify-end" : "justify-start"}`}>
+                              <div className={`max-w-[80%] rounded-lg px-3 py-2 ${isAgent ? "bg-primary text-primary-foreground" : "bg-card border border-border"}`}>
+                                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                                <p className={`text-[11px] mt-1 ${isAgent ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                                  {msg.sender} · {new Date(msg.created_at).toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Textarea
+                        placeholder="Write a reply..."
+                        value={chatReply}
+                        onChange={(e) => setChatReply(e.target.value)}
+                        rows={2}
+                      />
+                      <Button
+                        className="self-end"
+                        onClick={() => void handleSendAdminReply()}
+                        disabled={!chatReply.trim() || chatSending}
+                      >
+                        {chatSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </TabsContent>
@@ -893,12 +1284,17 @@ const TaskForm = ({ task, onSave, saving }: { task: GrowthTask | null; onSave: (
         )}
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <Select value={formData.verification_metric} onValueChange={(v) => setFormData({ ...formData, verification_metric: v })}>
+        <Select
+          value={formData.verification_metric || "none"}
+          onValueChange={(v) =>
+            setFormData({ ...formData, verification_metric: v === "none" ? "" : v })
+          }
+        >
           <SelectTrigger>
             <SelectValue placeholder="Verification Metric" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">None</SelectItem>
+            <SelectItem value="none">None</SelectItem>
             <SelectItem value="subscribers">Subscribers</SelectItem>
             <SelectItem value="videos">Total Videos</SelectItem>
             <SelectItem value="views_total">Total Views</SelectItem>

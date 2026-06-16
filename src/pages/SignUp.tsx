@@ -58,6 +58,23 @@ const SignUp = () => {
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; agreed?: string }>({});
   const [isYearly, setIsYearly] = useState(false);
 
+  const normalizeFunctionError = (error: any) => {
+    if (!error) return "Payment setup failed. Please try again.";
+    const rawBody = error?.context?.body;
+    if (typeof rawBody === "string") {
+      try {
+        const parsed = JSON.parse(rawBody);
+        return parsed?.error || parsed?.message || error.message || rawBody;
+      } catch {
+        return rawBody || error.message || "Payment setup failed. Please try again.";
+      }
+    }
+    if (rawBody && typeof rawBody === "object") {
+      return rawBody.error || rawBody.message || error.message || "Payment setup failed. Please try again.";
+    }
+    return error.message || "Payment setup failed. Please try again.";
+  };
+
   const selectedBillingCycle = isYearly ? "yearly" : "monthly";
 
   const getPlanPrice = (plan: SubscriptionPlan) => {
@@ -95,8 +112,11 @@ const SignUp = () => {
 
     if (error) {
       setLoading(false);
-      if (error.message.includes("already registered")) {
+      const normalizedMessage = error.message?.toLowerCase?.() || "";
+      if (normalizedMessage.includes("already registered")) {
         toast.error("This email is already registered. Please sign in instead.");
+      } else if (normalizedMessage.includes("database error")) {
+        toast.error("We couldn't create your account right now. Please try again in a moment.");
       } else {
         toast.error(error.message);
       }
@@ -115,36 +135,8 @@ const SignUp = () => {
       return;
     }
 
-    // Create or refresh pending subscription
-    const now = new Date().toISOString();
-    const pendingSubscription = {
-      plan: selectedPlan,
-      status: "pending",
-      billing_cycle: selectedBillingCycle,
-      current_period_start: now,
-      current_period_end: now,
-      updated_at: now,
-    };
-
-    const { data: updatedRows, error: updateSubError } = await supabase
-      .from("subscriptions")
-      .update(pendingSubscription)
-      .eq("user_id", userId)
-      .select("id");
-
-    let subError = updateSubError;
-
-    if (!subError && (!updatedRows || updatedRows.length === 0)) {
-      const { error: insertSubError } = await supabase.from("subscriptions").insert({
-        user_id: userId,
-        ...pendingSubscription,
-      });
-      subError = insertSubError;
-    }
-
-    if (subError) {
-      console.error("Subscription error:", subError);
-    }
+    // Do not mutate subscriptions from client during signup.
+    // Subscription state is finalized server-side through Stripe webhook/confirmation flow.
 
     // Redirect to Stripe checkout
     const stripePlan = STRIPE_PLANS[selectedPlan as keyof typeof STRIPE_PLANS];
@@ -156,8 +148,8 @@ const SignUp = () => {
 
       const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke("create-checkout", {
         body: {
-          priceId: selectedBillingCycle === "monthly" ? stripePlan.monthlyPriceId : undefined,
-          productId: stripePlan.productId,
+          planKey: selectedPlan,
+          productId: selectedBillingCycle === "monthly" ? stripePlan.productId : stripePlan.yearlyProductId,
           billingCycle: selectedBillingCycle,
           amountUsd: selectedBillingCycle === "yearly" ? stripePlan.yearlyPrice : stripePlan.monthlyPrice,
           email,
@@ -175,7 +167,7 @@ const SignUp = () => {
 
       if (checkoutError) {
         setLoading(false);
-        toast.error("Payment setup failed. Please try again.");
+        toast.error(normalizeFunctionError(checkoutError));
         navigate(needsConfirmation ? "/signin" : "/dashboard/billing");
         return;
       }
@@ -267,7 +259,7 @@ const SignUp = () => {
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
             <span className="font-display font-bold text-base sm:text-xl leading-tight">
-              YouTube <span className="gradient-text">Growth Planner</span>
+              YouTube <span className="gradient-text">Growth Partner</span>
             </span>
           </Link>
           <Link

@@ -38,7 +38,7 @@ const About = () => {
               <Sparkles className="h-3 w-3 text-accent absolute -top-1 -right-1" />
             </div>
             <span className="font-display font-bold text-base sm:text-xl leading-tight">
-              YouTube <span className="gradient-text">Growth Planner</span>
+              YouTube <span className="gradient-text">Growth Partner</span>
             </span>
           </Link>
           <Link to="/">
@@ -55,11 +55,11 @@ const About = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <h1 className="font-display text-4xl font-bold mb-6">About YouTube Growth Planner</h1>
+          <h1 className="font-display text-4xl font-bold mb-6">About YouTube Growth Partner</h1>
           
           <div className="prose prose-invert max-w-none">
             <p className="text-lg text-muted-foreground mb-8">
-              YouTube Growth Planner is an AI-powered YouTube growth platform designed to help creators of all sizes 
+              YouTube Growth Partner is an AI-powered YouTube growth platform designed to help creators of all sizes 
               optimize their content strategy, understand their audience, and accelerate their channel growth.
             </p>
 
@@ -91,19 +91,19 @@ const About = () => {
 
             <h2 className="font-display text-2xl font-bold mt-12 mb-4">Our Story</h2>
             <p className="text-muted-foreground mb-4">
-              YouTube Growth Planner was founded by a team of creators and engineers who experienced firsthand 
+              YouTube Growth Partner was founded by a team of creators and engineers who experienced firsthand 
               the challenges of growing a YouTube channel. We spent countless hours analyzing trends, 
               researching keywords, and trying to understand what makes content succeed.
             </p>
             <p className="text-muted-foreground mb-8">
-              We built YouTube Growth Planner to solve these problems - not just for ourselves, but for every 
+              We built YouTube Growth Partner to solve these problems - not just for ourselves, but for every 
               creator who dreams of building an audience and sharing their passion with the world.
             </p>
 
             <div className="glass rounded-xl p-8 text-center mt-12">
               <h2 className="font-display text-2xl font-bold mb-4">Ready to Grow?</h2>
               <p className="text-muted-foreground mb-6">
-                Join thousands of creators using YouTube Growth Planner to accelerate their YouTube success.
+                Join thousands of creators using YouTube Growth Partner to accelerate their YouTube success.
               </p>
               <Link to="/signup">
                 <Button variant="hero" size="lg">

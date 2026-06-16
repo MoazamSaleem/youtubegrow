@@ -143,9 +143,9 @@ const Terms = () => {
             <section>
               <h2 className="font-display text-2xl font-bold mb-4">12. Contact</h2>
               <p className="text-muted-foreground">
-                For questions about these Terms, please contact us at:
+                For questions about these Terms, please contact us through our contact page.
               </p>
-              <p className="text-primary mt-2">legal@youtubegrowth.cloud</p>
+              <Link to="/contact" className="text-primary mt-2 inline-block hover:underline">/contact</Link>
             </section>
           </div>
         </motion.div>

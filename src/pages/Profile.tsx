@@ -93,8 +93,8 @@ const Profile = () => {
   const { user, profile: authProfile, signOut, subscription } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [passwordUpdating, setPasswordUpdating] = useState(false);
   const [accountActionLoading, setAccountActionLoading] = useState(false);
@@ -402,14 +402,6 @@ const Profile = () => {
 
   const earnedBadgeIds = new Set(userBadges.map((b) => b.badge_id));
   const currentPlan = getActiveSubscriptionPlan(subscription);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background flex">

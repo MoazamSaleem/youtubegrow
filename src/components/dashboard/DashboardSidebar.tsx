@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,11 +28,13 @@ import {
   FileText,
   Image,
   AudioLines,
+  Film,
   Target,
   Shield,
   User,
   ChevronLeft,
   ChevronRight,
+  Home,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -59,6 +61,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
   const [selectedFeature, setSelectedFeature] = useState<string>("");
   const [requiredPlanForFeature, setRequiredPlanForFeature] = useState<SubscriptionPlan>("basic");
   const isTestUser = user?.email?.toLowerCase() === "moazamm.dev@gmail.com";
+  const desktopInitRef = useRef(false);
 
   const navigation: NavItem[] = [
     { name: "Overview", icon: BarChart3, href: "/dashboard", requiredPlan: ["basic", "pro", "advanced"], description: "Your channel dashboard" },
@@ -67,13 +70,26 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     { name: "Topic Ideas", icon: Lightbulb, href: "/dashboard/topics", requiredPlan: ["basic", "pro", "advanced"], description: "Get video topic suggestions" },
     { name: "Script Writer", icon: FileText, href: "/dashboard/scripts", requiredPlan: ["pro", "advanced"], description: "AI-generated video scripts" },
     { name: "Text to Speech", icon: AudioLines, href: "/dashboard/text-to-speech", requiredPlan: ["pro", "advanced"], description: "Generate voiceovers with preset voices or voice clones" },
+    { name: "Text to Video", icon: Film, href: "/dashboard/text-to-video", requiredPlan: ["basic", "pro", "advanced"], description: "Generate short videos from text prompts" },
     { name: "Thumbnails", icon: Image, href: "/dashboard/thumbnails", requiredPlan: ["pro", "advanced"], description: "Generate eye-catching thumbnails" },
+    { name: "SEO Analyzer", icon: Search, href: "/dashboard/seo-analyzer", requiredPlan: ["basic", "pro", "advanced"], description: "Audit any YouTube video SEO" },
     { name: "Competitors", icon: Users, href: "/dashboard/competitors", requiredPlan: ["basic", "pro", "advanced"], description: "Analyze competitor channels" },
     { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"], description: "Track your growth journey" },
     { name: "AI Credits", icon: Sparkles, href: "/dashboard/credits", description: "Manage your AI credits" },
     { name: "Profile", icon: User, href: "/dashboard/profile", description: "Your account settings" },
     { name: "AI Chat", icon: MessageSquare, href: "/dashboard/chat", requiredPlan: ["pro", "advanced"], description: "Chat with AI strategist" },
   ];
+  const mobileQuickNav: NavItem[] = [
+    { name: "Overview", icon: Home, href: "/dashboard", requiredPlan: ["basic", "pro", "advanced"] },
+    { name: "Channel Analysis", icon: Brain, href: "/dashboard/analysis", requiredPlan: ["basic", "pro", "advanced"] },
+    { name: "Growth Tasks", icon: Target, href: "/dashboard/growth", requiredPlan: ["basic", "pro", "advanced"] },
+    { name: "Profile", icon: User, href: "/dashboard/profile" },
+  ];
+  const currentNavItem =
+    navigation.find((item) => (item.href === "/dashboard" ? location.pathname === "/dashboard" : location.pathname.startsWith(item.href))) ??
+    (isAdmin && location.pathname.startsWith("/admin")
+      ? ({ name: "Admin Panel", icon: Shield, href: "/admin" } as NavItem)
+      : ({ name: "Overview", icon: Home, href: "/dashboard" } as NavItem));
 
   const isLocked = (item: NavItem): boolean => {
     if (isTestUser && item.href === "/dashboard/analysis") return false;
@@ -97,6 +113,11 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     setRequiredPlanForFeature(getMinRequiredPlan(item));
     setUpgradeModalOpen(true);
   };
+  const closeDrawerOnMobile = () => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setSidebarOpen(false);
+    }
+  };
 
   const isActive = (href: string): boolean => {
     if (href === "/dashboard") {
@@ -105,18 +126,61 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
     return location.pathname.startsWith(href);
   };
 
+  useEffect(() => {
+    if (!desktopInitRef.current && typeof window !== "undefined" && window.innerWidth >= 1024) {
+      desktopInitRef.current = true;
+      if (!sidebarOpen) {
+        setSidebarOpen(true);
+      }
+    }
+  }, [setSidebarOpen, sidebarOpen]);
+
+  useEffect(() => {
+    const previousPaddingBottom = document.body.style.paddingBottom;
+    const previousPaddingTop = document.body.style.paddingTop;
+    const previousPaddingLeft = document.body.style.paddingLeft;
+    const applyPadding = () => {
+      if (window.innerWidth < 1024) {
+        document.body.style.paddingBottom = "72px";
+        document.body.style.paddingTop = "66px";
+        document.body.style.paddingLeft = "";
+      } else {
+        document.body.style.paddingBottom = "";
+        document.body.style.paddingTop = "";
+        document.body.style.paddingLeft = sidebarOpen ? "256px" : "80px";
+      }
+    };
+
+    applyPadding();
+    window.addEventListener("resize", applyPadding);
+    return () => {
+      window.removeEventListener("resize", applyPadding);
+      document.body.style.paddingBottom = previousPaddingBottom;
+      document.body.style.paddingTop = previousPaddingTop;
+      document.body.style.paddingLeft = previousPaddingLeft;
+    };
+  }, [sidebarOpen]);
+
   return (
     <>
-      {/* Mobile Sidebar Toggle */}
-      <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 glass rounded-lg"
-      >
-        {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-      </button>
+      <div className="lg:hidden fixed top-0 inset-x-0 z-50 h-[66px] border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-4 flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 rounded-lg bg-gradient-to-br from-primary to-accent shrink-0">
+            <currentNavItem.icon className="h-4 w-4 text-primary-foreground" />
+          </div>
+          <span className="font-semibold text-base truncate">{currentNavItem.name}</span>
+        </div>
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="p-[10px] glass rounded-lg shrink-0"
+          aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+        >
+          {sidebarOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+        </button>
+      </div>
 
       <aside
-        className={`fixed lg:sticky lg:top-0 h-svh inset-y-0 left-0 z-50 w-64 glass-strong border-r border-border transform transition-transform duration-200 ${
+        className={`fixed lg:fixed lg:top-0 h-screen inset-y-0 left-0 z-50 w-64 glass-strong border-r border-border transform transition-transform duration-200 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0 lg:w-20"
         }`}
       >
@@ -200,7 +264,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
                 }
 
                 return (
-                  <Link key={item.name} to={item.href}>
+                  <Link key={item.name} to={item.href} onClick={closeDrawerOnMobile}>
                     {navContent}
                   </Link>
                 );
@@ -211,6 +275,7 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
             {isAdmin && (
               <Link
                 to="/admin"
+                onClick={closeDrawerOnMobile}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                   location.pathname.startsWith("/admin")
                     ? "bg-primary/10 text-primary"
@@ -259,6 +324,43 @@ export function DashboardSidebar({ sidebarOpen, setSidebarOpen }: DashboardSideb
           </div>
         </div>
       </aside>
+
+      {sidebarOpen && (
+        <button
+          type="button"
+          className="lg:hidden fixed inset-0 z-40 bg-black/50"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Close menu overlay"
+        />
+      )}
+
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="grid grid-cols-4">
+          {mobileQuickNav.map((item) => {
+            const active = isActive(item.href);
+            const locked = isLocked(item);
+            return (
+              <button
+                key={item.name}
+                onClick={() => {
+                  if (locked) {
+                    handleLockedClick(item);
+                    return;
+                  }
+                  navigate(item.href);
+                  closeDrawerOnMobile();
+                }}
+                className={`flex flex-col items-center justify-center gap-1 py-2 text-xs ${
+                  active ? "text-primary" : "text-muted-foreground"
+                }`}
+              >
+                <item.icon className="h-5 w-5" />
+                <span>{item.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Upgrade Modal */}
       <UpgradeModal

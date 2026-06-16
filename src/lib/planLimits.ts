@@ -11,6 +11,7 @@ export interface PlanLimits {
   competitorAnalysisFrequency: "never" | "weekly" | "daily";
   hasScriptWriter: boolean;
   hasTextToSpeech: boolean;
+  hasTextToVideo: boolean;
   hasVoiceClone: boolean;
   hasAdvancedAnalytics: boolean;
   hasGrowthTasks: boolean;
@@ -33,6 +34,7 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     competitorAnalysisFrequency: "weekly",
     hasScriptWriter: false,
     hasTextToSpeech: false,
+    hasTextToVideo: true,
     hasVoiceClone: false,
     hasAdvancedAnalytics: false,
     hasGrowthTasks: true,
@@ -53,6 +55,7 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     competitorAnalysisFrequency: "weekly",
     hasScriptWriter: true,
     hasTextToSpeech: true,
+    hasTextToVideo: true,
     hasVoiceClone: true,
     hasAdvancedAnalytics: true,
     hasGrowthTasks: true,
@@ -73,6 +76,7 @@ export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
     competitorAnalysisFrequency: "daily",
     hasScriptWriter: true,
     hasTextToSpeech: true,
+    hasTextToVideo: true,
     hasVoiceClone: true,
     hasAdvancedAnalytics: true,
     hasGrowthTasks: true,

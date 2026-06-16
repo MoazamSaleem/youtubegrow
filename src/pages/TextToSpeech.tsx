@@ -145,7 +145,7 @@ const TextToSpeech = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const userId = user?.id ?? null;
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [userCredits, setUserCredits] = useState<UserCredits>({
     ai_credits_balance: 0,
@@ -154,7 +154,7 @@ const TextToSpeech = () => {
   const [history, setHistory] = useState<TextToSpeechGeneration[]>([]);
   const [historyStatusMessage, setHistoryStatusMessage] = useState<string | null>(null);
   const [availableVoices, setAvailableVoices] = useState<TextToSpeechVoice[]>(TEXT_TO_SPEECH_VOICES);
-  const [ttsConfigured, setTtsConfigured] = useState(true);
+  const [ttsConfigured, setTtsConfigured] = useState(false);
   const [voicesLoading, setVoicesLoading] = useState(false);
   const [voicesError, setVoicesError] = useState<string | null>(null);
   const [deletingGenerationId, setDeletingGenerationId] = useState<string | null>(null);
@@ -1437,14 +1437,14 @@ const TextToSpeech = () => {
       <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       <main className="flex-1 transition-all duration-300">
-        <header className="sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
+        <header className="hidden lg:block sticky top-0 z-40 glass-strong border-b border-border px-4 lg:px-6 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="lg:hidden"
+                className="hidden"
               >
                 <Menu className="h-5 w-5" />
               </Button>

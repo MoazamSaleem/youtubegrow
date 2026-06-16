@@ -80,7 +80,7 @@ interface RealtimeChannelContext {
 const KeywordsResearch = () => {
   const { user, subscription, loading } = useAuth();
   const { toast } = useToast();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [niche, setNiche] = useState("");
   const [keywords, setKeywords] = useState<Keyword[]>([]);

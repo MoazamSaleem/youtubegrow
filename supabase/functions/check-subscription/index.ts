@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
+import Stripe from "npm:stripe@14.21.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { selectBestSubscriptionRecord } from "../_shared/subscription.ts";
 
@@ -107,21 +107,55 @@ const resolvePlanFromStripeSubscription = (
   subscription: Stripe.Subscription,
   previousPlan: string | null
 ) => {
-  const productId = subscription.items.data[0].price.product as string;
-  const priceId = subscription.items.data[0].price.id;
+  const firstItem = subscription.items.data[0];
+  const productId = firstItem?.price?.product as string;
+  const priceId = firstItem?.price?.id;
+  const priceLookupKey = firstItem?.price?.lookup_key ?? "";
+  const productObj =
+    typeof firstItem?.price?.product === "object" && firstItem?.price?.product
+      ? (firstItem.price.product as Stripe.Product)
+      : null;
+  const productName = productObj?.name?.toLowerCase?.() ?? "";
+
+  const normalizePlan = (value?: string | null) => {
+    if (!value) return null;
+    const normalized = value.toLowerCase();
+    if (normalized === "basic" || normalized === "pro" || normalized === "advanced") return normalized;
+    return null;
+  };
+
+  const planFromLookupKey = (() => {
+    if (!priceLookupKey) return null;
+    if (priceLookupKey.startsWith("ytgp_basic_")) return "basic";
+    if (priceLookupKey.startsWith("ytgp_pro_")) return "pro";
+    if (priceLookupKey.startsWith("ytgp_advanced_")) return "advanced";
+    return null;
+  })();
+
+  if (planFromLookupKey) return planFromLookupKey;
+
+  if (productName.includes("basic")) return "basic";
+  if (productName.includes("pro")) return "pro";
+  if (productName.includes("advanced")) return "advanced";
 
   const productPlanMap: Record<string, string> = {
-    "prod_TjlB0qtrN0s4u6": "basic",
-    "prod_TjlBgvbmpocKMF": "pro",
-    "prod_TjlCT4ijKq11hk": "advanced",
+    "prod_ULG0alM0SRcCvv": "basic",
+    "prod_ULG2MM6wkJhMnk": "basic",
+    "prod_ULG1B0SlaVlpYA": "pro",
+    "prod_ULG2hmVTfKbRSK": "pro",
+    "prod_ULG1utqbngUXMt": "advanced",
+    "prod_ULG366uyBVF8U9": "advanced",
   };
   const pricePlanMap: Record<string, string> = {
-    "price_1SmHf4IvqpEim8WgtxTKqyp0": "basic",
-    "price_1SmHfXIvqpEim8Wg9JtMKO3J": "pro",
-    "price_1SmHfeIvqpEim8WgyUq2VpbB": "advanced",
+    "price_1TMZUeB55nrd5jvIp7DcB0bK": "basic",
+    "price_1TMZWGB55nrd5jvI1n7dVzL9": "basic",
+    "price_1TMZVAB55nrd5jvIHhgZEUMT": "pro",
+    "price_1TMZWjB55nrd5jvIqiHbYbQs": "pro",
+    "price_1TMZVbB55nrd5jvIWcZAj3UI": "advanced",
+    "price_1TMZXCB55nrd5jvIkdf5Z6gR": "advanced",
   };
 
-  return productPlanMap[productId] || pricePlanMap[priceId] || previousPlan;
+  return normalizePlan(productPlanMap[productId] || pricePlanMap[priceId] || previousPlan);
 };
 
 const pickPreferredStripeSubscription = (
@@ -336,6 +370,7 @@ serve(async (req) => {
       customer: customerId,
       status: "all",
       limit: 20,
+      expand: ["data.items.data.price.product"],
     });
 
     const { activeSubscriptions, preferredSubscription: activeSubscription } =

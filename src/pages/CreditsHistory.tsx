@@ -59,8 +59,8 @@ interface CreditsUsage {
 
 const CreditsHistory = () => {
   const { user } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
   const [history, setHistory] = useState<CreditsHistoryEntry[]>([]);
   const [purchases, setPurchases] = useState<CreditsPurchase[]>([]);

@@ -20,6 +20,10 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+[functions.analyze-seo-video]
+enabled = true
+verify_jwt = true
+
 [functions.analyze-channel]
 enabled = true
 verify_jwt = false
@@ -30,7 +34,7 @@ verify_jwt = false
 
 [functions.account-actions]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 
 [functions.create-checkout]
 enabled = true
@@ -72,6 +76,10 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+[functions.generate-video]
+enabled = true
+verify_jwt = false
+
 [functions.list-tts-voices]
 enabled = true
 verify_jwt = false
@@ -91,3 +99,7 @@ verify_jwt = false
 [functions.check-trial-expiration]
 enabled = true
 verify_jwt = true
+
+[functions.send-support-chat-message]
+enabled = true
+verify_jwt = false

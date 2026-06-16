@@ -120,7 +120,7 @@ serve(async (req) => {
                 </ul>
                 <p style="margin: 20px 0;">
                   <a
-                    href="https://tubegrow.lovable.app/dashboard/billing"
+                    href="https://ytgrowth.cloud/dashboard/billing"
                     style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block;"
                   >
                     Manage Plan

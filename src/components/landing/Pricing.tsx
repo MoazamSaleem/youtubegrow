@@ -67,17 +67,19 @@ const Pricing = () => {
           : `Competitor analysis ${limits.competitorAnalysisFrequency}`, 
       included: limits.competitorAnalysisFrequency !== "never" 
     });
-    
-    // Script writer
-    features.push({ 
-      text: "Script writer", 
-      included: limits.hasScriptWriter 
-    });
 
-    if (plan === "pro" || plan === "advanced") {
-      features.push({ text: "Text to Speech", included: limits.hasTextToSpeech });
-      features.push({ text: "Voice Clone", included: limits.hasVoiceClone });
-    }
+    // SEO Analyzer (all paid plans)
+    features.push({
+      text: "SEO Analyzer (20 credits/query)",
+      included: true,
+    });
+    
+    features.push({ text: "Text to Video (80 credits/10 sec)", included: limits.hasTextToVideo });
+
+    // Script writer / TTS / Voice Clone (show on all plans; crossed when unavailable)
+    features.push({ text: "Script writer", included: limits.hasScriptWriter });
+    features.push({ text: "Text to Speech", included: limits.hasTextToSpeech });
+    features.push({ text: "Voice Clone", included: limits.hasVoiceClone });
     
     // Thumbnails
     features.push({ 
