@@ -28,7 +28,14 @@ logger = logging.getLogger("voltcut")
 app = FastAPI(title="Voltcut Video Studio API")
 api = APIRouter(prefix="/api")
 
-cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if o.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,

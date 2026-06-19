@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-STORAGE_DIR = Path(os.environ.get("STORAGE_DIR", "/app/storage"))
+STORAGE_DIR = Path(os.environ.get("STORAGE_DIR", "/app/storage")).expanduser().resolve()
 RENDER_DIR = STORAGE_DIR / "renders"
 TMP_DIR = STORAGE_DIR / "tmp"
 RENDER_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,6 +103,11 @@ def render_dependencies() -> Dict[str, Any]:
         "available": all(bool(path) for path in binaries.values()),
         "binaries": binaries,
     }
+
+
+def _concat_file_line(path: Path) -> str:
+    resolved = path.resolve().as_posix().replace("'", r"'\''")
+    return f"file '{resolved}'"
 
 
 async def _download(url: str, dest: Path) -> Path:
@@ -310,7 +315,7 @@ async def render_project(
 
     # Concat segments
     list_file = work / "concat.txt"
-    list_file.write_text("\n".join(f"file '{p}'" for p in scene_clips))
+    list_file.write_text("\n".join(_concat_file_line(p) for p in scene_clips), encoding="utf-8")
     concat_mp4 = work / "concat.mp4"
     code, log = await _run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),

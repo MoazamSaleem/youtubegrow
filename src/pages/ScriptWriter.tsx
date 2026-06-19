@@ -344,6 +344,8 @@ Estimated Duration: ${data.estimatedDuration}${tips}
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="0.5-1">0.5-1 min</SelectItem>
+                          <SelectItem value="1-2">1-2 mins</SelectItem>
                           <SelectItem value="3-5">3-5 mins</SelectItem>
                           <SelectItem value="5-8">5-8 mins</SelectItem>
                           <SelectItem value="8-10">8-10 mins</SelectItem>

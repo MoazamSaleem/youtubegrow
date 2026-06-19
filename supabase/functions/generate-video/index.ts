@@ -17,6 +17,14 @@ const STYLES = new Set(["cinematic", "documentary", "animated", "realistic", "pr
 const VOICES = new Set(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
 const CAPTION_THEMES = new Set(["viral_pop", "minimal", "hormozi", "mrbeast"]);
 
+type JsonRecord = Record<string, unknown>;
+
+const jsonResponse = (payload: JsonRecord, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
 const clampDuration = (value: unknown) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return MIN_DURATION_SECONDS;
@@ -36,16 +44,42 @@ const parseProviderResponse = async (response: Response) => {
   const text = await response.text();
   if (!text) return {};
   try {
-    return JSON.parse(text) as Record<string, unknown>;
+    return JSON.parse(text) as JsonRecord;
   } catch {
     return { raw: text };
   }
 };
 
+const providerHeaders = (apiKey: string, extra: HeadersInit = {}) => {
+  const headers = new Headers(extra);
+  if (apiKey) headers.set("Authorization", `Bearer ${apiKey}`);
+  return headers;
+};
+
+const providerError = (payload: JsonRecord, fallback: string) =>
+  typeof payload.detail === "string"
+    ? payload.detail
+    : typeof payload.error === "string"
+      ? payload.error
+      : typeof payload.raw === "string"
+        ? payload.raw
+        : fallback;
+
 const absoluteProviderUrl = (base: string, value: unknown) => {
   if (typeof value !== "string" || !value) return null;
   if (value.startsWith("http://") || value.startsWith("https://")) return value;
   return joinUrl(base, value);
+};
+
+const projectIdFromProviderResponse = (value: unknown) => {
+  if (!value || typeof value !== "object") return null;
+  const response = value as JsonRecord;
+  if (typeof response.project_id === "string") return response.project_id;
+  const project = response.project;
+  if (project && typeof project === "object" && typeof (project as JsonRecord).id === "string") {
+    return (project as JsonRecord).id as string;
+  }
+  return null;
 };
 
 const isMissingVideoRelationError = (error: { code?: string; message?: string; details?: string } | null | undefined) => {
@@ -58,6 +92,100 @@ const isMissingVideoRelationError = (error: { code?: string; message?: string; d
   );
 };
 
+const allowedProjectPatch = (patch: JsonRecord) => {
+  const allowed = new Set([
+    "title",
+    "aspect",
+    "script",
+    "voice",
+    "caption_theme",
+    "caption_style",
+    "scenes",
+    "music_url",
+    "music_tracks",
+    "timeline_layers",
+    "music_timeline",
+    "total_duration",
+    "thumbnail_url",
+    "status",
+    "final_video_url",
+  ]);
+
+  return Object.fromEntries(
+    Object.entries(patch).filter(([key]) => allowed.has(key))
+  ) as JsonRecord;
+};
+
+async function fetchProvider(
+  providerEndpoint: string,
+  providerApiKey: string,
+  path: string,
+  init: RequestInit = {},
+) {
+  const response = await fetch(joinUrl(providerEndpoint, path), {
+    ...init,
+    headers: providerHeaders(providerApiKey, init.headers ?? {}),
+  });
+  const payload = await parseProviderResponse(response);
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status >= 400 && response.status < 500 ? response.status : 500,
+      payload,
+      error: providerError(payload, "Text-to-video backend request failed"),
+    };
+  }
+
+  return { ok: true, status: response.status, payload, error: null };
+}
+
+async function findOwnedGeneration(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  projectId: string,
+) {
+  const direct = await supabaseAdmin
+    .from("text_to_video_generations")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("provider_project_id", projectId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!direct.error && direct.data) return direct.data as JsonRecord;
+
+  const fallback = await supabaseAdmin
+    .from("text_to_video_generations")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (fallback.error) return null;
+  return ((fallback.data ?? []) as JsonRecord[]).find((row) =>
+    projectIdFromProviderResponse(row.provider_response) === projectId
+  ) ?? null;
+}
+
+async function requireOwnedProject(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  projectId: unknown,
+) {
+  if (typeof projectId !== "string" || !projectId.trim()) {
+    return { generation: null, response: jsonResponse({ error: "Project id is required" }, 400) };
+  }
+
+  const generation = await findOwnedGeneration(supabaseAdmin, userId, projectId);
+  if (!generation) {
+    return { generation: null, response: jsonResponse({ error: "Video project not found" }, 404) };
+  }
+
+  return { generation, response: null };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -66,10 +194,7 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -78,7 +203,7 @@ serve(async (req) => {
     const providerEndpoint =
       Deno.env.get("TEXT_TO_VIDEO_ENDPOINT") ??
       Deno.env.get("TEXT_TO_VIDEO_API_BASE") ??
-      "";
+      "https://render.ytgrowth.cloud";
     const providerApiKey = Deno.env.get("TEXT_TO_VIDEO_API_KEY") ?? "";
 
     const authClient = createClient(supabaseUrl, supabaseAnonKey || supabaseServiceKey, {
@@ -91,10 +216,7 @@ serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const { data: userData, error: userError } = await authClient.auth.getUser(token);
     if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ error: "User not authenticated" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "User not authenticated" }, 401);
     }
 
     const accessResponse = await requireMinimumPlan({
@@ -106,16 +228,197 @@ serve(async (req) => {
     });
     if (accessResponse) return accessResponse;
 
-    const body = await req.json();
-    const action = typeof body?.action === "string" ? body.action : "generate";
+    let body: JsonRecord = {};
+    try {
+      body = await req.json();
+    } catch {
+      return jsonResponse({ error: "JSON body is required" }, 400);
+    }
+
+    const action = typeof body.action === "string" ? body.action : "generate";
+    const needsProvider = new Set([
+      "generate",
+      "status",
+      "getProject",
+      "updateProject",
+      "deleteProject",
+      "renderProject",
+      "renderStatus",
+      "meta",
+      "librarySearch",
+    ]);
+
+    if (needsProvider.has(action) && !providerEndpoint) {
+      return jsonResponse({
+        error: "Text to video is not configured. Set TEXT_TO_VIDEO_ENDPOINT to your Youtube-Shorts-Maker backend base URL.",
+      }, 503);
+    }
+
+    if (action === "meta") {
+      const result = await fetchProvider(providerEndpoint, providerApiKey, "/api/meta");
+      return result.ok ? jsonResponse({ meta: result.payload }) : jsonResponse({ error: result.error }, result.status);
+    }
+
+    if (action === "librarySearch") {
+      const q = typeof body.q === "string" ? body.q : "";
+      const type = body.type === "video" ? "video" : "image";
+      const result = await fetchProvider(
+        providerEndpoint,
+        providerApiKey,
+        `/api/library/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}`,
+      );
+      return result.ok ? jsonResponse(result.payload) : jsonResponse({ error: result.error }, result.status);
+    }
+
+    if (action === "getProject") {
+      const { response } = await requireOwnedProject(supabaseAdmin, userData.user.id, body.projectId);
+      if (response) return response;
+
+      const result = await fetchProvider(providerEndpoint, providerApiKey, `/api/projects/${body.projectId}`);
+      return result.ok ? jsonResponse({ project: result.payload }) : jsonResponse({ error: result.error }, result.status);
+    }
+
+    if (action === "updateProject") {
+      const { response } = await requireOwnedProject(supabaseAdmin, userData.user.id, body.projectId);
+      if (response) return response;
+
+      const patch = body.patch && typeof body.patch === "object"
+        ? allowedProjectPatch(body.patch as JsonRecord)
+        : {};
+
+      if (Object.keys(patch).length === 0) {
+        return jsonResponse({ error: "No project fields were provided" }, 400);
+      }
+
+      const result = await fetchProvider(providerEndpoint, providerApiKey, `/api/projects/${body.projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+
+      return result.ok ? jsonResponse({ project: result.payload }) : jsonResponse({ error: result.error }, result.status);
+    }
+
+    if (action === "deleteProject") {
+      const { generation, response } = await requireOwnedProject(supabaseAdmin, userData.user.id, body.projectId);
+      if (response) return response;
+
+      const result = await fetchProvider(providerEndpoint, providerApiKey, `/api/projects/${body.projectId}`, {
+        method: "DELETE",
+      });
+
+      if (!result.ok) return jsonResponse({ error: result.error }, result.status);
+
+      if (typeof generation?.id === "string") {
+        await supabaseAdmin
+          .from("text_to_video_generations")
+          .delete()
+          .eq("id", generation.id)
+          .eq("user_id", userData.user.id);
+      }
+
+      return jsonResponse({ deleted: true, projectId: body.projectId as string });
+    }
+
+    if (action === "renderProject") {
+      const { generation, response } = await requireOwnedProject(supabaseAdmin, userData.user.id, body.projectId);
+      if (response) return response;
+
+      const fps = Math.min(90, Math.max(20, Number(body.fps) || 30));
+      const outFormat = typeof body.outFormat === "string" ? body.outFormat : "mp4";
+      const result = await fetchProvider(providerEndpoint, providerApiKey, "/api/renders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: body.projectId,
+          fps,
+          out_format: outFormat,
+        }),
+      });
+
+      if (!result.ok) return jsonResponse({ error: result.error }, result.status);
+
+      const providerJobId = typeof result.payload.job_id === "string" ? result.payload.job_id : null;
+      let updatedGeneration = generation;
+      if (providerJobId && typeof generation?.id === "string") {
+        const update = await supabaseAdmin
+          .from("text_to_video_generations")
+          .update({
+            status: "processing",
+            provider_job_id: providerJobId,
+            video_url: null,
+            error_message: null,
+            provider_project_id: body.projectId,
+            provider_response: {
+              ...(generation.provider_response && typeof generation.provider_response === "object"
+                ? generation.provider_response as JsonRecord
+                : {}),
+              render: result.payload,
+            },
+          })
+          .eq("id", generation.id)
+          .select("*")
+          .single();
+        if (!update.error && update.data) updatedGeneration = update.data as JsonRecord;
+      }
+
+      return jsonResponse({ render: result.payload, generation: updatedGeneration });
+    }
+
+    if (action === "renderStatus") {
+      const jobId = typeof body.jobId === "string" ? body.jobId : "";
+      const projectId = typeof body.projectId === "string" ? body.projectId : "";
+      if (!jobId || !projectId) {
+        return jsonResponse({ error: "Project id and render job id are required" }, 400);
+      }
+
+      const { generation, response } = await requireOwnedProject(supabaseAdmin, userData.user.id, projectId);
+      if (response) return response;
+
+      const result = await fetchProvider(providerEndpoint, providerApiKey, `/api/renders/${jobId}`);
+      if (!result.ok) return jsonResponse({ error: result.error }, result.status);
+
+      const providerStatus = typeof result.payload.status === "string" ? result.payload.status : "running";
+      const finalVideoUrl = absoluteProviderUrl(providerEndpoint, result.payload.final_video_url);
+      const nextStatus = providerStatus === "completed"
+        ? "completed"
+        : providerStatus === "failed"
+          ? "failed"
+          : "processing";
+
+      let updatedGeneration = generation;
+      if (typeof generation?.id === "string" && (nextStatus === "completed" || nextStatus === "failed")) {
+        const update = await supabaseAdmin
+          .from("text_to_video_generations")
+          .update({
+            status: nextStatus,
+            video_url: finalVideoUrl,
+            provider_job_id: jobId,
+            provider_project_id: projectId,
+            provider_response: {
+              ...(generation.provider_response && typeof generation.provider_response === "object"
+                ? generation.provider_response as JsonRecord
+                : {}),
+              render: result.payload,
+            },
+            completed_at: nextStatus === "completed" ? new Date().toISOString() : null,
+            error_message: nextStatus === "failed"
+              ? (typeof result.payload.error === "string" ? result.payload.error : "Render failed")
+              : null,
+          })
+          .eq("id", generation.id)
+          .select("*")
+          .single();
+        if (!update.error && update.data) updatedGeneration = update.data as JsonRecord;
+      }
+
+      return jsonResponse({ render: result.payload, generation: updatedGeneration });
+    }
 
     if (action === "status") {
-      const generationId = typeof body?.generationId === "string" ? body.generationId : "";
+      const generationId = typeof body.generationId === "string" ? body.generationId : "";
       if (!generationId) {
-        return new Response(JSON.stringify({ error: "Generation id is required" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonResponse({ error: "Generation id is required" }, 400);
       }
 
       const { data: generationRecord, error: generationError } = await supabaseAdmin
@@ -126,43 +429,25 @@ serve(async (req) => {
         .single();
 
       if (generationError || !generationRecord) {
-        return new Response(JSON.stringify({ error: "Video generation not found" }), {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonResponse({ error: "Video generation not found" }, 404);
       }
 
       if (
         generationRecord.status !== "processing" ||
-        !generationRecord.provider_job_id ||
-        !providerEndpoint
+        !generationRecord.provider_job_id
       ) {
-        return new Response(JSON.stringify({ generation: generationRecord }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonResponse({ generation: generationRecord });
       }
 
-      const statusResponse = await fetch(joinUrl(providerEndpoint, `/api/renders/${generationRecord.provider_job_id}`), {
-        headers: providerApiKey ? { Authorization: `Bearer ${providerApiKey}` } : {},
-      });
-      const statusPayload = await parseProviderResponse(statusResponse);
+      const statusResult = await fetchProvider(
+        providerEndpoint,
+        providerApiKey,
+        `/api/renders/${generationRecord.provider_job_id}`,
+      );
+      if (!statusResult.ok) return jsonResponse({ error: statusResult.error }, statusResult.status);
 
-      if (!statusResponse.ok) {
-        return new Response(JSON.stringify({
-          error: typeof statusPayload.detail === "string"
-            ? statusPayload.detail
-            : typeof statusPayload.raw === "string"
-              ? statusPayload.raw
-              : "Failed to check render status",
-        }), {
-          status: statusResponse.status >= 400 && statusResponse.status < 500 ? statusResponse.status : 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const providerStatus = typeof statusPayload.status === "string" ? statusPayload.status : "processing";
-      const finalVideoUrl = absoluteProviderUrl(providerEndpoint, statusPayload.final_video_url);
+      const providerStatus = typeof statusResult.payload.status === "string" ? statusResult.payload.status : "processing";
+      const finalVideoUrl = absoluteProviderUrl(providerEndpoint, statusResult.payload.final_video_url);
       const nextStatus = providerStatus === "completed"
         ? "completed"
         : providerStatus === "failed"
@@ -174,10 +459,15 @@ serve(async (req) => {
         .update({
           status: nextStatus,
           video_url: finalVideoUrl,
-          provider_response: statusPayload,
+          provider_response: {
+            ...(generationRecord.provider_response && typeof generationRecord.provider_response === "object"
+              ? generationRecord.provider_response as JsonRecord
+              : {}),
+            render: statusResult.payload,
+          },
           completed_at: nextStatus === "completed" ? new Date().toISOString() : null,
           error_message: nextStatus === "failed"
-            ? (typeof statusPayload.error === "string" ? statusPayload.error : "Render failed")
+            ? (typeof statusResult.payload.error === "string" ? statusResult.payload.error : "Render failed")
             : null,
         })
         .eq("id", generationId)
@@ -185,46 +475,28 @@ serve(async (req) => {
         .single();
 
       if (updateStatusError || !updatedGeneration) {
-        return new Response(JSON.stringify({
+        return jsonResponse({
           error: updateStatusError?.message || "Failed to update render status",
-        }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        }, 500);
       }
 
-      return new Response(JSON.stringify({ generation: updatedGeneration }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ generation: updatedGeneration });
     }
 
-    const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-    const durationSeconds = clampDuration(body?.durationSeconds);
+    const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+    const durationSeconds = clampDuration(body.durationSeconds);
     const aspectRatio =
-      body?.aspectRatio === "16:9" || body?.aspectRatio === "1:1" ? body.aspectRatio : "9:16";
-    const style = normalizeStyle(body?.style);
-    const title = typeof body?.title === "string" ? body.title.trim() : "";
-    const voice = typeof body?.voice === "string" && VOICES.has(body.voice) ? body.voice : "nova";
+      body.aspectRatio === "16:9" || body.aspectRatio === "1:1" ? body.aspectRatio : "9:16";
+    const style = normalizeStyle(body.style);
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const voice = typeof body.voice === "string" && VOICES.has(body.voice) ? body.voice : "nova";
     const captionTheme =
-      typeof body?.captionTheme === "string" && CAPTION_THEMES.has(body.captionTheme)
+      typeof body.captionTheme === "string" && CAPTION_THEMES.has(body.captionTheme)
         ? body.captionTheme
         : "viral_pop";
 
     if (!prompt) {
-      return new Response(JSON.stringify({ error: "Prompt is required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (!providerEndpoint) {
-      return new Response(JSON.stringify({
-        error: "Text to video is not configured. Set TEXT_TO_VIDEO_ENDPOINT to your Youtube-Shorts-Maker backend base URL.",
-      }), {
-        status: 503,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Prompt is required" }, 400);
     }
 
     const creditsUsed = calculateCredits(durationSeconds);
@@ -233,14 +505,11 @@ serve(async (req) => {
       creditsUsed,
       "generate-video",
       `Text to Video - ${durationSeconds}s`,
-      durationSeconds <= 10 ? "basic" : durationSeconds <= 30 ? "standard" : "extensive"
+      durationSeconds <= 10 ? "basic" : durationSeconds <= 30 ? "standard" : "extensive",
     );
 
     if (!creditCheck.success) {
-      return new Response(JSON.stringify({ error: creditCheck.error }), {
-        status: 402,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: creditCheck.error }, 402);
     }
 
     const { data: insertedGeneration, error: insertError } = await supabaseAdmin
@@ -259,22 +528,16 @@ serve(async (req) => {
 
     if (insertError || !insertedGeneration) {
       await refundCredits(userData.user.id, creditsUsed, "Text to video save failed - refund");
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: isMissingVideoRelationError(insertError)
           ? "Text to video database is not configured. Apply the text-to-video migration before generating video."
           : insertError?.message || "Failed to create video job",
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      }, 500);
     }
 
-    const generatedProjectResponse = await fetch(joinUrl(providerEndpoint, "/api/projects/generate"), {
+    const generatedProjectResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/projects/generate", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(providerApiKey ? { Authorization: `Bearer ${providerApiKey}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: title || prompt.slice(0, 60) || "Text to Video",
         script: prompt,
@@ -284,95 +547,64 @@ serve(async (req) => {
       }),
     });
 
-    const generatedProject = await parseProviderResponse(generatedProjectResponse);
-
     if (!generatedProjectResponse.ok) {
       await supabaseAdmin
         .from("text_to_video_generations")
         .update({
           status: "failed",
-          error_message: typeof generatedProject.detail === "string"
-            ? generatedProject.detail
-            : typeof generatedProject.raw === "string"
-              ? generatedProject.raw
-              : "Failed to generate video project",
+          error_message: generatedProjectResponse.error,
         })
         .eq("id", insertedGeneration.id);
       await refundCredits(userData.user.id, creditsUsed, "Text to video provider error - refund");
-      return new Response(JSON.stringify({
-        error: typeof generatedProject.detail === "string"
-          ? generatedProject.detail
-          : typeof generatedProject.raw === "string"
-            ? generatedProject.raw
-            : "Failed to generate video project",
-      }), {
-        status: generatedProjectResponse.status >= 400 && generatedProjectResponse.status < 500 ? generatedProjectResponse.status : 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: generatedProjectResponse.error }, generatedProjectResponse.status);
     }
 
-    const providerProjectId = typeof generatedProject.id === "string" ? generatedProject.id : null;
+    const providerProjectId = typeof generatedProjectResponse.payload.id === "string"
+      ? generatedProjectResponse.payload.id
+      : null;
     if (!providerProjectId) {
       await supabaseAdmin
         .from("text_to_video_generations")
         .update({ status: "failed", error_message: "Video provider did not return a project id" })
         .eq("id", insertedGeneration.id);
       await refundCredits(userData.user.id, creditsUsed, "Text to video provider response error - refund");
-      return new Response(JSON.stringify({ error: "Video provider did not return a project id" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Video provider did not return a project id" }, 500);
     }
 
-    const renderResponse = await fetch(joinUrl(providerEndpoint, "/api/renders"), {
+    const renderResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/renders", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(providerApiKey ? { Authorization: `Bearer ${providerApiKey}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         project_id: providerProjectId,
         fps: 30,
         out_format: "mp4",
       }),
     });
-    const renderPayload = await parseProviderResponse(renderResponse);
 
     if (!renderResponse.ok) {
       await supabaseAdmin
         .from("text_to_video_generations")
         .update({
           status: "failed",
-          provider_response: { project: generatedProject, render: renderPayload },
-          error_message: typeof renderPayload.detail === "string"
-            ? renderPayload.detail
-            : typeof renderPayload.raw === "string"
-              ? renderPayload.raw
-              : "Failed to start video render",
+          provider_project_id: providerProjectId,
+          provider_response: { project: generatedProjectResponse.payload, render: renderResponse.payload },
+          error_message: renderResponse.error,
         })
         .eq("id", insertedGeneration.id);
       await refundCredits(userData.user.id, creditsUsed, "Text to video render start error - refund");
-      return new Response(JSON.stringify({
-        error: typeof renderPayload.detail === "string"
-          ? renderPayload.detail
-          : typeof renderPayload.raw === "string"
-            ? renderPayload.raw
-            : "Failed to start video render",
-      }), {
-        status: renderResponse.status >= 400 && renderResponse.status < 500 ? renderResponse.status : 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: renderResponse.error }, renderResponse.status);
     }
 
-    const providerJobId = typeof renderPayload.job_id === "string" ? renderPayload.job_id : null;
+    const providerJobId = typeof renderResponse.payload.job_id === "string" ? renderResponse.payload.job_id : null;
 
     const { data: generation, error: updateError } = await supabaseAdmin
       .from("text_to_video_generations")
       .update({
         status: "processing",
         video_url: null,
+        provider_project_id: providerProjectId,
         provider_job_id: providerJobId,
-        provider_response: { project: generatedProject, render: renderPayload },
+        provider_response: { project: generatedProjectResponse.payload, render: renderResponse.payload },
         completed_at: null,
         error_message: null,
       })
@@ -382,28 +614,21 @@ serve(async (req) => {
 
     if (updateError || !generation) {
       await refundCredits(userData.user.id, creditsUsed, "Text to video completion save failed - refund");
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: updateError?.message || "Failed to finalize generated video",
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      }, 500);
     }
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       generation,
+      project: generatedProjectResponse.payload,
+      render: renderResponse.payload,
       remainingCredits: creditCheck.currentBalance,
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Text to video error:", error);
-    return new Response(JSON.stringify({
+    return jsonResponse({
       error: error instanceof Error ? error.message : "Unknown error",
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    }, 500);
   }
 });

@@ -26,7 +26,7 @@ _LOCAL_DB_DIR.mkdir(exist_ok=True)
 _TABLE_COLUMNS = {
     "projects": {
         "id", "title", "aspect", "script", "voice", "caption_theme", "status",
-        "scenes", "music_url", "music_tracks", "timeline_layers", "music_timeline", "total_duration", "thumbnail_url", "final_video_url",
+        "caption_style", "scenes", "music_url", "music_tracks", "timeline_layers", "music_timeline", "total_duration", "thumbnail_url", "final_video_url",
         "created_at", "updated_at",
     },
     "renders": {
