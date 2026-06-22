@@ -223,6 +223,13 @@
     animation: gradient 8s ease infinite;
   }
 
+  .video-editor-image-zoom {
+    --editor-image-scale: 1;
+    animation: video-editor-image-zoom 10s ease-in-out infinite alternate;
+    transform-origin: center;
+    will-change: transform;
+  }
+
   .gsap-fade-up {
     opacity: 0;
     transform: translateY(40px);
@@ -257,4 +264,20 @@
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
+}
+
+@keyframes video-editor-image-zoom {
+  from {
+    transform: scale(var(--editor-image-scale));
+  }
+  to {
+    transform: scale(calc(var(--editor-image-scale) * 1.08));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-editor-image-zoom {
+    animation: none;
+    transform: scale(var(--editor-image-scale));
+  }
 }

@@ -44,7 +44,8 @@ const parseProviderResponse = async (response: Response) => {
   const text = await response.text();
   if (!text) return {};
   try {
-    return JSON.parse(text) as JsonRecord;
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed as JsonRecord : { raw: text };
   } catch {
     return { raw: text };
   }
@@ -65,15 +66,81 @@ const providerError = (payload: JsonRecord, fallback: string) =>
         ? payload.raw
         : fallback;
 
+const providerRequestError = (status: number, path: string, payload: JsonRecord) => {
+  if (status === 405) {
+    return `Text-to-video backend rejected ${path}. Check TEXT_TO_VIDEO_ENDPOINT points to the video generation service and that the deployed service supports this route.`;
+  }
+  return providerError(payload, "Text-to-video backend request failed");
+};
+
+const isUnsupportedProviderRoute = (result: { status: number; error: string | null }) =>
+  result.status === 404 ||
+  result.status === 405 ||
+  String(result.error ?? "").toLowerCase().includes("method not allowed");
+
 const absoluteProviderUrl = (base: string, value: unknown) => {
   if (typeof value !== "string" || !value) return null;
   if (value.startsWith("http://") || value.startsWith("https://")) return value;
   return joinUrl(base, value);
 };
 
+const providerAssetUrl = (base: string, value: unknown) => {
+  if (typeof value !== "string" || !value) return value;
+  const raw = value.trim();
+  if (!raw || raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+
+  let normalized = raw.replaceAll("\\", "/");
+  const storageMarker = "/app/storage/";
+  if (normalized.includes(storageMarker)) {
+    normalized = normalized.slice(normalized.indexOf(storageMarker) + storageMarker.length);
+  }
+  if (normalized.startsWith("/")) normalized = normalized.slice(1);
+  if (normalized.startsWith("app/storage/")) normalized = normalized.slice("app/storage/".length);
+  if (normalized.startsWith("storage/")) normalized = normalized.slice("storage/".length);
+  if (normalized.startsWith("api/storage/")) return joinUrl(base, normalized);
+  if (
+    normalized.startsWith("voiceover/") ||
+    normalized.startsWith("renders/") ||
+    normalized.startsWith("uploads/")
+  ) {
+    return joinUrl(base, `api/storage/${normalized}`);
+  }
+  return absoluteProviderUrl(base, raw) ?? raw;
+};
+
+const normalizeProviderProjectAssets = (base: string, value: JsonRecord) => {
+  const project = structuredClone(value) as JsonRecord;
+  for (const key of ["thumbnail_url", "final_video_url", "music_url"]) {
+    if (key in project) project[key] = providerAssetUrl(base, project[key]);
+  }
+  if (Array.isArray(project.music_tracks)) {
+    project.music_tracks = project.music_tracks.map((item) => providerAssetUrl(base, item));
+  }
+  if (Array.isArray(project.scenes)) {
+    project.scenes = project.scenes.map((scene) => {
+      if (!scene || typeof scene !== "object") return scene;
+      const next = { ...(scene as JsonRecord) };
+      for (const key of ["voiceover_url", "image_url", "video_url"]) {
+        if (key in next) next[key] = providerAssetUrl(base, next[key]);
+      }
+      return next;
+    });
+  }
+  if (Array.isArray(project.timeline_layers)) {
+    project.timeline_layers = project.timeline_layers.map((layer) => {
+      if (!layer || typeof layer !== "object") return layer;
+      const next = { ...(layer as JsonRecord) };
+      if ("url" in next) next.url = providerAssetUrl(base, next.url);
+      return next;
+    });
+  }
+  return project;
+};
+
 const projectIdFromProviderResponse = (value: unknown) => {
   if (!value || typeof value !== "object") return null;
   const response = value as JsonRecord;
+  if (typeof response.id === "string") return response.id;
   if (typeof response.project_id === "string") return response.project_id;
   const project = response.project;
   if (project && typeof project === "object" && typeof (project as JsonRecord).id === "string") {
@@ -133,7 +200,7 @@ async function fetchProvider(
       ok: false,
       status: response.status >= 400 && response.status < 500 ? response.status : 500,
       payload,
-      error: providerError(payload, "Text-to-video backend request failed"),
+      error: providerRequestError(response.status, path, payload),
     };
   }
 
@@ -203,7 +270,7 @@ serve(async (req) => {
     const providerEndpoint =
       Deno.env.get("TEXT_TO_VIDEO_ENDPOINT") ??
       Deno.env.get("TEXT_TO_VIDEO_API_BASE") ??
-      "https://render.ytgrowth.cloud";
+      "";
     const providerApiKey = Deno.env.get("TEXT_TO_VIDEO_API_KEY") ?? "";
 
     const authClient = createClient(supabaseUrl, supabaseAnonKey || supabaseServiceKey, {
@@ -228,6 +295,43 @@ serve(async (req) => {
     });
     if (accessResponse) return accessResponse;
 
+    const contentType = req.headers.get("Content-Type") ?? "";
+    if (contentType.toLowerCase().includes("multipart/form-data")) {
+      const formData = await req.formData();
+      const action = String(formData.get("action") ?? "");
+      if (action !== "uploadMedia") {
+        return jsonResponse({ error: "Unsupported multipart action" }, 400);
+      }
+      if (!providerEndpoint) {
+        return jsonResponse({
+          error: "Text to video is not configured. Set TEXT_TO_VIDEO_ENDPOINT to your Youtube-Shorts-Maker backend base URL.",
+        }, 503);
+      }
+
+      const file = formData.get("file");
+      if (!(file instanceof File)) {
+        return jsonResponse({ error: "Media file is required" }, 400);
+      }
+
+      const kindValue = String(formData.get("kind") ?? "video");
+      const upstreamForm = new FormData();
+      upstreamForm.append("file", file, file.name || "upload");
+      upstreamForm.append("kind", kindValue);
+
+      const uploadResult = await fetchProvider(providerEndpoint, providerApiKey, "/api/uploads", {
+        method: "POST",
+        body: upstreamForm,
+      });
+      if (!uploadResult.ok) return jsonResponse({ error: uploadResult.error }, uploadResult.status);
+
+      return jsonResponse({
+        upload: {
+          ...uploadResult.payload,
+          url: providerAssetUrl(providerEndpoint, uploadResult.payload.url),
+        },
+      });
+    }
+
     let body: JsonRecord = {};
     try {
       body = await req.json();
@@ -241,7 +345,6 @@ serve(async (req) => {
       "status",
       "getProject",
       "updateProject",
-      "deleteProject",
       "renderProject",
       "renderStatus",
       "meta",
@@ -261,7 +364,7 @@ serve(async (req) => {
 
     if (action === "librarySearch") {
       const q = typeof body.q === "string" ? body.q : "";
-      const type = body.type === "video" ? "video" : "image";
+      const type = body.type === "image" ? "image" : "video";
       const result = await fetchProvider(
         providerEndpoint,
         providerApiKey,
@@ -275,7 +378,9 @@ serve(async (req) => {
       if (response) return response;
 
       const result = await fetchProvider(providerEndpoint, providerApiKey, `/api/projects/${body.projectId}`);
-      return result.ok ? jsonResponse({ project: result.payload }) : jsonResponse({ error: result.error }, result.status);
+      return result.ok
+        ? jsonResponse({ project: normalizeProviderProjectAssets(providerEndpoint, result.payload) })
+        : jsonResponse({ error: result.error }, result.status);
     }
 
     if (action === "updateProject") {
@@ -296,18 +401,53 @@ serve(async (req) => {
         body: JSON.stringify(patch),
       });
 
-      return result.ok ? jsonResponse({ project: result.payload }) : jsonResponse({ error: result.error }, result.status);
+      return result.ok
+        ? jsonResponse({ project: normalizeProviderProjectAssets(providerEndpoint, result.payload) })
+        : jsonResponse({ error: result.error }, result.status);
     }
 
     if (action === "deleteProject") {
-      const { generation, response } = await requireOwnedProject(supabaseAdmin, userData.user.id, body.projectId);
-      if (response) return response;
+      const projectId = typeof body.projectId === "string" && body.projectId.trim()
+        ? body.projectId.trim()
+        : null;
+      const generationId = typeof body.generationId === "string" && body.generationId.trim()
+        ? body.generationId.trim()
+        : null;
 
-      const result = await fetchProvider(providerEndpoint, providerApiKey, `/api/projects/${body.projectId}`, {
-        method: "DELETE",
-      });
+      let generation: JsonRecord | null = null;
+      if (projectId) {
+        const owned = await requireOwnedProject(supabaseAdmin, userData.user.id, projectId);
+        if (owned.response) return owned.response;
+        generation = owned.generation;
+      } else if (generationId) {
+        const { data, error } = await supabaseAdmin
+          .from("text_to_video_generations")
+          .select("*")
+          .eq("id", generationId)
+          .eq("user_id", userData.user.id)
+          .maybeSingle();
 
-      if (!result.ok) return jsonResponse({ error: result.error }, result.status);
+        if (error || !data) {
+          return jsonResponse({ error: "Video generation not found" }, 404);
+        }
+        generation = data as JsonRecord;
+      } else {
+        return jsonResponse({ error: "Project id or generation id is required" }, 400);
+      }
+
+      if (projectId) {
+        if (!providerEndpoint) {
+          return jsonResponse({
+            error: "Text to video is not configured. Set TEXT_TO_VIDEO_ENDPOINT to your Youtube-Shorts-Maker backend base URL.",
+          }, 503);
+        }
+
+        const result = await fetchProvider(providerEndpoint, providerApiKey, `/api/projects/${projectId}`, {
+          method: "DELETE",
+        });
+
+        if (!result.ok && result.status !== 404) return jsonResponse({ error: result.error }, result.status);
+      }
 
       if (typeof generation?.id === "string") {
         await supabaseAdmin
@@ -317,7 +457,7 @@ serve(async (req) => {
           .eq("user_id", userData.user.id);
       }
 
-      return jsonResponse({ deleted: true, projectId: body.projectId as string });
+      return jsonResponse({ deleted: true, projectId, generationId: generation?.id ?? generationId });
     }
 
     if (action === "renderProject") {
@@ -434,10 +574,20 @@ serve(async (req) => {
 
       if (
         generationRecord.status !== "processing" ||
-        !generationRecord.provider_job_id
+          !generationRecord.provider_job_id
       ) {
         return jsonResponse({ generation: generationRecord });
       }
+
+      const previousProviderResponse =
+        generationRecord.provider_response && typeof generationRecord.provider_response === "object"
+          ? generationRecord.provider_response as JsonRecord
+          : {};
+      const previousRender =
+        previousProviderResponse.render && typeof previousProviderResponse.render === "object"
+          ? previousProviderResponse.render as JsonRecord
+          : {};
+      const phase = previousRender.phase === "generation" ? "generation" : "render";
 
       const statusResult = await fetchProvider(
         providerEndpoint,
@@ -447,12 +597,144 @@ serve(async (req) => {
       if (!statusResult.ok) return jsonResponse({ error: statusResult.error }, statusResult.status);
 
       const providerStatus = typeof statusResult.payload.status === "string" ? statusResult.payload.status : "processing";
+      const statusPayload = { ...statusResult.payload, phase };
+
+      if (phase === "generation") {
+        if (providerStatus === "failed") {
+          const { data: failedGeneration, error: failedUpdateError } = await supabaseAdmin
+            .from("text_to_video_generations")
+            .update({
+              status: "failed",
+              provider_response: {
+                ...previousProviderResponse,
+                render: statusPayload,
+              },
+              error_message: typeof statusResult.payload.error === "string"
+                ? statusResult.payload.error
+                : "Project generation failed",
+            })
+            .eq("id", generationId)
+            .select("*")
+            .single();
+
+          if (failedUpdateError || !failedGeneration) {
+            return jsonResponse({ error: failedUpdateError?.message || "Failed to update generation status" }, 500);
+          }
+
+          return jsonResponse({ generation: failedGeneration, render: statusPayload });
+        }
+
+        if (providerStatus !== "completed") {
+          const { data: updatedGeneration, error: updateStatusError } = await supabaseAdmin
+            .from("text_to_video_generations")
+            .update({
+              status: "processing",
+              provider_response: {
+                ...previousProviderResponse,
+                render: statusPayload,
+              },
+              error_message: null,
+            })
+            .eq("id", generationId)
+            .select("*")
+            .single();
+
+          if (updateStatusError || !updatedGeneration) {
+            return jsonResponse({ error: updateStatusError?.message || "Failed to update generation status" }, 500);
+          }
+
+          return jsonResponse({ generation: updatedGeneration, render: statusPayload });
+        }
+
+        const providerProjectId =
+          typeof generationRecord.provider_project_id === "string"
+            ? generationRecord.provider_project_id
+            : projectIdFromProviderResponse(previousProviderResponse);
+        if (!providerProjectId) {
+          return jsonResponse({ error: "Video provider project id is missing" }, 500);
+        }
+
+        const projectResult = await fetchProvider(providerEndpoint, providerApiKey, `/api/projects/${providerProjectId}`);
+        if (!projectResult.ok) return jsonResponse({ error: projectResult.error }, projectResult.status);
+
+        const renderResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/renders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: providerProjectId,
+            fps: 30,
+            out_format: "mp4",
+          }),
+        });
+
+        if (!renderResponse.ok) {
+          const { data: failedGeneration, error: failedUpdateError } = await supabaseAdmin
+            .from("text_to_video_generations")
+            .update({
+              status: "failed",
+              provider_project_id: providerProjectId,
+              provider_response: {
+                ...previousProviderResponse,
+                project: projectResult.payload,
+                render: { ...renderResponse.payload, phase: "render" },
+              },
+              error_message: renderResponse.error,
+            })
+            .eq("id", generationId)
+            .select("*")
+            .single();
+
+          if (failedUpdateError || !failedGeneration) {
+            return jsonResponse({ error: failedUpdateError?.message || "Failed to update render status" }, 500);
+          }
+
+          return jsonResponse({ generation: failedGeneration, project: normalizeProviderProjectAssets(providerEndpoint, projectResult.payload), render: { ...renderResponse.payload, phase: "render" } });
+        }
+
+        const providerJobId = typeof renderResponse.payload.job_id === "string" ? renderResponse.payload.job_id : null;
+        const renderPayload = {
+          ...renderResponse.payload,
+          progress: typeof renderResponse.payload.progress === "number" ? renderResponse.payload.progress : 82,
+          message: typeof renderResponse.payload.message === "string" ? renderResponse.payload.message : "Queued render",
+          phase: "render",
+        };
+        const { data: renderGeneration, error: renderUpdateError } = await supabaseAdmin
+          .from("text_to_video_generations")
+          .update({
+            status: "processing",
+            video_url: null,
+            provider_project_id: providerProjectId,
+            provider_job_id: providerJobId,
+            provider_response: {
+              ...previousProviderResponse,
+              project: projectResult.payload,
+              render: renderPayload,
+            },
+            completed_at: null,
+            error_message: null,
+          })
+          .eq("id", generationId)
+          .select("*")
+          .single();
+
+        if (renderUpdateError || !renderGeneration) {
+          return jsonResponse({ error: renderUpdateError?.message || "Failed to start render status tracking" }, 500);
+        }
+
+        return jsonResponse({
+          generation: renderGeneration,
+          project: normalizeProviderProjectAssets(providerEndpoint, projectResult.payload),
+          render: renderPayload,
+        });
+      }
+
       const finalVideoUrl = absoluteProviderUrl(providerEndpoint, statusResult.payload.final_video_url);
       const nextStatus = providerStatus === "completed"
         ? "completed"
         : providerStatus === "failed"
           ? "failed"
           : "processing";
+      const renderStatusPayload = { ...statusResult.payload, phase: "render" };
 
       const { data: updatedGeneration, error: updateStatusError } = await supabaseAdmin
         .from("text_to_video_generations")
@@ -460,15 +742,13 @@ serve(async (req) => {
           status: nextStatus,
           video_url: finalVideoUrl,
           provider_response: {
-            ...(generationRecord.provider_response && typeof generationRecord.provider_response === "object"
-              ? generationRecord.provider_response as JsonRecord
-              : {}),
-            render: statusResult.payload,
+            ...previousProviderResponse,
+            render: renderStatusPayload,
           },
           completed_at: nextStatus === "completed" ? new Date().toISOString() : null,
           error_message: nextStatus === "failed"
-            ? (typeof statusResult.payload.error === "string" ? statusResult.payload.error : "Render failed")
-            : null,
+          ? (typeof statusResult.payload.error === "string" ? statusResult.payload.error : "Render failed")
+          : null,
         })
         .eq("id", generationId)
         .select("*")
@@ -480,7 +760,7 @@ serve(async (req) => {
         }, 500);
       }
 
-      return jsonResponse({ generation: updatedGeneration });
+      return jsonResponse({ generation: updatedGeneration, render: renderStatusPayload });
     }
 
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
@@ -535,17 +815,28 @@ serve(async (req) => {
       }, 500);
     }
 
-    const generatedProjectResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/projects/generate", {
+    const generationRequestBody = {
+      title: title || prompt.slice(0, 60) || "Text to Video",
+      script: prompt,
+      aspect: aspectRatio,
+      voice,
+      caption_theme: captionTheme || (style === "documentary" ? "minimal" : "viral_pop"),
+    };
+    let generatedProjectResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/projects/generate-async", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: title || prompt.slice(0, 60) || "Text to Video",
-        script: prompt,
-        aspect: aspectRatio,
-        voice,
-        caption_theme: captionTheme || (style === "documentary" ? "minimal" : "viral_pop"),
-      }),
+      body: JSON.stringify(generationRequestBody),
     });
+    let usedAsyncGeneration = true;
+
+    if (!generatedProjectResponse.ok && isUnsupportedProviderRoute(generatedProjectResponse)) {
+      usedAsyncGeneration = false;
+      generatedProjectResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/projects/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(generationRequestBody),
+      });
+    }
 
     if (!generatedProjectResponse.ok) {
       await supabaseAdmin
@@ -559,43 +850,101 @@ serve(async (req) => {
       return jsonResponse({ error: generatedProjectResponse.error }, generatedProjectResponse.status);
     }
 
-    const providerProjectId = typeof generatedProjectResponse.payload.id === "string"
-      ? generatedProjectResponse.payload.id
-      : null;
+    const providerProjectId = projectIdFromProviderResponse(generatedProjectResponse.payload);
     if (!providerProjectId) {
+      const providerRaw = typeof generatedProjectResponse.payload.raw === "string"
+        ? generatedProjectResponse.payload.raw
+        : JSON.stringify(generatedProjectResponse.payload);
+      const providerResponseError =
+        providerRaw === "null"
+          ? "Video backend returned JSON null from the generation route. The backend must return the created project object with an id."
+          : "Video provider did not return a project id";
       await supabaseAdmin
         .from("text_to_video_generations")
-        .update({ status: "failed", error_message: "Video provider did not return a project id" })
+        .update({ status: "failed", error_message: providerResponseError })
         .eq("id", insertedGeneration.id);
       await refundCredits(userData.user.id, creditsUsed, "Text to video provider response error - refund");
-      return jsonResponse({ error: "Video provider did not return a project id" }, 500);
+      return jsonResponse({ error: providerResponseError, providerResponse: generatedProjectResponse.payload }, 502);
     }
 
-    const renderResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/renders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        project_id: providerProjectId,
-        fps: 30,
-        out_format: "mp4",
-      }),
-    });
+    if (!usedAsyncGeneration) {
+      const renderResponse = await fetchProvider(providerEndpoint, providerApiKey, "/api/renders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: providerProjectId,
+          fps: 30,
+          out_format: "mp4",
+        }),
+      });
 
-    if (!renderResponse.ok) {
-      await supabaseAdmin
+      if (!renderResponse.ok) {
+        await supabaseAdmin
+          .from("text_to_video_generations")
+          .update({
+            status: "failed",
+            provider_project_id: providerProjectId,
+            provider_response: { project: generatedProjectResponse.payload, render: renderResponse.payload },
+            error_message: renderResponse.error,
+          })
+          .eq("id", insertedGeneration.id);
+        await refundCredits(userData.user.id, creditsUsed, "Text to video render start error - refund");
+        return jsonResponse({ error: renderResponse.error }, renderResponse.status);
+      }
+
+      const providerJobId = typeof renderResponse.payload.job_id === "string" ? renderResponse.payload.job_id : null;
+      const renderPayload = { ...renderResponse.payload, phase: "render" };
+      const { data: generation, error: updateError } = await supabaseAdmin
         .from("text_to_video_generations")
         .update({
-          status: "failed",
+          status: "processing",
+          video_url: null,
           provider_project_id: providerProjectId,
-          provider_response: { project: generatedProjectResponse.payload, render: renderResponse.payload },
-          error_message: renderResponse.error,
+          provider_job_id: providerJobId,
+          provider_response: { project: generatedProjectResponse.payload, render: renderPayload },
+          completed_at: null,
+          error_message: null,
         })
-        .eq("id", insertedGeneration.id);
-      await refundCredits(userData.user.id, creditsUsed, "Text to video render start error - refund");
-      return jsonResponse({ error: renderResponse.error }, renderResponse.status);
+        .eq("id", insertedGeneration.id)
+        .select("*")
+        .single();
+
+      if (updateError || !generation) {
+        await refundCredits(userData.user.id, creditsUsed, "Text to video update failed - refund");
+        return jsonResponse({ error: updateError?.message || "Failed to update video job" }, 500);
+      }
+
+      return jsonResponse({
+        generation,
+        project: normalizeProviderProjectAssets(providerEndpoint, generatedProjectResponse.payload),
+        render: renderPayload,
+        remainingCredits: creditCheck.currentBalance,
+      });
     }
 
-    const providerJobId = typeof renderResponse.payload.job_id === "string" ? renderResponse.payload.job_id : null;
+    const providerGenerationJobId =
+      typeof generatedProjectResponse.payload.generation_job_id === "string"
+        ? generatedProjectResponse.payload.generation_job_id
+        : typeof generatedProjectResponse.payload.job_id === "string"
+          ? generatedProjectResponse.payload.job_id
+          : null;
+    const generatedProject =
+      generatedProjectResponse.payload.project && typeof generatedProjectResponse.payload.project === "object"
+        ? generatedProjectResponse.payload.project as JsonRecord
+        : generatedProjectResponse.payload;
+    const generationProgressPayload = {
+      job_id: providerGenerationJobId,
+      status: typeof generatedProjectResponse.payload.status === "string"
+        ? generatedProjectResponse.payload.status
+        : "queued",
+      progress: typeof generatedProjectResponse.payload.progress === "number"
+        ? generatedProjectResponse.payload.progress
+        : 1,
+      message: typeof generatedProjectResponse.payload.message === "string"
+        ? generatedProjectResponse.payload.message
+        : "Queued generation",
+      phase: "generation",
+    };
 
     const { data: generation, error: updateError } = await supabaseAdmin
       .from("text_to_video_generations")
@@ -603,8 +952,8 @@ serve(async (req) => {
         status: "processing",
         video_url: null,
         provider_project_id: providerProjectId,
-        provider_job_id: providerJobId,
-        provider_response: { project: generatedProjectResponse.payload, render: renderResponse.payload },
+        provider_job_id: providerGenerationJobId,
+        provider_response: { project: generatedProject, render: generationProgressPayload },
         completed_at: null,
         error_message: null,
       })
@@ -621,8 +970,8 @@ serve(async (req) => {
 
     return jsonResponse({
       generation,
-      project: generatedProjectResponse.payload,
-      render: renderResponse.payload,
+      project: normalizeProviderProjectAssets(providerEndpoint, generatedProject),
+      render: generationProgressPayload,
       remainingCredits: creditCheck.currentBalance,
     });
   } catch (error) {

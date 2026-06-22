@@ -1,19 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { SubscriptionRequiredState } from "@/components/dashboard/SubscriptionRequiredState";
+import { VideoEditorWorkspace } from "@/components/text-to-video/VideoEditorWorkspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -41,31 +37,16 @@ import {
   type TextToVideoVoice,
 } from "@/lib/textToVideo";
 import {
-  Captions,
-  Download,
   Edit3,
   Film,
-  ImagePlus,
-  Layers,
   Loader2,
   Menu,
   Monitor,
-  MousePointer2,
-  Plus,
-  RefreshCw,
-  Save,
-  Scissors,
-  Search,
   Smartphone,
   Sparkles,
   Square,
   Trash2,
-  Type,
-  Video,
-  Volume2,
   Wand2,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 
 interface UserCredits {
@@ -85,47 +66,65 @@ interface GenerateVideoResponse {
   message?: string;
 }
 
+interface UploadMediaResponse {
+  upload?: {
+    url?: string;
+    media_type?: "image" | "video" | "audio" | string;
+    filename?: string;
+    size?: number;
+    kind?: string;
+  };
+  error?: string;
+  message?: string;
+}
+
 interface LibraryItem {
   id?: string | number;
+  type?: "image" | "video" | "audio" | string;
   title?: string;
   url?: string;
   image_url?: string;
   video_url?: string;
+  thumb?: string;
   preview_url?: string;
   previewURL?: string;
   webformatURL?: string;
+  source_url?: string;
   tags?: string;
 }
-
-const EFFECTS = ["shake", "rgb_split", "glitch", "blur_reveal", "vignette", "film_burn", "flash", "speed_ramp"];
-const ANIMATIONS = ["ken_burns_in", "ken_burns_out", "punch_in", "slow_pan", "none"];
-const TRANSITIONS = ["fade", "flash", "zoom", "swipe"];
-const CAPTION_PRESETS = ["viral_pop", "hormozi", "mrbeast", "minimal", "subtitle"];
-const CAPTION_FONTS = ["bold_sans", "display", "narrow", "mono", "serif"];
-const CAPTION_POSITIONS = ["top", "middle", "bottom"];
-const CAPTION_BACKGROUNDS = ["none", "accent_box", "dark_box"];
-const CAPTION_ANIMATIONS = ["pop", "fade", "slide", "none"];
 
 const makeId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID().replace(/-/g, "")
     : Math.random().toString(16).slice(2);
 
-const formatSeconds = (value: number) => `${Math.max(0, Number(value) || 0).toFixed(1)}s`;
-
 const mediaUrlFromLibraryItem = (item: LibraryItem) =>
-  item.video_url || item.image_url || item.url || item.webformatURL || item.preview_url || item.previewURL || "";
+  item.video_url || item.image_url || item.url || item.webformatURL || item.preview_url || item.previewURL || item.thumb || "";
 
-const previewFrameClass = (aspect: TextToVideoAspect) => {
-  if (aspect === "9:16") return "aspect-[9/16] max-w-sm";
-  if (aspect === "1:1") return "aspect-square max-w-lg";
-  return "aspect-video max-w-4xl";
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object";
+
+const clampPercent = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
+
+const renderStateFromGeneration = (generation: TextToVideoGeneration | null | undefined) => {
+  const render = isRecord(generation?.provider_response?.render) ? generation.provider_response.render : {};
+  const progress = typeof render.progress === "number"
+    ? render.progress
+    : generation?.status === "completed"
+      ? 100
+      : generation?.status === "processing"
+        ? 5
+        : 0;
+  const message = typeof render.message === "string"
+    ? render.message
+    : generation?.status === "completed"
+      ? "Completed"
+      : generation?.status === "failed"
+        ? generation.error_message || "Failed"
+        : "Processing";
+  const status = typeof render.status === "string" ? render.status : generation?.status || "queued";
+  return { progress: clampPercent(progress), message, status };
 };
-
-const clipStyle = (start: number, duration: number, total: number) => ({
-  left: `${Math.max(0, (start / Math.max(total, 0.1)) * 100)}%`,
-  width: `${Math.max(3, (duration / Math.max(total, 0.1)) * 100)}%`,
-});
 
 const TextToVideo = () => {
   const { user, subscription, loading } = useAuth();
@@ -145,17 +144,20 @@ const TextToVideo = () => {
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [renderJob, setRenderJob] = useState<TextToVideoRenderJob | null>(null);
   const [renderSettings, setRenderSettings] = useState({ fps: 30, outFormat: "mp4" });
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [generationProgressMessage, setGenerationProgressMessage] = useState("");
   const [libraryQuery, setLibraryQuery] = useState("");
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
   const [isSearchingLibrary, setIsSearchingLibrary] = useState(false);
   const [newLayer, setNewLayer] = useState({
-    type: "image" as TextToVideoTimelineLayer["type"],
+    type: "video" as TextToVideoTimelineLayer["type"],
     url: "",
     start: 0,
     duration: 3,
   });
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [timelineZoom, setTimelineZoom] = useState(48);
+  const pollingGenerationRef = useRef<string | null>(null);
   const [formData, setFormData] = useState({
     title: "",
     prompt: "",
@@ -180,28 +182,22 @@ const TextToVideo = () => {
     () => project?.timeline_layers?.find((layer) => layer.id === selectedLayerId) ?? null,
     [project?.timeline_layers, selectedLayerId],
   );
-  const timelineDuration = useMemo(() => {
-    const layerEnd = Math.max(
-      0,
-      ...((project?.timeline_layers ?? []).map((layer) => (Number(layer.start) || 0) + (Number(layer.duration) || 0)))
-    );
-    return Math.max(1, Number(project?.total_duration) || 0, layerEnd);
-  }, [project?.timeline_layers, project?.total_duration]);
-  const sceneTimeline = useMemo(() => {
-    let cursor = 0;
-    return (project?.scenes ?? []).map((scene) => {
-      const start = cursor;
-      const duration = Number(scene.duration) || 0.1;
-      cursor += duration;
-      return { scene, start, duration };
-    });
-  }, [project?.scenes]);
-  const timelineTicks = useMemo(() => {
-    const step = timelineDuration > 90 ? 10 : timelineDuration > 35 ? 5 : 2;
-    const count = Math.floor(timelineDuration / step) + 1;
-    return Array.from({ length: count + 1 }, (_, index) => Math.min(index * step, timelineDuration));
-  }, [timelineDuration]);
-  const timelineWidth = Math.max(960, Math.ceil(timelineDuration * timelineZoom));
+  const activeGenerationRenderState = useMemo(
+    () => renderStateFromGeneration(activeGeneration),
+    [activeGeneration],
+  );
+  const visibleGenerationProgress = isGenerating
+    ? generationProgress
+    : activeGeneration?.status === "processing" || activeGeneration?.status === "completed"
+      ? activeGenerationRenderState.progress
+      : 0;
+  const visibleGenerationMessage = isGenerating
+    ? generationProgressMessage || generationStep || "Processing"
+    : activeGeneration?.status === "processing" || activeGeneration?.status === "completed"
+      ? activeGenerationRenderState.message
+      : "";
+  const shouldShowGenerationProgress =
+    isGenerating || activeGeneration?.status === "processing" || activeGeneration?.status === "completed";
 
   const getSessionWithRefresh = useCallback(async (forceRefresh = false) => {
     const {
@@ -254,13 +250,61 @@ const TextToVideo = () => {
     return { data: parsed, error: null as string | null };
   }, [getSessionWithRefresh]);
 
+  const uploadProjectMedia = useCallback(async (file: File, kind: "image" | "video" | "audio" = "video", forceSessionRefresh = false) => {
+    const session = await getSessionWithRefresh(forceSessionRefresh);
+    if (!session?.access_token) throw new Error("Your session expired. Please sign in again.");
+
+    const formData = new FormData();
+    formData.append("action", "uploadMedia");
+    formData.append("kind", kind);
+    formData.append("file", file);
+
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-video`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: formData,
+    });
+
+    const raw = await response.text();
+    let parsed: UploadMediaResponse | null = null;
+    try {
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch {
+      parsed = null;
+    }
+
+    if (response.status === 401 && !forceSessionRefresh) {
+      return uploadProjectMedia(file, kind, true);
+    }
+
+    if (!response.ok) {
+      return { data: null, error: parsed?.error || parsed?.message || raw || `Upload failed with status ${response.status}` };
+    }
+
+    return { data: parsed, error: null as string | null };
+  }, [getSessionWithRefresh]);
+
   const startStepFlow = useCallback(() => {
-    const steps = ["Splitting scenes", "Generating voiceover", "Aligning captions", "Finding visuals", "Rendering draft", "Finalizing"];
+    const steps = [
+      { label: "Splitting scenes", progress: 8 },
+      { label: "Generating voiceover", progress: 22 },
+      { label: "Aligning captions", progress: 38 },
+      { label: "Finding Pixabay videos", progress: 52 },
+      { label: "Starting render", progress: 64 },
+      { label: "Rendering draft", progress: 72 },
+    ];
     let index = 0;
-    setGenerationStep(steps[index]);
+    setGenerationStep(steps[index].label);
+    setGenerationProgressMessage(steps[index].label);
+    setGenerationProgress(steps[index].progress);
     return window.setInterval(() => {
       index = Math.min(steps.length - 1, index + 1);
-      setGenerationStep(steps[index]);
+      setGenerationStep(steps[index].label);
+      setGenerationProgressMessage(steps[index].label);
+      setGenerationProgress(steps[index].progress);
     }, 4500);
   }, []);
 
@@ -308,20 +352,41 @@ const TextToVideo = () => {
   }, [invokeGenerateVideo, navigate, toast]);
 
   const pollGenerationStatus = useCallback(async (generationId: string) => {
+    pollingGenerationRef.current = generationId;
     for (let attempt = 0; attempt < 60; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, attempt < 6 ? 5000 : 10000));
+      if (attempt > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, attempt < 6 ? 5000 : 10000));
+      }
       const { data, error } = await invokeGenerateVideo({ action: "status", generationId });
       if (error || !data?.generation) continue;
 
       setHistory((previous) => previous.map((item) => (item.id === data.generation?.id ? data.generation : item)));
-      setActiveGeneration((previous) => (previous?.id === data.generation?.id ? data.generation : previous));
+      setActiveGeneration((previous) => (!previous || previous.id === data.generation?.id ? data.generation : previous));
+      const renderState = renderStateFromGeneration(data.generation);
+      setGenerationProgress(renderState.progress);
+      setGenerationProgressMessage(renderState.message);
+      if (data.project) {
+        const normalized = normalizeTextToVideoProject(data.project);
+        setProject((previous) => (!previous || previous.id === normalized.id ? normalized : previous));
+        setSelectedSceneId((previous) => previous ?? normalized.scenes[0]?.id ?? null);
+      }
+      if (data.render) {
+        setRenderJob(data.render);
+      } else if (isRecord(data.generation.provider_response?.render)) {
+        setRenderJob(data.generation.provider_response.render as unknown as TextToVideoRenderJob);
+      }
 
       if (data.generation.status === "completed") {
+        setGenerationProgress(100);
+        setGenerationProgressMessage("Completed");
+        pollingGenerationRef.current = null;
         toast({ title: "Video ready", description: "Your text-to-video render is complete." });
         return;
       }
 
       if (data.generation.status === "failed") {
+        setGenerationProgressMessage(data.generation.error_message || "Failed");
+        pollingGenerationRef.current = null;
         toast({
           title: "Video render failed",
           description: data.generation.error_message || "The video backend could not complete this render.",
@@ -330,6 +395,7 @@ const TextToVideo = () => {
         return;
       }
     }
+    pollingGenerationRef.current = null;
   }, [invokeGenerateVideo, toast]);
 
   useEffect(() => {
@@ -340,6 +406,17 @@ const TextToVideo = () => {
     void fetchCredits();
     void fetchHistory();
   }, [fetchCredits, fetchHistory]);
+
+  useEffect(() => {
+    if (loading || !hasAccess) return;
+    const processing = history.find((item) => item.status === "processing");
+    if (!processing || pollingGenerationRef.current === processing.id) return;
+    setActiveGeneration((previous) => previous ?? processing);
+    const renderState = renderStateFromGeneration(processing);
+    setGenerationProgress(renderState.progress);
+    setGenerationProgressMessage(renderState.message);
+    void pollGenerationStatus(processing.id);
+  }, [hasAccess, history, loading, pollGenerationStatus]);
 
   useEffect(() => {
     if (!loading && hasAccess && projectId) {
@@ -388,7 +465,11 @@ const TextToVideo = () => {
         setProject(normalized);
         setSelectedSceneId(normalized.scenes[0]?.id ?? null);
       }
-      if (data.render) setRenderJob(data.render);
+      if (data.render) {
+        setRenderJob(data.render);
+        setGenerationProgress(clampPercent(data.render.progress ?? 65));
+        setGenerationProgressMessage(data.render.message || "Rendering draft");
+      }
       setUserCredits((previous) => ({
         ai_credits_balance: data.remainingCredits ?? previous.ai_credits_balance - data.generation!.credits_used,
         ai_credits_used: previous.ai_credits_used + data.generation!.credits_used,
@@ -396,6 +477,8 @@ const TextToVideo = () => {
       toast({ title: "Video job started", description: `${data.generation.credits_used} AI credits used for this request.` });
       if (data.generation.status === "processing") void pollGenerationStatus(data.generation.id);
     } catch (error) {
+      setGenerationProgress(0);
+      setGenerationProgressMessage("");
       toast({
         title: "Unable to generate video",
         description: error instanceof Error ? error.message : "Make sure the text-to-video service and Edge Function are configured.",
@@ -410,16 +493,17 @@ const TextToVideo = () => {
 
   const deleteProject = async (generation: TextToVideoGeneration) => {
     const providerProjectId = projectIdFromGeneration(generation);
-    if (!providerProjectId) {
-      toast({ title: "Unable to delete project", description: "This generation has no provider project id.", variant: "destructive" });
-      return;
-    }
 
     try {
-      const { error } = await invokeGenerateVideo({ action: "deleteProject", projectId: providerProjectId });
+      const { error } = await invokeGenerateVideo({
+        action: "deleteProject",
+        generationId: generation.id,
+        projectId: providerProjectId,
+      });
       if (error) throw new Error(error);
       setHistory((previous) => previous.filter((item) => item.id !== generation.id));
       if (project?.id === providerProjectId) setProject(null);
+      if (activeGeneration?.id === generation.id) setActiveGeneration(null);
       toast({ title: "Project deleted" });
     } catch (error) {
       toast({
@@ -540,11 +624,11 @@ const TextToVideo = () => {
     await saveProjectPatch({ timeline_layers }, "Timeline layer removed");
   };
 
-  const searchLibrary = async () => {
+  const searchLibrary = async (mediaType: "image" | "video" = "video") => {
     if (!libraryQuery.trim()) return;
     setIsSearchingLibrary(true);
     try {
-      const { data, error } = await invokeGenerateVideo({ action: "librarySearch", q: libraryQuery, type: "image" });
+      const { data, error } = await invokeGenerateVideo({ action: "librarySearch", q: libraryQuery, type: mediaType });
       if (error) throw new Error(error);
       setLibraryItems(data?.items ?? []);
     } catch (error) {
@@ -562,7 +646,8 @@ const TextToVideo = () => {
     if (!selectedScene) return;
     const url = mediaUrlFromLibraryItem(item);
     if (!url) return;
-    updateSceneLocal(selectedScene.id, { image_url: url, video_url: null });
+    const isVideo = item.type === "video" || Boolean(item.video_url);
+    updateSceneLocal(selectedScene.id, isVideo ? { video_url: item.video_url || item.url || url, image_url: null } : { image_url: item.image_url || item.url || url, video_url: null });
     await saveScenes("Scene visual saved");
   };
 
@@ -645,12 +730,14 @@ const TextToVideo = () => {
   if (loading) return null;
 
   return (
-    <div className="min-h-screen bg-background">
-      <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
-      <main className="min-h-screen p-4 lg:p-8">
-        <button onClick={() => setSidebarOpen(true)} className="lg:hidden mb-4 p-2 rounded-lg glass" aria-label="Open menu">
-          <Menu className="h-6 w-6" />
-        </button>
+    <div className={`min-h-screen ${isEditorRoute ? "bg-[#111014]" : "bg-background"}`}>
+      {!isEditorRoute && <DashboardSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />}
+      <main className={isEditorRoute ? "min-h-screen" : "min-h-screen p-4 lg:p-8"}>
+        {!isEditorRoute && (
+          <button onClick={() => setSidebarOpen(true)} className="lg:hidden mb-4 p-2 rounded-lg glass" aria-label="Open menu">
+            <Menu className="h-6 w-6" />
+          </button>
+        )}
 
         {!hasAccess ? (
           <SubscriptionRequiredState
@@ -658,7 +745,8 @@ const TextToVideo = () => {
             description="Text to video is available on Basic, Pro, and Advanced plans."
           />
         ) : (
-          <div className="mx-auto max-w-none space-y-6">
+          <div className={isEditorRoute ? "max-w-none" : "mx-auto max-w-none space-y-6"}>
+            {!isEditorRoute && (
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
                 <Badge variant="outline" className="mb-3">{TEXT_TO_VIDEO_COST_PER_10_SECONDS} credits / 10 seconds</Badge>
@@ -679,6 +767,7 @@ const TextToVideo = () => {
                 </CardContent>
               </Card>
             </div>
+            )}
 
             <div className="space-y-6">
               {!isEditorRoute && (
@@ -742,6 +831,15 @@ const TextToVideo = () => {
                           {isGenerating ? generationStep || "Generating" : "Generate"}
                         </Button>
                       </div>
+                      {shouldShowGenerationProgress && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{visibleGenerationMessage || "Processing"}</span>
+                            <span>{visibleGenerationProgress}%</span>
+                          </div>
+                          <Progress value={visibleGenerationProgress} className="h-2" />
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -754,38 +852,50 @@ const TextToVideo = () => {
                   <CardContent className="space-y-3">
                     {history.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Generated projects will appear here.</div>
-                    ) : history.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`w-full rounded-lg border p-3 text-left transition-colors ${activeGeneration?.id === item.id ? "border-primary bg-primary/10" : "border-border hover:border-primary/40"}`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="line-clamp-2 text-sm font-medium">{item.prompt}</p>
-                          <Badge variant={item.status === "failed" ? "destructive" : "outline"}>{item.status}</Badge>
+                    ) : history.map((item) => {
+                      const itemRenderState = renderStateFromGeneration(item);
+                      return (
+                        <div
+                          key={item.id}
+                          className={`w-full rounded-lg border p-3 text-left transition-colors ${activeGeneration?.id === item.id ? "border-primary bg-primary/10" : "border-border hover:border-primary/40"}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="line-clamp-2 text-sm font-medium">{item.prompt}</p>
+                            <Badge variant={item.status === "failed" ? "destructive" : "outline"}>{item.status}</Badge>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">{item.duration_seconds}s - {item.aspect_ratio} - {item.credits_used} credits</p>
+                          {(item.status === "processing" || item.status === "completed") && (
+                            <div className="mt-3 space-y-1.5">
+                              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                <span>{itemRenderState.message}</span>
+                                <span>{itemRenderState.progress}%</span>
+                              </div>
+                              <Progress value={itemRenderState.progress} className="h-1.5" />
+                            </div>
+                          )}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                const providerProjectId = projectIdFromGeneration(item);
+                                if (!providerProjectId) {
+                                  toast({ title: "Project unavailable", description: "This project has no editor id.", variant: "destructive" });
+                                  return;
+                                }
+                                navigate(`/dashboard/text-to-video/editor/${providerProjectId}`);
+                              }}
+                            >
+                              <Edit3 className="mr-2 h-4 w-4" />
+                              Edit Timeline
+                            </Button>
+                            <Button size="sm" variant="destructive" onClick={() => void deleteProject(item)}>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </Button>
+                          </div>
                         </div>
-                        <p className="mt-1 text-xs text-muted-foreground">{item.duration_seconds}s - {item.aspect_ratio} - {item.credits_used} credits</p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              const providerProjectId = projectIdFromGeneration(item);
-                              if (!providerProjectId) {
-                                toast({ title: "Project unavailable", description: "This project has no editor id.", variant: "destructive" });
-                                return;
-                              }
-                              navigate(`/dashboard/text-to-video/editor/${providerProjectId}`);
-                            }}
-                          >
-                            <Edit3 className="mr-2 h-4 w-4" />
-                            Edit Timeline
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => void deleteProject(item)}>
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </CardContent>
                 </Card>
               </div>
@@ -804,509 +914,42 @@ const TextToVideo = () => {
                     </CardContent>
                   </Card>
                 ) : (
-                  <>
-                    <Card>
-                      <CardHeader>
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <Input className="h-11 text-lg font-semibold" value={project.title} onChange={(event) => updateProjectLocal({ title: event.target.value })} />
-                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                              <Badge variant="outline">{project.aspect}</Badge>
-                              <span>{project.scenes.length} scenes</span>
-                              <span>{formatSeconds(project.total_duration)}</span>
-                              <span>{project.status}</span>
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" onClick={() => void saveProjectPatch({ title: project.title, aspect: project.aspect }, "Project settings saved")} disabled={isSaving}>
-                              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                              Save
-                            </Button>
-                            {activeVideoUrl && (
-                              <Button variant="outline" asChild>
-                                <a href={activeVideoUrl} target="_blank" rel="noreferrer"><Download className="mr-2 h-4 w-4" />Open Video</a>
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid gap-6 lg:grid-cols-[minmax(260px,0.8fr),1.2fr]">
-                          <div className="space-y-4">
-                            <div className={`mx-auto overflow-hidden rounded-lg border border-border bg-black ${previewFrameClass(project.aspect)}`}>
-                              {activeVideoUrl ? (
-                                <video src={activeVideoUrl} controls className="h-full w-full bg-black object-contain" />
-                              ) : selectedScene?.image_url ? (
-                                <img src={selectedScene.image_url} alt="" className="h-full w-full bg-black object-contain" />
-                              ) : (
-                                <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">Preview</div>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-3 gap-2">
-                              {project.scenes.map((scene) => (
-                                <button
-                                  key={scene.id}
-                                  type="button"
-                                  onClick={() => setSelectedSceneId(scene.id)}
-                                  className={`rounded-lg border p-2 text-left ${selectedScene?.id === scene.id ? "border-primary bg-primary/10" : "border-border"}`}
-                                >
-                                  <div className="mb-2 aspect-video overflow-hidden rounded bg-muted">
-                                    {scene.image_url ? <img src={scene.image_url} alt="" className="h-full w-full object-cover" /> : null}
-                                  </div>
-                                  <p className="truncate text-xs font-medium">Scene {scene.index + 1}</p>
-                                  <p className="text-xs text-muted-foreground">{formatSeconds(scene.duration)}</p>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <Tabs defaultValue="scene" className="min-w-0">
-                            <TabsList className="grid w-full grid-cols-3">
-                              <TabsTrigger value="scene"><Scissors className="mr-2 h-4 w-4" />Scene</TabsTrigger>
-                              <TabsTrigger value="captions"><Captions className="mr-2 h-4 w-4" />Captions</TabsTrigger>
-                              <TabsTrigger value="media"><ImagePlus className="mr-2 h-4 w-4" />Media</TabsTrigger>
-                            </TabsList>
-
-                            <TabsContent value="scene" className="mt-4 space-y-4">
-                              {selectedScene && (
-                                <>
-                                  <div className="grid gap-4 md:grid-cols-2">
-                                    <div className="space-y-2">
-                                      <Label>Duration</Label>
-                                      <Input type="number" min={0.25} step={0.25} value={selectedScene.duration} onChange={(event) => updateSceneLocal(selectedScene.id, { duration: Number(event.target.value) || 0.25 })} />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>Speaker</Label>
-                                      <Select value={selectedScene.speaker ?? "primary"} onValueChange={(value) => updateSceneLocal(selectedScene.id, { speaker: value })}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                          {["primary", "speaker2", "speaker3", "speaker4"].map((speaker) => <SelectItem key={speaker} value={speaker}>{speaker}</SelectItem>)}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2">
-                                    <Label>Scene script</Label>
-                                    <Textarea rows={5} value={selectedScene.script} onChange={(event) => updateSceneLocal(selectedScene.id, { script: event.target.value })} />
-                                  </div>
-                                  <div className="grid gap-4 md:grid-cols-2">
-                                    <div className="space-y-2">
-                                      <Label>Animation</Label>
-                                      <Select value={selectedScene.animation ?? "ken_burns_in"} onValueChange={(value) => updateSceneLocal(selectedScene.id, { animation: value })}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>{ANIMATIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                      </Select>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>Transition</Label>
-                                      <Select value={selectedScene.transition_in ?? "fade"} onValueChange={(value) => updateSceneLocal(selectedScene.id, { transition_in: value })}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>{TRANSITIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-                                  <div className="grid gap-4 md:grid-cols-3">
-                                    <div className="space-y-2">
-                                      <Label>Crop X</Label>
-                                      <Slider value={[selectedScene.crop_x ?? 0]} min={-100} max={100} step={1} onValueChange={([value]) => updateSceneLocal(selectedScene.id, { crop_x: value })} />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>Crop Y</Label>
-                                      <Slider value={[selectedScene.crop_y ?? 0]} min={-100} max={100} step={1} onValueChange={([value]) => updateSceneLocal(selectedScene.id, { crop_y: value })} />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>Zoom</Label>
-                                      <Slider value={[selectedScene.crop_zoom ?? 1]} min={1} max={2.5} step={0.05} onValueChange={([value]) => updateSceneLocal(selectedScene.id, { crop_zoom: value })} />
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2">
-                                    <Label>Effects</Label>
-                                    <div className="grid gap-2 sm:grid-cols-2">
-                                      {EFFECTS.map((effect) => {
-                                        const checked = (selectedScene.effects ?? []).includes(effect);
-                                        return (
-                                          <label key={effect} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm">
-                                            <Checkbox
-                                              checked={checked}
-                                              onCheckedChange={(next) => {
-                                                const effects = new Set(selectedScene.effects ?? []);
-                                                if (next) effects.add(effect);
-                                                else effects.delete(effect);
-                                                updateSceneLocal(selectedScene.id, { effects: [...effects] });
-                                              }}
-                                            />
-                                            {effect}
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                  <Button onClick={() => void saveScenes()} disabled={isSaving}>
-                                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                                    Save Scene
-                                  </Button>
-                                </>
-                              )}
-                            </TabsContent>
-
-                            <TabsContent value="captions" className="mt-4 space-y-4">
-                              <div className="grid gap-4 md:grid-cols-2">
-                                <div className="space-y-2">
-                                  <Label>Preset</Label>
-                                  <Select value={project.caption_style.preset} onValueChange={(value) => void updateCaptionStyle({ preset: value })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>{CAPTION_PRESETS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Font</Label>
-                                  <Select value={project.caption_style.font} onValueChange={(value) => void updateCaptionStyle({ font: value })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>{CAPTION_FONTS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Position</Label>
-                                  <Select value={project.caption_style.position} onValueChange={(value) => void updateCaptionStyle({ position: value })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>{CAPTION_POSITIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Background</Label>
-                                  <Select value={project.caption_style.background} onValueChange={(value) => void updateCaptionStyle({ background: value })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>{CAPTION_BACKGROUNDS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Active color</Label>
-                                  <Input type="color" value={project.caption_style.active_color} onChange={(event) => updateProjectLocal({ caption_style: { ...project.caption_style, active_color: event.target.value } })} onBlur={() => void saveProjectPatch({ caption_style: project.caption_style }, "Caption color saved")} />
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Phrase color</Label>
-                                  <Input type="color" value={project.caption_style.phrase_color} onChange={(event) => updateProjectLocal({ caption_style: { ...project.caption_style, phrase_color: event.target.value } })} onBlur={() => void saveProjectPatch({ caption_style: project.caption_style }, "Caption color saved")} />
-                                </div>
-                              </div>
-                              <div className="grid gap-4 md:grid-cols-3">
-                                <div className="space-y-2">
-                                  <Label>Active size</Label>
-                                  <Input type="number" value={project.caption_style.size_active} onChange={(event) => updateProjectLocal({ caption_style: { ...project.caption_style, size_active: Number(event.target.value) || 72 } })} onBlur={() => void saveProjectPatch({ caption_style: project.caption_style }, "Caption size saved")} />
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Phrase size</Label>
-                                  <Input type="number" value={project.caption_style.size_phrase} onChange={(event) => updateProjectLocal({ caption_style: { ...project.caption_style, size_phrase: Number(event.target.value) || 0 } })} onBlur={() => void saveProjectPatch({ caption_style: project.caption_style }, "Caption size saved")} />
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Stroke</Label>
-                                  <Input type="number" value={project.caption_style.stroke_width} onChange={(event) => updateProjectLocal({ caption_style: { ...project.caption_style, stroke_width: Number(event.target.value) || 0 } })} onBlur={() => void saveProjectPatch({ caption_style: project.caption_style }, "Caption stroke saved")} />
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-4">
-                                <label className="flex items-center gap-2 text-sm"><Switch checked={project.caption_style.uppercase} onCheckedChange={(checked) => void updateCaptionStyle({ uppercase: checked })} />Uppercase</label>
-                                <label className="flex items-center gap-2 text-sm"><Switch checked={project.caption_style.show_phrase} onCheckedChange={(checked) => void updateCaptionStyle({ show_phrase: checked })} />Show phrase</label>
-                                <Select value={project.caption_style.animation} onValueChange={(value) => void updateCaptionStyle({ animation: value })}>
-                                  <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-                                  <SelectContent>{CAPTION_ANIMATIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                </Select>
-                              </div>
-                              <Separator />
-                              <div className="space-y-3">
-                                {(selectedScene?.captions ?? []).map((caption) => (
-                                  <div key={caption.id} className="rounded-lg border border-border p-3">
-                                    <Textarea rows={2} value={caption.text} onChange={(event) => selectedScene && updateCaptionLocal(selectedScene.id, caption.id, { text: event.target.value })} />
-                                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                                      <Input type="number" step="0.05" value={caption.start} onChange={(event) => selectedScene && updateCaptionLocal(selectedScene.id, caption.id, { start: Number(event.target.value) || 0 })} />
-                                      <Input type="number" step="0.05" value={caption.end} onChange={(event) => selectedScene && updateCaptionLocal(selectedScene.id, caption.id, { end: Number(event.target.value) || 0 })} />
-                                      <Select value={caption.style_preset ?? project.caption_style.preset} onValueChange={(value) => selectedScene && updateCaptionLocal(selectedScene.id, caption.id, { style_preset: value })}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>{CAPTION_PRESETS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                              <Button onClick={() => void saveScenes("Captions saved")} disabled={isSaving}>
-                                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                                Save Captions
-                              </Button>
-                            </TabsContent>
-
-                            <TabsContent value="media" className="mt-4 space-y-4">
-                              {selectedScene && (
-                                <>
-                                  <div className="space-y-2">
-                                    <Label>Image URL</Label>
-                                    <Input value={selectedScene.image_url ?? ""} onChange={(event) => updateSceneLocal(selectedScene.id, { image_url: event.target.value })} />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <Label>Video URL</Label>
-                                    <Input value={selectedScene.video_url ?? ""} onChange={(event) => updateSceneLocal(selectedScene.id, { video_url: event.target.value })} />
-                                  </div>
-                                  <Button onClick={() => void saveScenes("Scene media saved")} disabled={isSaving}>
-                                    <Save className="mr-2 h-4 w-4" />Save Media
-                                  </Button>
-                                  <Separator />
-                                  <div className="flex gap-2">
-                                    <Input value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search stock media" onKeyDown={(event) => { if (event.key === "Enter") void searchLibrary(); }} />
-                                    <Button onClick={() => void searchLibrary()} disabled={isSearchingLibrary}>
-                                      {isSearchingLibrary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                                    </Button>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                                    {libraryItems.map((item, index) => {
-                                      const url = mediaUrlFromLibraryItem(item);
-                                      return (
-                                        <button key={`${item.id ?? index}`} type="button" onClick={() => void applyLibraryItemToScene(item)} className="overflow-hidden rounded-lg border border-border text-left">
-                                          {url ? <img src={url} alt="" className="aspect-video w-full object-cover" /> : <div className="aspect-video bg-muted" />}
-                                          <p className="truncate p-2 text-xs">{item.title || item.tags || "Media item"}</p>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </>
-                              )}
-                            </TabsContent>
-
-                          </Tabs>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardHeader>
-                        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                          <div>
-                            <CardTitle className="flex items-center gap-2">
-                              <Layers className="h-5 w-5 text-primary" />
-                              Timeline Editor
-                            </CardTitle>
-                            <CardDescription>Multi-track scene, caption, overlay, and audio editing for the final render.</CardDescription>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setTimelineZoom((value) => Math.max(24, value - 12))}>
-                              <ZoomOut className="h-4 w-4" />
-                            </Button>
-                            <Badge variant="outline">{Math.round(timelineZoom)} px/s</Badge>
-                            <Button variant="outline" size="sm" onClick={() => setTimelineZoom((value) => Math.min(96, value + 12))}>
-                              <ZoomIn className="h-4 w-4" />
-                            </Button>
-                            <Select value={String(renderSettings.fps)} onValueChange={(value) => setRenderSettings((previous) => ({ ...previous, fps: Number(value) }))}>
-                              <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
-                              <SelectContent>{[20, 24, 30, 48, 60, 90].map((fps) => <SelectItem key={fps} value={String(fps)}>{fps} fps</SelectItem>)}</SelectContent>
-                            </Select>
-                            <Select value={renderSettings.outFormat} onValueChange={(value) => setRenderSettings((previous) => ({ ...previous, outFormat: value }))}>
-                              <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
-                              <SelectContent>{["mp4", "webm", "mov", "gif"].map((format) => <SelectItem key={format} value={format}>{format.toUpperCase()}</SelectItem>)}</SelectContent>
-                            </Select>
-                            <Button onClick={() => void renderProject()} disabled={isRendering || isSaving}>
-                              {isRendering ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                              Render
-                            </Button>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-5">
-                        {renderJob && (
-                          <div className="rounded-lg border border-border bg-muted/20 p-4">
-                            <div className="mb-2 flex items-center justify-between gap-3">
-                              <span className="text-sm font-medium">{renderJob.message || renderJob.status}</span>
-                              <Badge variant={renderJob.status === "failed" ? "destructive" : "outline"}>{renderJob.status}</Badge>
-                            </div>
-                            <Progress value={renderJob.progress ?? (renderJob.status === "completed" ? 100 : 0)} />
-                            {renderJob.error && <p className="mt-2 text-sm text-destructive">{renderJob.error}</p>}
-                          </div>
-                        )}
-                        <div className="grid gap-4 xl:grid-cols-[1fr,320px]">
-                          <div className="overflow-hidden rounded-lg border border-border bg-background">
-                            <div className="flex items-center justify-between border-b border-border bg-muted/20 px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm"><MousePointer2 className="mr-2 h-4 w-4" />Select</Button>
-                                <Button variant="outline" size="sm"><Scissors className="mr-2 h-4 w-4" />Split</Button>
-                                <Button variant="outline" size="sm"><Plus className="mr-2 h-4 w-4" />Layer</Button>
-                              </div>
-                              <div className="text-xs text-muted-foreground">{formatSeconds(timelineDuration)} total</div>
-                            </div>
-
-                            <div className="overflow-x-auto">
-                              <div className="relative" style={{ width: `${timelineWidth}px` }}>
-                                <div className="sticky top-0 z-20 h-9 border-b border-border bg-background">
-                                  {timelineTicks.map((tick) => (
-                                    <div key={tick} className="absolute top-0 h-full border-l border-border/70 pl-1 text-[10px] text-muted-foreground" style={{ left: `${(tick / timelineDuration) * 100}%` }}>
-                                      {formatSeconds(tick)}
-                                    </div>
-                                  ))}
-                                </div>
-
-                                <div className="pointer-events-none absolute bottom-0 top-9 z-30 w-px bg-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]" style={{ left: `${selectedScene ? (sceneTimeline.find((item) => item.scene.id === selectedScene.id)?.start ?? 0) / timelineDuration * 100 : 0}%` }}>
-                                  <div className="-ml-2 h-3 w-4 rounded-b bg-primary" />
-                                </div>
-
-                                <div className="space-y-1 p-3">
-                                  <div className="grid grid-cols-[110px,1fr] gap-3">
-                                    <div className="flex h-14 items-center gap-2 text-xs font-medium text-muted-foreground"><Film className="h-4 w-4" />Scenes</div>
-                                    <div className="relative h-14 rounded-md border border-border bg-muted/20">
-                                      {sceneTimeline.map(({ scene, start, duration }) => (
-                                        <button
-                                          key={scene.id}
-                                          type="button"
-                                          onClick={() => setSelectedSceneId(scene.id)}
-                                          className={`absolute top-1 h-12 rounded-md border px-3 text-left text-xs shadow-sm transition-colors ${selectedScene?.id === scene.id ? "border-primary bg-primary/20 text-primary" : "border-cyan-500/30 bg-cyan-500/10 text-foreground"}`}
-                                          style={clipStyle(start, duration, timelineDuration)}
-                                        >
-                                          <p className="truncate font-medium">Scene {scene.index + 1}</p>
-                                          <p className="text-muted-foreground">{formatSeconds(duration)}</p>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  <div className="grid grid-cols-[110px,1fr] gap-3">
-                                    <div className="flex h-12 items-center gap-2 text-xs font-medium text-muted-foreground"><Type className="h-4 w-4" />Captions</div>
-                                    <div className="relative h-12 rounded-md border border-border bg-muted/10">
-                                      {(selectedScene?.captions ?? []).map((caption) => (
-                                        <button
-                                          key={caption.id}
-                                          type="button"
-                                          className="absolute top-1 h-10 rounded-md border border-amber-400/30 bg-amber-400/10 px-2 text-left text-[11px] text-amber-100"
-                                          style={clipStyle(caption.start, Math.max(0.2, caption.end - caption.start), timelineDuration)}
-                                        >
-                                          <span className="line-clamp-1">{caption.text}</span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  {(["video", "image"] as const).map((type) => (
-                                    <div key={type} className="grid grid-cols-[110px,1fr] gap-3">
-                                      <div className="flex h-12 items-center gap-2 text-xs font-medium text-muted-foreground">
-                                        {type === "video" ? <Video className="h-4 w-4" /> : <ImagePlus className="h-4 w-4" />}
-                                        {type === "video" ? "Video" : "Images"}
-                                      </div>
-                                      <div className="relative h-12 rounded-md border border-border bg-muted/10">
-                                        {(project.timeline_layers ?? []).filter((layer) => layer.type === type).map((layer) => (
-                                          <button
-                                            key={layer.id}
-                                            type="button"
-                                            onClick={() => setSelectedLayerId(layer.id)}
-                                            className={`absolute top-1 h-10 rounded-md border px-2 text-left text-[11px] transition-colors ${selectedLayerId === layer.id ? "border-primary bg-primary/20 text-primary" : "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"}`}
-                                            style={clipStyle(layer.start, layer.duration, timelineDuration)}
-                                          >
-                                            <span className="line-clamp-1">{layer.url}</span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ))}
-
-                                  <div className="grid grid-cols-[110px,1fr] gap-3">
-                                    <div className="flex h-12 items-center gap-2 text-xs font-medium text-muted-foreground"><Volume2 className="h-4 w-4" />Audio</div>
-                                    <div className="relative h-12 rounded-md border border-border bg-muted/10">
-                                      {(project.timeline_layers ?? []).filter((layer) => layer.type === "audio").map((layer) => (
-                                        <button
-                                          key={layer.id}
-                                          type="button"
-                                          onClick={() => setSelectedLayerId(layer.id)}
-                                          className={`absolute top-1 h-10 rounded-md border px-2 text-left text-[11px] transition-colors ${selectedLayerId === layer.id ? "border-primary bg-primary/20 text-primary" : "border-fuchsia-400/30 bg-fuchsia-400/10 text-fuchsia-100"}`}
-                                          style={clipStyle(layer.start, layer.duration, timelineDuration)}
-                                        >
-                                          <span className="line-clamp-1">{layer.url}</span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="grid gap-3 border-t border-border bg-muted/10 p-3 md:grid-cols-[120px,1fr,90px,90px,auto]">
-                              <Select value={newLayer.type} onValueChange={(value: TextToVideoTimelineLayer["type"]) => setNewLayer((previous) => ({ ...previous, type: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="image">Image</SelectItem>
-                                  <SelectItem value="video">Video</SelectItem>
-                                  <SelectItem value="audio">Audio</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <Input value={newLayer.url} onChange={(event) => setNewLayer((previous) => ({ ...previous, url: event.target.value }))} placeholder="Layer media URL or /api/storage path" />
-                              <Input type="number" min={0} step={0.25} value={newLayer.start} onChange={(event) => setNewLayer((previous) => ({ ...previous, start: Number(event.target.value) || 0 }))} />
-                              <Input type="number" min={0.25} step={0.25} value={newLayer.duration} onChange={(event) => setNewLayer((previous) => ({ ...previous, duration: Number(event.target.value) || 0.25 }))} />
-                              <Button onClick={() => void addLayer()}><Plus className="mr-2 h-4 w-4" />Add</Button>
-                            </div>
-                          </div>
-
-                          <div className="rounded-lg border border-border bg-muted/10 p-4">
-                            <div className="mb-4 flex items-center justify-between">
-                              <div>
-                                <p className="text-sm font-semibold">Inspector</p>
-                                <p className="text-xs text-muted-foreground">{selectedLayer ? selectedLayer.type : selectedScene ? `Scene ${selectedScene.index + 1}` : "Select a clip"}</p>
-                              </div>
-                              {selectedLayer && (
-                                <Button variant="ghost" size="icon" onClick={() => void removeLayer(selectedLayer.id)} aria-label="Remove selected layer">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-
-                            {selectedLayer ? (
-                              <div className="space-y-3">
-                                <div className="space-y-2">
-                                  <Label>Source</Label>
-                                  <Input value={selectedLayer.url} onChange={(event) => updateProjectLocal({ timeline_layers: (project.timeline_layers ?? []).map((item) => item.id === selectedLayer.id ? { ...item, url: event.target.value } : item) })} onBlur={(event) => void updateLayer(selectedLayer.id, { url: event.target.value })} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div className="space-y-2">
-                                    <Label>Start</Label>
-                                    <Input type="number" step={0.25} value={selectedLayer.start} onChange={(event) => updateProjectLocal({ timeline_layers: (project.timeline_layers ?? []).map((item) => item.id === selectedLayer.id ? { ...item, start: Number(event.target.value) || 0 } : item) })} onBlur={(event) => void updateLayer(selectedLayer.id, { start: Number(event.target.value) || 0 })} />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <Label>Duration</Label>
-                                    <Input type="number" step={0.25} value={selectedLayer.duration} onChange={(event) => updateProjectLocal({ timeline_layers: (project.timeline_layers ?? []).map((item) => item.id === selectedLayer.id ? { ...item, duration: Number(event.target.value) || 0.25 } : item) })} onBlur={(event) => void updateLayer(selectedLayer.id, { duration: Math.max(0.25, Number(event.target.value) || 0.25) })} />
-                                  </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div className="space-y-2">
-                                    <Label>Volume</Label>
-                                    <Input type="number" step={0.05} disabled={selectedLayer.type !== "audio"} value={selectedLayer.volume} onChange={(event) => updateProjectLocal({ timeline_layers: (project.timeline_layers ?? []).map((item) => item.id === selectedLayer.id ? { ...item, volume: Number(event.target.value) || 0 } : item) })} onBlur={(event) => void updateLayer(selectedLayer.id, { volume: Number(event.target.value) || 0 })} />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <Label>Opacity</Label>
-                                    <Input type="number" step={0.05} disabled={selectedLayer.type === "audio"} value={selectedLayer.opacity} onChange={(event) => updateProjectLocal({ timeline_layers: (project.timeline_layers ?? []).map((item) => item.id === selectedLayer.id ? { ...item, opacity: Number(event.target.value) || 0 } : item) })} onBlur={(event) => void updateLayer(selectedLayer.id, { opacity: Number(event.target.value) || 0 })} />
-                                  </div>
-                                </div>
-                              </div>
-                            ) : selectedScene ? (
-                              <div className="space-y-3">
-                                <div className="space-y-2">
-                                  <Label>Scene script</Label>
-                                  <Textarea rows={5} value={selectedScene.script} onChange={(event) => updateSceneLocal(selectedScene.id, { script: event.target.value })} onBlur={() => void saveScenes("Scene saved")} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div className="space-y-2">
-                                    <Label>Duration</Label>
-                                    <Input type="number" min={0.25} step={0.25} value={selectedScene.duration} onChange={(event) => updateSceneLocal(selectedScene.id, { duration: Number(event.target.value) || 0.25 })} onBlur={() => void saveScenes("Scene timing saved")} />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <Label>Animation</Label>
-                                    <Select value={selectedScene.animation ?? "ken_burns_in"} onValueChange={(value) => updateSceneLocal(selectedScene.id, { animation: value })}>
-                                      <SelectTrigger><SelectValue /></SelectTrigger>
-                                      <SelectContent>{ANIMATIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-                                    </Select>
-                                  </div>
-                                </div>
-                                <Button onClick={() => void saveScenes()} disabled={isSaving}>
-                                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                                  Save Scene
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Select a clip on the timeline.</div>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </>
+                  <VideoEditorWorkspace
+                    project={project}
+                    selectedScene={selectedScene}
+                    selectedSceneId={selectedSceneId}
+                    selectedLayer={selectedLayer}
+                    selectedLayerId={selectedLayerId}
+                    activeVideoUrl={activeVideoUrl}
+                    renderJob={renderJob}
+                    renderSettings={renderSettings}
+                    timelineZoom={timelineZoom}
+                    isSaving={isSaving}
+                    isRendering={isRendering}
+                    libraryQuery={libraryQuery}
+                    libraryItems={libraryItems}
+                    isSearchingLibrary={isSearchingLibrary}
+                    newLayer={newLayer}
+                    setSelectedSceneId={setSelectedSceneId}
+                    setSelectedLayerId={setSelectedLayerId}
+                    setRenderSettings={setRenderSettings}
+                    setTimelineZoom={setTimelineZoom}
+                    setLibraryQuery={setLibraryQuery}
+                    setNewLayer={setNewLayer}
+                    updateProjectLocal={updateProjectLocal}
+                    updateSceneLocal={updateSceneLocal}
+                    updateCaptionLocal={updateCaptionLocal}
+                    updateCaptionStyle={updateCaptionStyle}
+                    saveProjectPatch={saveProjectPatch}
+                    saveScenes={saveScenes}
+                    updateLayer={updateLayer}
+                    removeLayer={removeLayer}
+                    addLayer={addLayer}
+                    searchLibrary={searchLibrary}
+                    applyLibraryItemToScene={applyLibraryItemToScene}
+                    uploadProjectMedia={uploadProjectMedia}
+                    renderProject={renderProject}
+                  />
                 )}
               </div>
               )}

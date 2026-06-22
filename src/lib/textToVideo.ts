@@ -206,7 +206,17 @@ export function estimateTextToVideoDurationSeconds(script: string) {
 }
 
 export function projectIdFromGeneration(generation: TextToVideoGeneration | null | undefined) {
-  return generation?.provider_project_id || generation?.provider_response?.project?.id || null;
+  const providerResponse = generation?.provider_response as
+    | { id?: string | null; project_id?: string | null; project?: { id?: string | null } | null }
+    | null
+    | undefined;
+  return (
+    generation?.provider_project_id ||
+    providerResponse?.project?.id ||
+    providerResponse?.project_id ||
+    providerResponse?.id ||
+    null
+  );
 }
 
 export function normalizeTextToVideoProject(project: TextToVideoProject): TextToVideoProject {
