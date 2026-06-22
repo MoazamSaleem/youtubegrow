@@ -68,6 +68,7 @@ class _Cursor:
 
     async def _fetch(self):
         def _run():
+            local_rows = self._load_local()
             try:
                 q = _sb.table(self.table).select("*")
                 for k, v in self.filt.items():
@@ -76,16 +77,18 @@ class _Cursor:
                     q = q.order(self._order_by, desc=self._order_desc)
                 if self._limit is not None:
                     q = q.limit(self._limit)
-                return q.execute().data or []
+                rows = q.execute().data or []
             except Exception:
-                rows = self._load_local()
-                for k, v in self.filt.items():
-                    rows = [row for row in rows if row.get(k) == v]
-                if self._order_by:
-                    rows = sorted(rows, key=lambda row: row.get(self._order_by), reverse=self._order_desc)
-                if self._limit is not None:
-                    rows = rows[: self._limit]
-                return rows
+                rows = []
+            if not rows:
+                rows = local_rows
+            for k, v in self.filt.items():
+                rows = [row for row in rows if row.get(k) == v]
+            if self._order_by:
+                rows = sorted(rows, key=lambda row: row.get(self._order_by), reverse=self._order_desc)
+            if self._limit is not None:
+                rows = rows[: self._limit]
+            return rows
 
         self._rows = await asyncio.to_thread(_run)
 
@@ -131,12 +134,14 @@ class _Collection:
                 for k, v in filt.items():
                     q = q.eq(k, v)
                 rows = q.limit(1).execute().data or []
-                return rows[0] if rows else None
+                if rows:
+                    return rows[0]
             except Exception:
-                for row in self._load_local():
-                    if all(row.get(k) == v for k, v in filt.items()):
-                        return row
-                return None
+                pass
+            for row in self._load_local():
+                if all(row.get(k) == v for k, v in filt.items()):
+                    return row
+            return None
 
         return await asyncio.to_thread(_run)
 
