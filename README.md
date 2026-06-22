@@ -16,6 +16,10 @@ npm run build
 npm run preview
 ```
 
+## Text-to-video backend
+
+The render backend is in `backend/`. Hostinger KVM deployment steps are in `docs/hostinger-text-to-video.md`.
+
 ## Stack
 
 - React + TypeScript
