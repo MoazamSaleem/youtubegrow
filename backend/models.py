@@ -69,6 +69,10 @@ class CaptionStyle(BaseModel):
     phrase_color: str = "#FFFFFF"
     phrase_opacity: float = 0.55
     position: str = "bottom"      # bottom, middle, top
+    position_x: float = 50.0      # percentage of video width
+    position_y: float = 72.0      # percentage of video height
+    box_width: float = 76.0       # percentage of video width
+    box_height: float = 16.0      # percentage of video height
     size_active: int = 96
     size_phrase: int = 42
     stroke_width: int = 6

@@ -101,6 +101,8 @@ const makeId = () =>
 const mediaUrlFromLibraryItem = (item: LibraryItem) =>
   item.video_url || item.image_url || item.url || item.webformatURL || item.preview_url || item.previewURL || item.thumb || "";
 
+const isVideoUrl = (url: string) => /\.(mp4|mov|webm|m4v)(?:\?|#|$)/i.test(url);
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object";
 
@@ -125,6 +127,33 @@ const renderStateFromGeneration = (generation: TextToVideoGeneration | null | un
   const status = typeof render.status === "string" ? render.status : generation?.status || "queued";
   return { progress: clampPercent(progress), message, status };
 };
+
+const cloneTextToVideoProject = (project: TextToVideoProject) =>
+  normalizeTextToVideoProject(
+    typeof structuredClone === "function"
+      ? structuredClone(project)
+      : JSON.parse(JSON.stringify(project)),
+  );
+
+const editableProjectPatch = (project: TextToVideoProject): Partial<TextToVideoProject> => ({
+  title: project.title,
+  aspect: project.aspect,
+  script: project.script,
+  voice: project.voice,
+  caption_theme: project.caption_theme,
+  caption_style: project.caption_style,
+  scenes: project.scenes,
+  music_url: project.music_url,
+  music_tracks: project.music_tracks,
+  timeline_layers: project.timeline_layers,
+  music_timeline: project.music_timeline,
+  total_duration: project.total_duration,
+  thumbnail_url: project.thumbnail_url,
+  status: project.status,
+  final_video_url: project.final_video_url,
+});
+
+const projectPatchFingerprint = (project: TextToVideoProject) => JSON.stringify(editableProjectPatch(project));
 
 const TextToVideo = () => {
   const { user, subscription, loading } = useAuth();
@@ -158,6 +187,10 @@ const TextToVideo = () => {
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [timelineZoom, setTimelineZoom] = useState(48);
   const pollingGenerationRef = useRef<string | null>(null);
+  const projectRef = useRef<TextToVideoProject | null>(null);
+  const undoStackRef = useRef<TextToVideoProject[]>([]);
+  const redoStackRef = useRef<TextToVideoProject[]>([]);
+  const [projectEditHistory, setProjectEditHistory] = useState({ undo: 0, redo: 0 });
   const [formData, setFormData] = useState({
     title: "",
     prompt: "",
@@ -198,6 +231,34 @@ const TextToVideo = () => {
       : "";
   const shouldShowGenerationProgress =
     isGenerating || activeGeneration?.status === "processing" || activeGeneration?.status === "completed";
+
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
+
+  const syncProjectEditHistory = useCallback(() => {
+    setProjectEditHistory({
+      undo: undoStackRef.current.length,
+      redo: redoStackRef.current.length,
+    });
+  }, []);
+
+  const resetProjectEditHistory = useCallback(() => {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    syncProjectEditHistory();
+  }, [syncProjectEditHistory]);
+
+  const recordProjectSnapshot = useCallback(() => {
+    const currentProject = projectRef.current;
+    if (!currentProject) return;
+    const snapshot = cloneTextToVideoProject(currentProject);
+    const lastSnapshot = undoStackRef.current.at(-1);
+    if (lastSnapshot && projectPatchFingerprint(lastSnapshot) === projectPatchFingerprint(snapshot)) return;
+    undoStackRef.current = [...undoStackRef.current, snapshot].slice(-50);
+    redoStackRef.current = [];
+    syncProjectEditHistory();
+  }, [syncProjectEditHistory]);
 
   const getSessionWithRefresh = useCallback(async (forceRefresh = false) => {
     const {
@@ -337,6 +398,8 @@ const TextToVideo = () => {
   }, [hasAccess, user?.id]);
 
   const loadProjectById = useCallback(async (providerProjectId: string) => {
+    projectRef.current = null;
+    resetProjectEditHistory();
     setProject(null);
     setRenderJob(null);
     const { data, error } = await invokeGenerateVideo({ action: "getProject", projectId: providerProjectId });
@@ -347,9 +410,10 @@ const TextToVideo = () => {
     }
 
     const normalized = normalizeTextToVideoProject(data.project);
+    projectRef.current = normalized;
     setProject(normalized);
     setSelectedSceneId(normalized.scenes[0]?.id ?? null);
-  }, [invokeGenerateVideo, navigate, toast]);
+  }, [invokeGenerateVideo, navigate, resetProjectEditHistory, toast]);
 
   const pollGenerationStatus = useCallback(async (generationId: string) => {
     pollingGenerationRef.current = generationId;
@@ -367,6 +431,9 @@ const TextToVideo = () => {
       setGenerationProgressMessage(renderState.message);
       if (data.project) {
         const normalized = normalizeTextToVideoProject(data.project);
+        if (!projectRef.current || projectRef.current.id === normalized.id) {
+          projectRef.current = normalized;
+        }
         setProject((previous) => (!previous || previous.id === normalized.id ? normalized : previous));
         setSelectedSceneId((previous) => previous ?? normalized.scenes[0]?.id ?? null);
       }
@@ -462,6 +529,8 @@ const TextToVideo = () => {
       setActiveGeneration(data.generation);
       if (data.project) {
         const normalized = normalizeTextToVideoProject(data.project);
+        resetProjectEditHistory();
+        projectRef.current = normalized;
         setProject(normalized);
         setSelectedSceneId(normalized.scenes[0]?.id ?? null);
       }
@@ -502,7 +571,11 @@ const TextToVideo = () => {
       });
       if (error) throw new Error(error);
       setHistory((previous) => previous.filter((item) => item.id !== generation.id));
-      if (project?.id === providerProjectId) setProject(null);
+      if (project?.id === providerProjectId) {
+        projectRef.current = null;
+        resetProjectEditHistory();
+        setProject(null);
+      }
       if (activeGeneration?.id === generation.id) setActiveGeneration(null);
       toast({ title: "Project deleted" });
     } catch (error) {
@@ -515,19 +588,34 @@ const TextToVideo = () => {
   };
 
   const saveProjectPatch = async (patch: Partial<TextToVideoProject>, successTitle = "Project saved") => {
-    if (!project) return null;
+    const currentProject = projectRef.current ?? project;
+    if (!currentProject) return null;
     setIsSaving(true);
     try {
-      const { data, error } = await invokeGenerateVideo({ action: "updateProject", projectId: project.id, patch });
+      const { data, error } = await invokeGenerateVideo({ action: "updateProject", projectId: currentProject.id, patch });
       if (error) throw new Error(error);
       if (!data?.project) throw new Error("Updated project was not returned");
       const normalized = normalizeTextToVideoProject(data.project);
-      setProject(normalized);
-      if (!normalized.scenes.some((scene) => scene.id === selectedSceneId)) {
-        setSelectedSceneId(normalized.scenes[0]?.id ?? null);
+      const definedPatch = Object.fromEntries(
+        Object.entries(patch).filter(([, value]) => value !== undefined),
+      ) as Partial<TextToVideoProject>;
+      const reconciled = normalizeTextToVideoProject({
+        ...normalized,
+        ...definedPatch,
+        caption_style: patch.caption_style
+          ? { ...normalized.caption_style, ...patch.caption_style }
+          : normalized.caption_style,
+        music_timeline: patch.music_timeline
+          ? { ...normalized.music_timeline, ...patch.music_timeline }
+          : normalized.music_timeline,
+      } as TextToVideoProject);
+      projectRef.current = reconciled;
+      setProject(reconciled);
+      if (!reconciled.scenes.some((scene) => scene.id === selectedSceneId)) {
+        setSelectedSceneId(reconciled.scenes[0]?.id ?? null);
       }
       toast({ title: successTitle });
-      return normalized;
+      return reconciled;
     } catch (error) {
       toast({
         title: "Unable to save project",
@@ -540,51 +628,106 @@ const TextToVideo = () => {
     }
   };
 
+  const restoreProjectSnapshot = async (snapshot: TextToVideoProject, successTitle: string) => {
+    const nextProject = cloneTextToVideoProject(snapshot);
+    projectRef.current = nextProject;
+    setProject(nextProject);
+    if (!nextProject.scenes.some((scene) => scene.id === selectedSceneId)) {
+      setSelectedSceneId(nextProject.scenes[0]?.id ?? null);
+    }
+    if (selectedLayerId && !nextProject.timeline_layers?.some((layer) => layer.id === selectedLayerId)) {
+      setSelectedLayerId(null);
+    }
+    await saveProjectPatch(editableProjectPatch(nextProject), successTitle);
+  };
+
+  const undoProject = async () => {
+    const currentProject = projectRef.current ?? project;
+    const previousProject = undoStackRef.current.at(-1);
+    if (!currentProject || !previousProject || isSaving) return;
+    undoStackRef.current = undoStackRef.current.slice(0, -1);
+    redoStackRef.current = [...redoStackRef.current, cloneTextToVideoProject(currentProject)].slice(-50);
+    syncProjectEditHistory();
+    await restoreProjectSnapshot(previousProject, "Undo applied");
+  };
+
+  const redoProject = async () => {
+    const currentProject = projectRef.current ?? project;
+    const nextProject = redoStackRef.current.at(-1);
+    if (!currentProject || !nextProject || isSaving) return;
+    redoStackRef.current = redoStackRef.current.slice(0, -1);
+    undoStackRef.current = [...undoStackRef.current, cloneTextToVideoProject(currentProject)].slice(-50);
+    syncProjectEditHistory();
+    await restoreProjectSnapshot(nextProject, "Redo applied");
+  };
+
   const updateProjectLocal = (patch: Partial<TextToVideoProject>) => {
-    setProject((previous) => (previous ? normalizeTextToVideoProject({ ...previous, ...patch }) : previous));
+    const currentProject = projectRef.current ?? project;
+    if (!currentProject) return;
+    const nextProject = normalizeTextToVideoProject({ ...currentProject, ...patch });
+    projectRef.current = nextProject;
+    setProject(nextProject);
   };
 
   const updateSceneLocal = (sceneId: string, patch: Partial<TextToVideoScene>) => {
-    setProject((previous) => {
-      if (!previous) return previous;
-      const scenes = previous.scenes.map((scene) => (scene.id === sceneId ? { ...scene, ...patch } : scene));
-      const totalDuration = scenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0);
-      return normalizeTextToVideoProject({ ...previous, scenes, total_duration: totalDuration });
-    });
+    const currentProject = projectRef.current ?? project;
+    if (!currentProject) return;
+    const scenes = currentProject.scenes.map((scene) => (scene.id === sceneId ? { ...scene, ...patch } : scene));
+    const totalDuration = scenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0);
+    const nextProject = normalizeTextToVideoProject({ ...currentProject, scenes, total_duration: totalDuration });
+    projectRef.current = nextProject;
+    setProject(nextProject);
   };
 
   const saveScenes = async (successTitle = "Scenes saved") => {
-    if (!project) return;
+    const currentProject = projectRef.current ?? project;
+    if (!currentProject) return;
     await saveProjectPatch({
-      scenes: project.scenes,
-      total_duration: project.scenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0),
-      thumbnail_url: project.scenes.find((scene) => scene.image_url)?.image_url ?? project.thumbnail_url,
+      scenes: currentProject.scenes,
+      total_duration: currentProject.scenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0),
+      thumbnail_url:
+        currentProject.scenes.find((scene) => scene.video_url)?.video_url ??
+        currentProject.scenes.find((scene) => scene.image_url)?.image_url ??
+        currentProject.thumbnail_url,
     }, successTitle);
   };
 
   const updateCaptionLocal = (sceneId: string, captionId: string, patch: Partial<TextToVideoCaption>) => {
-    setProject((previous) => {
-      if (!previous) return previous;
-      return normalizeTextToVideoProject({
-        ...previous,
-        scenes: previous.scenes.map((scene) =>
-          scene.id === sceneId
-            ? {
-                ...scene,
-                captions: (scene.captions ?? []).map((caption) =>
-                  caption.id === captionId ? { ...caption, ...patch } : caption,
-                ),
-              }
-            : scene,
-        ),
-      });
+    const currentProject = projectRef.current ?? project;
+    if (!currentProject) return;
+    const nextProject = normalizeTextToVideoProject({
+      ...currentProject,
+      scenes: currentProject.scenes.map((scene) =>
+        scene.id === sceneId
+          ? {
+              ...scene,
+              captions: (scene.captions ?? []).map((caption) =>
+                caption.id === captionId ? { ...caption, ...patch } : caption,
+              ),
+            }
+          : scene,
+      ),
     });
+    projectRef.current = nextProject;
+    setProject(nextProject);
+  };
+
+  const updateCaptionStyleLocal = (patch: Partial<TextToVideoCaptionStyle>) => {
+    const currentProject = projectRef.current ?? project;
+    if (!currentProject) return;
+    const nextStyle = { ...currentProject.caption_style, ...patch };
+    const nextProject = normalizeTextToVideoProject({ ...currentProject, caption_style: nextStyle });
+    projectRef.current = nextProject;
+    setProject(nextProject);
   };
 
   const updateCaptionStyle = async (patch: Partial<TextToVideoCaptionStyle>) => {
-    if (!project) return;
-    const nextStyle = { ...project.caption_style, ...patch };
-    updateProjectLocal({ caption_style: nextStyle });
+    const currentProject = projectRef.current ?? project;
+    if (!currentProject) return;
+    const nextStyle = { ...currentProject.caption_style, ...patch };
+    const nextProject = normalizeTextToVideoProject({ ...currentProject, caption_style: nextStyle });
+    projectRef.current = nextProject;
+    setProject(nextProject);
     await saveProjectPatch({ caption_style: nextStyle }, "Caption style saved");
   };
 
@@ -604,7 +747,7 @@ const TextToVideo = () => {
     };
     const timeline_layers = [...(project.timeline_layers ?? []), layer];
     updateProjectLocal({ timeline_layers });
-    setNewLayer({ type: "image", url: "", start: 0, duration: 3 });
+    setNewLayer({ type: "video", url: "", start: 0, duration: 3 });
     await saveProjectPatch({ timeline_layers }, "Timeline layer added");
   };
 
@@ -646,7 +789,7 @@ const TextToVideo = () => {
     if (!selectedScene) return;
     const url = mediaUrlFromLibraryItem(item);
     if (!url) return;
-    const isVideo = item.type === "video" || Boolean(item.video_url);
+    const isVideo = item.type === "video" || Boolean(item.video_url) || isVideoUrl(url);
     updateSceneLocal(selectedScene.id, isVideo ? { video_url: item.video_url || item.url || url, image_url: null } : { image_url: item.image_url || item.url || url, video_url: null });
     await saveScenes("Scene visual saved");
   };
@@ -939,6 +1082,7 @@ const TextToVideo = () => {
                     updateProjectLocal={updateProjectLocal}
                     updateSceneLocal={updateSceneLocal}
                     updateCaptionLocal={updateCaptionLocal}
+                    updateCaptionStyleLocal={updateCaptionStyleLocal}
                     updateCaptionStyle={updateCaptionStyle}
                     saveProjectPatch={saveProjectPatch}
                     saveScenes={saveScenes}
@@ -949,6 +1093,11 @@ const TextToVideo = () => {
                     applyLibraryItemToScene={applyLibraryItemToScene}
                     uploadProjectMedia={uploadProjectMedia}
                     renderProject={renderProject}
+                    canUndo={projectEditHistory.undo > 0}
+                    canRedo={projectEditHistory.redo > 0}
+                    undoProject={undoProject}
+                    redoProject={redoProject}
+                    recordProjectSnapshot={recordProjectSnapshot}
                   />
                 )}
               </div>

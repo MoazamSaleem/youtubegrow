@@ -10,6 +10,7 @@ import {
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -51,6 +52,8 @@ import {
   Sparkles,
   Trash2,
   Type,
+  Redo2,
+  Undo2,
   UploadCloud,
   Video,
   Volume2,
@@ -63,6 +66,7 @@ import {
   type TextToVideoAspect,
   type TextToVideoCaption,
   type TextToVideoCaptionStyle,
+  type TextToVideoMusicTimeline,
   type TextToVideoProject,
   type TextToVideoRenderJob,
   type TextToVideoScene,
@@ -134,6 +138,7 @@ interface VideoEditorWorkspaceProps {
   updateProjectLocal: (patch: Partial<TextToVideoProject>) => void;
   updateSceneLocal: (sceneId: string, patch: Partial<TextToVideoScene>) => void;
   updateCaptionLocal: (sceneId: string, captionId: string, patch: Partial<TextToVideoCaption>) => void;
+  updateCaptionStyleLocal: (patch: Partial<TextToVideoCaptionStyle>) => void;
   updateCaptionStyle: (patch: Partial<TextToVideoCaptionStyle>) => Promise<void>;
   saveProjectPatch: (patch: Partial<TextToVideoProject>, successTitle?: string) => Promise<TextToVideoProject | null>;
   saveScenes: (successTitle?: string) => Promise<void>;
@@ -147,6 +152,11 @@ interface VideoEditorWorkspaceProps {
     kind?: "image" | "video" | "audio",
   ) => Promise<{ data: { upload?: UploadMediaResult } | null; error: string | null }>;
   renderProject: () => Promise<void>;
+  canUndo: boolean;
+  canRedo: boolean;
+  undoProject: () => Promise<void>;
+  redoProject: () => Promise<void>;
+  recordProjectSnapshot: () => void;
 }
 
 const EFFECTS = ["shake", "rgb_split", "glitch", "blur_reveal", "vignette", "film_burn", "flash", "speed_ramp"];
@@ -154,11 +164,117 @@ const ANIMATIONS = ["ken_burns_in", "ken_burns_out", "punch_in", "slow_pan", "no
 const TRANSITIONS = ["fade", "flash", "zoom", "swipe"];
 const CAPTION_PRESETS = ["viral_pop", "hormozi", "mrbeast", "minimal", "subtitle"];
 const CAPTION_FONTS = ["bold_sans", "display", "narrow", "mono", "serif"];
-const CAPTION_POSITIONS = ["top", "middle", "bottom"];
+const CAPTION_POSITIONS = ["top", "middle", "bottom", "custom"];
 const CAPTION_BACKGROUNDS = ["none", "accent_box", "dark_box"];
 const CAPTION_ANIMATIONS = ["pop", "fade", "slide", "none"];
+const CAPTION_STYLE_PRESETS: Record<string, Partial<TextToVideoCaptionStyle>> = {
+  viral_pop: {
+    preset: "viral_pop",
+    font: "display",
+    active_color: "#FFD60A",
+    phrase_color: "#FFFFFF",
+    phrase_opacity: 0.55,
+    position: "bottom",
+    position_x: 50,
+    position_y: 72,
+    box_width: 76,
+    box_height: 16,
+    size_active: 96,
+    size_phrase: 42,
+    stroke_width: 6,
+    background: "none",
+    uppercase: true,
+    animation: "pop",
+    show_phrase: true,
+  },
+  hormozi: {
+    preset: "hormozi",
+    font: "display",
+    active_color: "#FFFFFF",
+    phrase_color: "#FFD60A",
+    phrase_opacity: 0.55,
+    position: "middle",
+    position_x: 50,
+    position_y: 52,
+    box_width: 82,
+    box_height: 20,
+    size_active: 110,
+    size_phrase: 56,
+    stroke_width: 10,
+    background: "dark_box",
+    uppercase: true,
+    animation: "pop",
+    show_phrase: false,
+  },
+  mrbeast: {
+    preset: "mrbeast",
+    font: "display",
+    active_color: "#FF3B30",
+    phrase_color: "#FFFFFF",
+    phrase_opacity: 0.55,
+    position: "middle",
+    position_x: 50,
+    position_y: 52,
+    box_width: 84,
+    box_height: 22,
+    size_active: 120,
+    size_phrase: 48,
+    stroke_width: 12,
+    background: "accent_box",
+    uppercase: true,
+    animation: "pop",
+    show_phrase: false,
+  },
+  minimal: {
+    preset: "minimal",
+    font: "bold_sans",
+    active_color: "#FFFFFF",
+    phrase_color: "#FFFFFF",
+    phrase_opacity: 0.55,
+    position: "bottom",
+    position_x: 50,
+    position_y: 76,
+    box_width: 70,
+    box_height: 14,
+    size_active: 72,
+    size_phrase: 36,
+    stroke_width: 4,
+    background: "none",
+    uppercase: false,
+    animation: "fade",
+    show_phrase: false,
+  },
+  subtitle: {
+    preset: "subtitle",
+    font: "bold_sans",
+    active_color: "#FFFFFF",
+    phrase_color: "#FFFFFF",
+    phrase_opacity: 0.55,
+    position: "bottom",
+    position_x: 50,
+    position_y: 84,
+    box_width: 92,
+    box_height: 10,
+    size_active: 54,
+    size_phrase: 0,
+    stroke_width: 3,
+    background: "dark_box",
+    uppercase: false,
+    animation: "none",
+    show_phrase: false,
+  },
+};
+const CAPTION_FONT_STYLES: Record<string, CSSProperties> = {
+  bold_sans: { fontFamily: "Inter, Arial, sans-serif" },
+  display: { fontFamily: "'Arial Black', Impact, sans-serif" },
+  narrow: { fontFamily: "'Arial Narrow', 'Roboto Condensed', Arial, sans-serif" },
+  mono: { fontFamily: "'Courier New', monospace" },
+  serif: { fontFamily: "Georgia, 'Times New Roman', serif" },
+};
 const LABEL_COLUMN_WIDTH = 124;
 const MIN_CLIP_SECONDS = 0.25;
+const MIN_TIMELINE_ZOOM = 24;
+const MAX_TIMELINE_ZOOM = 180;
 const LIBRARY_DRAG_MIME = "application/x-video-editor-library-item";
 
 const makeId = () =>
@@ -218,14 +334,48 @@ const captionBounds = (caption: TextToVideoCaption, sceneStart: number, sceneDur
   return {
     start: looksLocal ? sceneStart + start : start,
     end: looksLocal ? sceneStart + end : end,
+    isLocal: looksLocal,
   };
 };
 
-const captionPositionClass = (position: string) => {
-  if (position === "top") return "top-[12%]";
-  if (position === "middle") return "top-1/2 -translate-y-1/2";
-  return "bottom-[12%]";
+const captionPresetCoordinates = (position: string) => {
+  if (position === "top") return { x: 50, y: 22 };
+  if (position === "middle") return { x: 50, y: 52 };
+  return { x: 50, y: 72 };
 };
+
+const captionCoordinates = (style: TextToVideoCaptionStyle) => {
+  if (style.position === "custom") {
+    return {
+      x: clamp(Number(style.position_x) || 50, 5, 95),
+      y: clamp(Number(style.position_y) || 72, 5, 95),
+    };
+  }
+  return captionPresetCoordinates(style.position);
+};
+
+const captionBoxSize = (style: TextToVideoCaptionStyle) => ({
+  width: clamp(Number(style.box_width) || 76, 12, 95),
+  height: clamp(Number(style.box_height) || 16, 6, 60),
+});
+
+type CaptionInteraction =
+  | {
+      mode: "move";
+      pointerId: number;
+      offsetX: number;
+      offsetY: number;
+      patch: Partial<TextToVideoCaptionStyle>;
+    }
+  | {
+      mode: "resize";
+      pointerId: number;
+      startX: number;
+      startY: number;
+      startBoxWidth: number;
+      startBoxHeight: number;
+      patch: Partial<TextToVideoCaptionStyle>;
+    };
 
 type DragState =
   | {
@@ -243,6 +393,27 @@ type DragState =
       startX: number;
       initialScenes: TextToVideoScene[];
       draftScenes: TextToVideoScene[];
+    }
+  | {
+      kind: "caption";
+      action: "move" | "resize-start" | "resize-end";
+      sceneId: string;
+      captionId: string;
+      startX: number;
+      initialStart: number;
+      initialEnd: number;
+      sceneStart: number;
+      sceneDuration: number;
+      isLocal: boolean;
+      initialScenes: TextToVideoScene[];
+      draftScenes: TextToVideoScene[];
+    }
+  | {
+      kind: "music";
+      action: "move" | "resize-start" | "resize-end";
+      startX: number;
+      initialTimeline: TextToVideoMusicTimeline;
+      draftTimeline: TextToVideoMusicTimeline;
     };
 
 interface PreviewAudioSource {
@@ -323,6 +494,7 @@ export const VideoEditorWorkspace = ({
   updateProjectLocal,
   updateSceneLocal,
   updateCaptionLocal,
+  updateCaptionStyleLocal,
   updateCaptionStyle,
   saveProjectPatch,
   saveScenes,
@@ -333,6 +505,11 @@ export const VideoEditorWorkspace = ({
   applyLibraryItemToScene,
   uploadProjectMedia,
   renderProject,
+  canUndo,
+  canRedo,
+  undoProject,
+  redoProject,
+  recordProjectSnapshot,
 }: VideoEditorWorkspaceProps) => {
   const [activePanel, setActivePanel] = useState<EditorPanel>("text");
   const [playheadTime, setPlayheadTime] = useState(0);
@@ -348,15 +525,25 @@ export const VideoEditorWorkspace = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const dragStateRef = useRef<DragState | null>(null);
+  const captionInteractionRef = useRef<CaptionInteraction | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewFrameRef = useRef<HTMLDivElement | null>(null);
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const playheadTimeRef = useRef(0);
 
   const timelineDuration = useMemo(() => {
     const layerEnd = Math.max(
       0,
       ...((project.timeline_layers ?? []).map((layer) => (Number(layer.start) || 0) + (Number(layer.duration) || 0))),
     );
-    return Math.max(1, Number(project.total_duration) || 0, layerEnd);
-  }, [project.timeline_layers, project.total_duration]);
+    const baseDuration = Number(project.total_duration) || 0;
+    const musicTimeline = project.music_timeline ?? { start: 0, duration: 0 };
+    const musicStart = Number(musicTimeline.start) || 0;
+    const musicEnd = project.music_url
+      ? musicStart + (Number(musicTimeline.duration) || Math.max(0, baseDuration - musicStart))
+      : 0;
+    return Math.max(1, baseDuration, layerEnd, musicEnd);
+  }, [project.music_timeline, project.music_url, project.timeline_layers, project.total_duration]);
 
   const sceneTimeline = useMemo(() => {
     let cursor = 0;
@@ -383,7 +570,7 @@ export const VideoEditorWorkspace = ({
       sceneTimeline.flatMap(({ scene, start, duration }) =>
         (scene.captions ?? []).map((caption) => {
           const bounds = captionBounds(caption, start, duration);
-          return { scene, caption, ...bounds };
+          return { scene, caption, sceneStart: start, sceneDuration: duration, ...bounds };
         }),
       ),
     [sceneTimeline],
@@ -405,6 +592,13 @@ export const VideoEditorWorkspace = ({
   const previewVideoStart = activeVisualLayer?.type === "video" ? activeVisualLayer.start : activeSceneItem?.start ?? 0;
   const previewVideoTrimStart = activeVisualLayer?.type === "video" ? activeVisualLayer.trim_start : 0;
   const previewImageUrl = activeVisualLayer?.type === "image" ? activeVisualLayer.url : previewScene?.image_url ?? null;
+  const captionStyle = project.caption_style;
+  const musicTimeline = project.music_timeline ?? { start: 0, duration: 0, trim_start: 0, trim_end: 0 };
+  const musicStart = clamp(Number(musicTimeline.start) || 0, 0, timelineDuration);
+  const musicDuration = Math.max(
+    MIN_CLIP_SECONDS,
+    Number(musicTimeline.duration) || Math.max(MIN_CLIP_SECONDS, timelineDuration - musicStart),
+  );
   const previewAudioSources = useMemo<PreviewAudioSource[]>(() => {
     const sources: PreviewAudioSource[] = [];
     if (previewScene?.voiceover_url && activeSceneItem && isPlayableBrowserUrl(previewScene.voiceover_url)) {
@@ -417,13 +611,17 @@ export const VideoEditorWorkspace = ({
         loop: false,
       });
     }
-    if (project.music_url && isPlayableBrowserUrl(project.music_url)) {
-      const timeline = project.music_timeline ?? { start: 0, trim_start: 0 };
+    if (
+      project.music_url &&
+      isPlayableBrowserUrl(project.music_url) &&
+      playheadTime >= musicStart &&
+      playheadTime <= musicStart + musicDuration
+    ) {
       sources.push({
         id: "project-music",
         url: project.music_url,
-        start: Number(timeline.start) || 0,
-        trimStart: Number(timeline.trim_start) || 0,
+        start: musicStart,
+        trimStart: Number(musicTimeline.trim_start) || 0,
         volume: 0.25,
         loop: true,
       });
@@ -439,27 +637,42 @@ export const VideoEditorWorkspace = ({
       });
     }
     return sources;
-  }, [activeLayers, activeSceneItem, previewScene, project.music_timeline, project.music_url]);
-  const captionStyle = project.caption_style;
+  }, [activeLayers, activeSceneItem, musicDuration, musicStart, musicTimeline.trim_start, playheadTime, previewScene, project.music_url]);
 
   useEffect(() => {
     setPlayheadTime((value) => clamp(value, 0, timelineDuration));
   }, [timelineDuration]);
 
   useEffect(() => {
-    if (!isPlaying) return;
-    const timer = window.setInterval(() => {
-      setPlayheadTime((current) => {
-        const next = snapTime(current + 0.05);
-        if (next >= timelineDuration) {
-          setIsPlaying(false);
-          return timelineDuration;
-        }
-        return next;
-      });
-    }, 50);
+    playheadTimeRef.current = playheadTime;
+  }, [playheadTime]);
 
-    return () => window.clearInterval(timer);
+  useEffect(() => {
+    if (!isPlaying) return;
+    const startedAt = performance.now();
+    const startedTime = playheadTimeRef.current;
+    let lastCommit = 0;
+    let frameId = 0;
+
+    const tick = (now: number) => {
+      const next = startedTime + (now - startedAt) / 1000;
+      if (next >= timelineDuration) {
+        playheadTimeRef.current = timelineDuration;
+        setPlayheadTime(timelineDuration);
+        setIsPlaying(false);
+        return;
+      }
+
+      playheadTimeRef.current = next;
+      if (now - lastCommit > 80) {
+        setPlayheadTime(snapTime(next));
+        lastCommit = now;
+      }
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
   }, [isPlaying, timelineDuration]);
 
   useEffect(() => {
@@ -473,7 +686,9 @@ export const VideoEditorWorkspace = ({
     const video = videoRef.current;
     if (!video) return;
     const targetTime = Math.max(0, playheadTime - previewVideoStart + (Number(previewVideoTrimStart) || 0));
-    if (Number.isFinite(video.duration) && Math.abs(video.currentTime - targetTime) > 0.25) {
+    const drift = Math.abs(video.currentTime - targetTime);
+    const seekThreshold = isPlaying ? 1.25 : 0.08;
+    if (Number.isFinite(video.duration) && drift > seekThreshold) {
       try {
         video.currentTime = clamp(targetTime, 0, video.duration || timelineDuration);
       } catch {
@@ -509,7 +724,7 @@ export const VideoEditorWorkspace = ({
       audio.loop = source.loop;
       audio.volume = clamp(source.volume, 0, 1);
       const targetTime = Math.max(0, playheadTime - source.start + source.trimStart);
-      if (Math.abs(audio.currentTime - targetTime) > 0.35) {
+      if (Math.abs(audio.currentTime - targetTime) > (isPlaying ? 1.25 : 0.12)) {
         audio.currentTime = targetTime;
       }
 
@@ -553,6 +768,44 @@ export const VideoEditorWorkspace = ({
     setActivePanel(layer.type === "audio" ? "audio" : "media");
   };
 
+  const setTimelineZoomAround = (nextZoom: number, anchorClientX?: number) => {
+    const scroll = timelineScrollRef.current;
+    const clampedZoom = clamp(nextZoom, MIN_TIMELINE_ZOOM, MAX_TIMELINE_ZOOM);
+    if (clampedZoom === timelineZoom) return;
+
+    const rect = scroll?.getBoundingClientRect();
+    const hasCursorAnchor = Boolean(rect && typeof anchorClientX === "number");
+    const anchorOffset = hasCursorAnchor && rect && typeof anchorClientX === "number"
+      ? anchorClientX - rect.left
+      : scroll
+        ? scroll.clientWidth / 2
+        : LABEL_COLUMN_WIDTH;
+    const anchorContentX = hasCursorAnchor && scroll
+      ? Math.max(0, scroll.scrollLeft + anchorOffset - LABEL_COLUMN_WIDTH)
+      : playheadTime * pixelsPerSecond;
+    const anchorTime = hasCursorAnchor
+      ? clamp(anchorContentX / Math.max(pixelsPerSecond, 0.1), 0, timelineDuration)
+      : playheadTime;
+
+    setTimelineZoom(clampedZoom);
+    window.requestAnimationFrame(() => {
+      const nextTimelineWidth = Math.max(920, Math.ceil(timelineDuration * clampedZoom));
+      const nextPixelsPerSecond = nextTimelineWidth / Math.max(timelineDuration, 0.1);
+      const nextContentX = LABEL_COLUMN_WIDTH + anchorTime * nextPixelsPerSecond;
+      if (scroll) scroll.scrollLeft = Math.max(0, nextContentX - anchorOffset);
+    });
+  };
+
+  const zoomTimelineBy = (delta: number, anchorClientX?: number) => {
+    setTimelineZoomAround(timelineZoom + delta, anchorClientX);
+  };
+
+  const handleTimelineWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey && !event.altKey) return;
+    event.preventDefault();
+    zoomTimelineBy(event.deltaY < 0 ? 12 : -12, event.clientX);
+  };
+
   const scrubFromTrack = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 && event.buttons !== 1) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -563,13 +816,16 @@ export const VideoEditorWorkspace = ({
   const beginLayerDrag = (
     event: ReactPointerEvent<HTMLDivElement>,
     layer: TextToVideoTimelineLayer,
-    action: DragState["action"],
+    action: Extract<DragState, { kind: "layer" }>["action"],
   ) => {
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
+    recordProjectSnapshot();
     setSelectedLayerId(layer.id);
     setSelectedCaptionId(null);
+    setActivePanel(layer.type === "audio" ? "audio" : "media");
+    setPlayheadTime(clamp(Number(layer.start) || 0, 0, timelineDuration));
     dragStateRef.current = {
       kind: "layer",
       action: action as "move" | "resize-start" | "resize-end",
@@ -587,6 +843,7 @@ export const VideoEditorWorkspace = ({
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
+    recordProjectSnapshot();
     setSelectedSceneId(scene.id);
     setSelectedLayerId(null);
     dragStateRef.current = {
@@ -596,6 +853,63 @@ export const VideoEditorWorkspace = ({
       startX: event.clientX,
       initialScenes: project.scenes,
       draftScenes: project.scenes,
+    };
+  };
+
+  const beginCaptionTimelineDrag = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    item: (typeof captionTimeline)[number],
+    action: Extract<DragState, { kind: "caption" }>["action"],
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    recordProjectSnapshot();
+    setSelectedCaptionId(item.caption.id);
+    setSelectedLayerId(null);
+    setSelectedSceneId(item.scene.id);
+    setActivePanel("text");
+    setPlayheadTime(clamp(item.start, 0, timelineDuration));
+    dragStateRef.current = {
+      kind: "caption",
+      action,
+      sceneId: item.scene.id,
+      captionId: item.caption.id,
+      startX: event.clientX,
+      initialStart: item.start,
+      initialEnd: item.end,
+      sceneStart: item.sceneStart,
+      sceneDuration: item.sceneDuration,
+      isLocal: item.isLocal,
+      initialScenes: project.scenes,
+      draftScenes: project.scenes,
+    };
+  };
+
+  const beginMusicDrag = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    action: Extract<DragState, { kind: "music" }>["action"],
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    recordProjectSnapshot();
+    setSelectedLayerId(null);
+    setSelectedCaptionId(null);
+    setActivePanel("audio");
+    const initialTimeline = {
+      ...musicTimeline,
+      start: musicStart,
+      duration: musicDuration,
+      trim_start: Number(musicTimeline.trim_start) || 0,
+      trim_end: Number(musicTimeline.trim_end) || 0,
+    };
+    dragStateRef.current = {
+      kind: "music",
+      action,
+      startX: event.clientX,
+      initialTimeline,
+      draftTimeline: initialTimeline,
     };
   };
 
@@ -624,6 +938,73 @@ export const VideoEditorWorkspace = ({
       return;
     }
 
+    if (drag.kind === "caption") {
+      const duration = Math.max(MIN_CLIP_SECONDS, drag.initialEnd - drag.initialStart);
+      const sceneMin = drag.sceneStart;
+      const sceneMax = drag.sceneStart + Math.max(MIN_CLIP_SECONDS, drag.sceneDuration);
+      let nextStart = drag.initialStart;
+      let nextEnd = drag.initialEnd;
+
+      if (drag.action === "move") {
+        nextStart = clamp(snapTime(drag.initialStart + deltaSeconds), sceneMin, Math.max(sceneMin, sceneMax - duration));
+        nextEnd = snapTime(nextStart + duration);
+      } else if (drag.action === "resize-start") {
+        nextStart = clamp(snapTime(drag.initialStart + deltaSeconds), sceneMin, Math.max(sceneMin, drag.initialEnd - MIN_CLIP_SECONDS));
+      } else {
+        nextEnd = clamp(snapTime(drag.initialEnd + deltaSeconds), drag.initialStart + MIN_CLIP_SECONDS, sceneMax);
+      }
+
+      const storedStart = snapTime(drag.isLocal ? nextStart - drag.sceneStart : nextStart);
+      const storedEnd = snapTime(drag.isLocal ? nextEnd - drag.sceneStart : nextEnd);
+      const draftScenes = drag.initialScenes.map((scene) =>
+        scene.id === drag.sceneId
+          ? {
+              ...scene,
+              captions: (scene.captions ?? []).map((caption) =>
+                caption.id === drag.captionId
+                  ? {
+                      ...caption,
+                      start: storedStart,
+                      end: Math.max(storedStart + MIN_CLIP_SECONDS, storedEnd),
+                    }
+                  : caption,
+              ),
+            }
+          : scene,
+      );
+      dragStateRef.current = { ...drag, draftScenes };
+      updateProjectLocal({ scenes: draftScenes });
+      setPlayheadTime(clamp(nextStart, 0, timelineDuration));
+      return;
+    }
+
+    if (drag.kind === "music") {
+      const initialStart = Number(drag.initialTimeline.start) || 0;
+      const initialDuration = Math.max(MIN_CLIP_SECONDS, Number(drag.initialTimeline.duration) || musicDuration);
+      const initialEnd = initialStart + initialDuration;
+      let start = initialStart;
+      let duration = initialDuration;
+
+      if (drag.action === "move") {
+        start = clamp(snapTime(initialStart + deltaSeconds), 0, Math.max(0, timelineDuration - initialDuration));
+      } else if (drag.action === "resize-start") {
+        start = clamp(snapTime(initialStart + deltaSeconds), 0, Math.max(0, initialEnd - MIN_CLIP_SECONDS));
+        duration = snapTime(initialEnd - start);
+      } else {
+        duration = clamp(snapTime(initialDuration + deltaSeconds), MIN_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, timelineDuration - initialStart));
+      }
+
+      const draftTimeline = {
+        ...drag.initialTimeline,
+        start,
+        duration,
+      };
+      dragStateRef.current = { ...drag, draftTimeline };
+      updateProjectLocal({ music_timeline: draftTimeline });
+      setPlayheadTime(clamp(start, 0, timelineDuration));
+      return;
+    }
+
     const draftScenes = drag.initialScenes.map((scene) => {
       if (scene.id !== drag.id) return scene;
       const initialDuration = Math.max(MIN_CLIP_SECONDS, Number(scene.duration) || MIN_CLIP_SECONDS);
@@ -643,6 +1024,17 @@ export const VideoEditorWorkspace = ({
 
     if (drag.kind === "layer") {
       await saveProjectPatch({ timeline_layers: drag.draftLayers }, "Timeline updated");
+      return;
+    }
+
+    if (drag.kind === "caption") {
+      const totalDuration = drag.draftScenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0);
+      await saveProjectPatch({ scenes: drag.draftScenes, total_duration: totalDuration }, "Caption timing saved");
+      return;
+    }
+
+    if (drag.kind === "music") {
+      await saveProjectPatch({ music_timeline: drag.draftTimeline }, "Music timing saved");
       return;
     }
 
@@ -711,12 +1103,17 @@ export const VideoEditorWorkspace = ({
     patch: Partial<TextToVideoScene>,
     successTitle: string,
   ) => {
+    recordProjectSnapshot();
     const scenes = project.scenes.map((scene) => (scene.id === sceneId ? { ...scene, ...patch } : scene));
     const total_duration = scenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0);
     const thumbnail_url =
-      typeof patch.image_url === "string" && patch.image_url
+      typeof patch.video_url === "string" && patch.video_url
+        ? patch.video_url
+        : typeof patch.image_url === "string" && patch.image_url
         ? patch.image_url
-        : scenes.find((scene) => scene.image_url)?.image_url ?? project.thumbnail_url;
+        : scenes.find((scene) => scene.video_url)?.video_url ??
+          scenes.find((scene) => scene.image_url)?.image_url ??
+          project.thumbnail_url;
 
     updateProjectLocal({ scenes, total_duration, thumbnail_url });
     setSelectedSceneId(sceneId);
@@ -729,6 +1126,7 @@ export const VideoEditorWorkspace = ({
     url: string,
     targetSceneId?: string,
   ) => {
+    recordProjectSnapshot();
     const sceneItem = targetSceneId ? sceneTimeline.find(({ scene }) => scene.id === targetSceneId) : null;
     const layer: TextToVideoTimelineLayer = {
       id: makeId(),
@@ -926,6 +1324,7 @@ export const VideoEditorWorkspace = ({
       const clipEnd = clipStart + (Number(selectedLayer.duration) || 0);
       if (playheadTime <= clipStart + MIN_CLIP_SECONDS || playheadTime >= clipEnd - MIN_CLIP_SECONDS) return;
 
+      recordProjectSnapshot();
       const firstDuration = snapTime(playheadTime - clipStart);
       const secondDuration = snapTime(clipEnd - playheadTime);
       const secondLayer: TextToVideoTimelineLayer = {
@@ -949,6 +1348,7 @@ export const VideoEditorWorkspace = ({
     const localTime = snapTime(playheadTime - active.start);
     if (localTime <= MIN_CLIP_SECONDS || localTime >= active.duration - MIN_CLIP_SECONDS) return;
 
+    recordProjectSnapshot();
     const secondScene: TextToVideoScene = {
       ...active.scene,
       id: makeId(),
@@ -977,6 +1377,7 @@ export const VideoEditorWorkspace = ({
 
   const duplicateSelectedLayer = async () => {
     if (!selectedLayer) return;
+    recordProjectSnapshot();
     const copy = {
       ...selectedLayer,
       id: makeId(),
@@ -993,6 +1394,112 @@ export const VideoEditorWorkspace = ({
     setPlayheadTime((current) => clamp(snapTime(current + seconds), 0, timelineDuration));
   };
 
+  const applyCaptionPreset = async (preset: string) => {
+    recordProjectSnapshot();
+    await updateCaptionStyle({ preset, ...(CAPTION_STYLE_PRESETS[preset] ?? {}) });
+  };
+
+  const updateCaptionPositionPreset = async (position: string) => {
+    recordProjectSnapshot();
+    const coordinates = position === "custom" ? captionCoordinates(captionStyle) : captionPresetCoordinates(position);
+    await updateCaptionStyle({
+      position,
+      position_x: coordinates.x,
+      position_y: coordinates.y,
+    });
+  };
+
+  const pointToCaptionPercent = (event: ReactPointerEvent<HTMLElement>) => {
+    const rect = previewFrameRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return captionCoordinates(captionStyle);
+    return {
+      x: clamp(((event.clientX - rect.left) / rect.width) * 100, 5, 95),
+      y: clamp(((event.clientY - rect.top) / rect.height) * 100, 5, 95),
+    };
+  };
+
+  const beginCaptionMove = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    caption: TextToVideoCaption,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    recordProjectSnapshot();
+    const item = captionTimeline.find(({ caption: timelineCaption }) => timelineCaption.id === caption.id);
+    if (item) selectCaption(caption.id, item.start);
+    const point = pointToCaptionPercent(event);
+    const coordinates = captionCoordinates(captionStyle);
+    const patch = { position: "custom", position_x: coordinates.x, position_y: coordinates.y };
+    captionInteractionRef.current = {
+      mode: "move",
+      pointerId: event.pointerId,
+      offsetX: coordinates.x - point.x,
+      offsetY: coordinates.y - point.y,
+      patch,
+    };
+    updateCaptionStyleLocal(patch);
+  };
+
+  const beginCaptionResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    recordProjectSnapshot();
+    const boxSize = captionBoxSize(captionStyle);
+    const patch = {
+      box_width: boxSize.width,
+      box_height: boxSize.height,
+    };
+    captionInteractionRef.current = {
+      mode: "resize",
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startBoxWidth: patch.box_width,
+      startBoxHeight: patch.box_height,
+      patch,
+    };
+  };
+
+  const handleCaptionInteractionMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const interaction = captionInteractionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (interaction.mode === "move") {
+      const point = pointToCaptionPercent(event);
+      const patch = {
+        position: "custom",
+        position_x: clamp(point.x + interaction.offsetX, 5, 95),
+        position_y: clamp(point.y + interaction.offsetY, 5, 95),
+      };
+      captionInteractionRef.current = { ...interaction, patch };
+      updateCaptionStyleLocal(patch);
+      return;
+    }
+
+    const rect = previewFrameRef.current?.getBoundingClientRect();
+    const deltaX = rect?.width ? ((event.clientX - interaction.startX) / rect.width) * 200 : 0;
+    const deltaY = rect?.height ? ((event.clientY - interaction.startY) / rect.height) * 200 : 0;
+    const patch = {
+      box_width: Math.round(clamp(interaction.startBoxWidth + deltaX, 12, 95)),
+      box_height: Math.round(clamp(interaction.startBoxHeight + deltaY, 6, 60)),
+    };
+    captionInteractionRef.current = { ...interaction, patch };
+    updateCaptionStyleLocal(patch);
+  };
+
+  const finishCaptionInteraction = async (event: ReactPointerEvent<HTMLElement>) => {
+    const interaction = captionInteractionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    captionInteractionRef.current = null;
+    await updateCaptionStyle(interaction.patch);
+  };
+
   const renderCaption = () => {
     if (!selectedCaption) return null;
     const displayText = captionStyle.uppercase ? selectedCaption.text.toUpperCase() : selectedCaption.text;
@@ -1002,27 +1509,43 @@ export const VideoEditorWorkspace = ({
         : captionStyle.background === "dark_box"
           ? "bg-black/75 text-white"
           : "text-white";
+    const coordinates = captionCoordinates(captionStyle);
+    const boxSize = captionBoxSize(captionStyle);
+    const fontStyle = CAPTION_FONT_STYLES[captionStyle.font] ?? CAPTION_FONT_STYLES.bold_sans;
 
     return (
       <button
         type="button"
-        onClick={() => {
-          const item = captionTimeline.find(({ caption }) => caption.id === selectedCaption.id);
-          if (item) selectCaption(selectedCaption.id, item.start);
-        }}
-        className={`absolute left-1/2 max-w-[76%] -translate-x-1/2 rounded px-3 py-1.5 text-center font-semibold leading-tight shadow-lg outline outline-2 outline-transparent transition ${
+        onPointerDown={(event) => beginCaptionMove(event, selectedCaption)}
+        onPointerMove={handleCaptionInteractionMove}
+        onPointerUp={(event) => void finishCaptionInteraction(event)}
+        onPointerCancel={(event) => void finishCaptionInteraction(event)}
+        className={`absolute flex -translate-x-1/2 -translate-y-1/2 cursor-move items-center justify-center overflow-hidden rounded px-3 py-1.5 text-center font-semibold leading-tight shadow-lg outline outline-2 outline-transparent transition ${
           selectedCaptionId === selectedCaption.id ? "outline-white" : ""
-        } ${captionPositionClass(captionStyle.position)} ${backgroundClass}`}
+        } ${backgroundClass}`}
         style={{
+          left: `${coordinates.x}%`,
+          top: `${coordinates.y}%`,
+          width: `${boxSize.width}%`,
+          height: `${boxSize.height}%`,
           color: captionStyle.background === "accent_box" ? "#111111" : captionStyle.phrase_color,
-          fontSize: clamp((captionStyle.size_phrase || 42) / 2.7, 14, 34),
+          fontSize: clamp((captionStyle.size_active || captionStyle.size_phrase || 96) / 2.8, 16, 58),
+          ...fontStyle,
           textShadow:
             captionStyle.background === "none"
               ? `0 2px ${Math.max(0, captionStyle.stroke_width || 0)}px rgba(0,0,0,0.8)`
               : undefined,
         }}
       >
-        {displayText}
+        <span className="line-clamp-4 break-words">{displayText}</span>
+        <span
+          role="presentation"
+          className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-sm border border-white/80 bg-zinc-950 shadow"
+          onPointerDown={beginCaptionResize}
+          onPointerMove={handleCaptionInteractionMove}
+          onPointerUp={(event) => void finishCaptionInteraction(event)}
+          onPointerCancel={(event) => void finishCaptionInteraction(event)}
+        />
       </button>
     );
   };
@@ -1138,6 +1661,26 @@ export const VideoEditorWorkspace = ({
             <span className="hidden text-xs text-zinc-500 md:inline">{project.scenes.length} scenes</span>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-zinc-400 hover:text-white"
+              onClick={() => void undoProject()}
+              disabled={!canUndo || isSaving}
+              title="Undo"
+            >
+              <Undo2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-zinc-400 hover:text-white"
+              onClick={() => void redoProject()}
+              disabled={!canRedo || isSaving}
+              title="Redo"
+            >
+              <Redo2 className="h-4 w-4" />
+            </Button>
             {activeVideoUrl && (
               <Button variant="ghost" size="sm" asChild className="text-zinc-300 hover:text-white">
                 <a href={activeVideoUrl} target="_blank" rel="noreferrer">
@@ -1162,6 +1705,7 @@ export const VideoEditorWorkspace = ({
             <section className="flex min-h-0 flex-1 items-center justify-center bg-[#1a191f] p-6">
               <div className="relative flex h-full max-h-[55vh] w-full max-w-5xl items-center justify-center overflow-hidden rounded border border-white/10 bg-[#242329] shadow-2xl">
                 <div
+                  ref={previewFrameRef}
                   className={`relative overflow-hidden bg-black ${
                     project.aspect === "9:16"
                       ? "h-full aspect-[9/16]"
@@ -1176,6 +1720,10 @@ export const VideoEditorWorkspace = ({
                       ref={videoRef}
                       src={previewVideoUrl}
                       className="h-full w-full object-cover"
+                      style={{
+                        objectPosition: `${50 + (previewScene?.crop_x ?? 0) / 2}% ${50 + (previewScene?.crop_y ?? 0) / 2}%`,
+                        transform: `scale(${previewScene?.crop_zoom ?? 1})`,
+                      }}
                       playsInline
                       muted
                       preload="auto"
@@ -1196,6 +1744,10 @@ export const VideoEditorWorkspace = ({
                       ref={videoRef}
                       src={activeVideoUrl}
                       className="h-full w-full object-cover"
+                      style={{
+                        objectPosition: `${50 + (previewScene?.crop_x ?? 0) / 2}% ${50 + (previewScene?.crop_y ?? 0) / 2}%`,
+                        transform: `scale(${previewScene?.crop_zoom ?? 1})`,
+                      }}
                       playsInline
                       muted
                       preload="auto"
@@ -1230,7 +1782,7 @@ export const VideoEditorWorkspace = ({
               </div>
             </section>
 
-            <section className="h-[286px] shrink-0 border-t border-white/10 bg-[#111014]">
+            <section className="h-[348px] shrink-0 border-t border-white/10 bg-[#111014]">
               <div className="flex h-10 items-center justify-between border-b border-white/10 px-3">
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="sm" className="h-8 text-zinc-300 hover:text-white">
@@ -1250,7 +1802,15 @@ export const VideoEditorWorkspace = ({
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-300 hover:text-white" onClick={() => void duplicateSelectedLayer()}>
                         <Copy className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-300 hover:text-white" onClick={() => void removeLayer(selectedLayer.id)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-zinc-300 hover:text-white"
+                        onClick={() => {
+                          recordProjectSnapshot();
+                          void removeLayer(selectedLayer.id);
+                        }}
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </>
@@ -1260,11 +1820,33 @@ export const VideoEditorWorkspace = ({
                   <span className="font-mono text-xs text-zinc-400">
                     {formatClock(playheadTime)} / {formatClock(timelineDuration)}
                   </span>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-white" onClick={() => setTimelineZoom((value) => Math.max(28, value - 12))}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-zinc-400 hover:text-white"
+                    onClick={() => zoomTimelineBy(-12)}
+                    disabled={timelineZoom <= MIN_TIMELINE_ZOOM}
+                    title="Zoom out"
+                  >
                     <ZoomOut className="h-4 w-4" />
                   </Button>
+                  <Slider
+                    value={[timelineZoom]}
+                    min={MIN_TIMELINE_ZOOM}
+                    max={MAX_TIMELINE_ZOOM}
+                    step={4}
+                    className="w-28"
+                    onValueChange={([value]) => setTimelineZoomAround(value)}
+                  />
                   <span className="w-12 text-center text-[11px] text-zinc-500">{Math.round(timelineZoom)}px</span>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-white" onClick={() => setTimelineZoom((value) => Math.min(132, value + 12))}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-zinc-400 hover:text-white"
+                    onClick={() => zoomTimelineBy(12)}
+                    disabled={timelineZoom >= MAX_TIMELINE_ZOOM}
+                    title="Zoom in"
+                  >
                     <ZoomIn className="h-4 w-4" />
                   </Button>
                 </div>
@@ -1295,14 +1877,25 @@ export const VideoEditorWorkspace = ({
                   <Input className="h-8 border-white/10 bg-[#232229] text-xs" value={newLayer.url} onChange={(event) => setNewLayer((previous) => ({ ...previous, url: event.target.value }))} placeholder="Media URL or storage path" />
                   <Input className="h-8 border-white/10 bg-[#232229] text-xs" type="number" min={0} step={0.25} value={newLayer.start} onChange={(event) => setNewLayer((previous) => ({ ...previous, start: Number(event.target.value) || 0 }))} />
                   <Input className="h-8 border-white/10 bg-[#232229] text-xs" type="number" min={0.25} step={0.25} value={newLayer.duration} onChange={(event) => setNewLayer((previous) => ({ ...previous, duration: Number(event.target.value) || MIN_CLIP_SECONDS }))} />
-                  <Button size="sm" className="h-8" onClick={() => void addLayer()}>
+                  <Button
+                    size="sm"
+                    className="h-8"
+                    onClick={() => {
+                      recordProjectSnapshot();
+                      void addLayer();
+                    }}
+                  >
                     <Plus className="mr-2 h-4 w-4" />
                     Add
                   </Button>
                 </div>
               )}
 
-              <div className="h-[calc(100%-40px)] overflow-auto sidebar-scroll">
+              <div
+                ref={timelineScrollRef}
+                className="h-[calc(100%-40px)] overflow-auto sidebar-scroll"
+                onWheel={handleTimelineWheel}
+              >
                 <div className="relative" style={{ width: LABEL_COLUMN_WIDTH + timelineWidth }}>
                   <div
                     className="sticky top-0 z-30 grid h-8 border-b border-white/10 bg-[#111014]"
@@ -1359,11 +1952,19 @@ export const VideoEditorWorkspace = ({
                             onDragOver={allowDrop}
                             onDrop={(event) => void handleEditorDrop(event, { kind: "scene", id: scene.id })}
                           >
-                            {scene.image_url && (
+                            {scene.video_url ? (
+                              <video
+                                src={scene.video_url}
+                                className="absolute inset-0 h-full w-full object-cover opacity-45"
+                                muted
+                                playsInline
+                                preload="metadata"
+                              />
+                            ) : scene.image_url && (
                               <img
                                 src={scene.image_url}
                                 alt=""
-                                className={`absolute inset-0 h-full w-full object-cover opacity-45 ${scene.video_url ? "" : "video-editor-image-zoom"}`}
+                                className="video-editor-image-zoom absolute inset-0 h-full w-full object-cover opacity-45"
                               />
                             )}
                             {scene.video_url && (
@@ -1394,22 +1995,33 @@ export const VideoEditorWorkspace = ({
                         Text
                       </div>
                       <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
-                        {captionTimeline.map(({ caption, start, end }) => (
+                        {captionTimeline.map((item) => (
                           <TimelineClip
-                            key={caption.id}
-                            left={start * pixelsPerSecond}
-                            width={Math.max(MIN_CLIP_SECONDS, end - start) * pixelsPerSecond}
-                            selected={selectedCaptionId === caption.id}
-                            className="border-violet-300/50 bg-violet-500/70 text-white"
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              selectCaption(caption.id, start);
-                            }}
+                            key={item.caption.id}
+                            left={item.start * pixelsPerSecond}
+                            width={Math.max(MIN_CLIP_SECONDS, item.end - item.start) * pixelsPerSecond}
+                            selected={selectedCaptionId === item.caption.id}
+                            className="cursor-grab border-violet-300/50 bg-violet-500/70 text-white active:cursor-grabbing"
+                            onPointerDown={(event) => beginCaptionTimelineDrag(event, item, "move")}
+                            onPointerMove={handleTimelineDrag}
+                            onPointerUp={() => void finishTimelineDrag()}
                           >
                             <div className="flex h-full items-center gap-1 px-2">
                               <Type className="h-3 w-3 shrink-0" />
-                              <span className="truncate">{caption.text}</span>
+                              <span className="truncate">{item.caption.text}</span>
                             </div>
+                            <div
+                              className="absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-white/25"
+                              onPointerDown={(event) => beginCaptionTimelineDrag(event, item, "resize-start")}
+                              onPointerMove={handleTimelineDrag}
+                              onPointerUp={() => void finishTimelineDrag()}
+                            />
+                            <div
+                              className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-white/25"
+                              onPointerDown={(event) => beginCaptionTimelineDrag(event, item, "resize-end")}
+                              onPointerMove={handleTimelineDrag}
+                              onPointerUp={() => void finishTimelineDrag()}
+                            />
                           </TimelineClip>
                         ))}
                       </div>
@@ -1460,8 +2072,80 @@ export const VideoEditorWorkspace = ({
 
                     <div className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
                       <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                        <Mic2 className="h-4 w-4" />
+                        Voice
+                      </div>
+                      <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
+                        {sceneTimeline.filter(({ scene }) => Boolean(scene.voiceover_url)).map(({ scene, start, duration }) => (
+                          <TimelineClip
+                            key={`voice-${scene.id}`}
+                            left={start * pixelsPerSecond}
+                            width={duration * pixelsPerSecond}
+                            selected={selectedSceneId === scene.id && activePanel === "audio" && !selectedLayer}
+                            className="border-amber-200/40 bg-amber-500/60 text-white"
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                              setSelectedSceneId(scene.id);
+                              setSelectedLayerId(null);
+                              setSelectedCaptionId(null);
+                              setActivePanel("audio");
+                              setPlayheadTime(start);
+                            }}
+                          >
+                            <div className="absolute inset-x-2 top-1/2 h-5 -translate-y-1/2 opacity-70 [background:repeating-linear-gradient(90deg,rgba(255,255,255,.35)_0_2px,transparent_2px_7px)]" />
+                            <div className="relative z-10 flex h-full items-center gap-1 px-2">
+                              <Mic2 className="h-3 w-3 shrink-0" />
+                              <span className="truncate">Scene {scene.index + 1} voice</span>
+                            </div>
+                          </TimelineClip>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
+                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                        <Music2 className="h-4 w-4" />
+                        Music
+                      </div>
+                      <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
+                        {project.music_url && (
+                          <TimelineClip
+                            left={musicStart * pixelsPerSecond}
+                            width={Math.min(musicDuration, timelineDuration - musicStart) * pixelsPerSecond}
+                            selected={activePanel === "audio" && !selectedLayer}
+                            className="cursor-grab border-fuchsia-200/40 bg-fuchsia-500/60 text-white active:cursor-grabbing"
+                            onPointerDown={(event) => beginMusicDrag(event, "move")}
+                            onPointerMove={handleTimelineDrag}
+                            onPointerUp={() => void finishTimelineDrag()}
+                          >
+                            <div className="absolute inset-x-2 top-1/2 h-5 -translate-y-1/2 opacity-70 [background:repeating-linear-gradient(90deg,rgba(255,255,255,.35)_0_2px,transparent_2px_7px)]" />
+                            <div className="relative z-10 flex h-full items-center gap-1 px-2">
+                              <Music2 className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{labelFromUrl(project.music_url)}</span>
+                            </div>
+                            <div
+                              className="absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-white/25"
+                              onPointerDown={(event) => beginMusicDrag(event, "resize-start")}
+                              onPointerMove={handleTimelineDrag}
+                              onPointerUp={() => void finishTimelineDrag()}
+                              onPointerCancel={() => void finishTimelineDrag()}
+                            />
+                            <div
+                              className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-white/25"
+                              onPointerDown={(event) => beginMusicDrag(event, "resize-end")}
+                              onPointerMove={handleTimelineDrag}
+                              onPointerUp={() => void finishTimelineDrag()}
+                              onPointerCancel={() => void finishTimelineDrag()}
+                            />
+                          </TimelineClip>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
+                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
                         <Volume2 className="h-4 w-4" />
-                        Audio
+                        Audio Layers
                       </div>
                       <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
                         {(project.timeline_layers ?? []).filter((layer) => layer.type === "audio").map((layer) => (
@@ -1488,12 +2172,14 @@ export const VideoEditorWorkspace = ({
                               onPointerDown={(event) => beginLayerDrag(event, layer, "resize-start")}
                               onPointerMove={handleTimelineDrag}
                               onPointerUp={() => void finishTimelineDrag()}
+                              onPointerCancel={() => void finishTimelineDrag()}
                             />
                             <div
                               className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-white/25"
                               onPointerDown={(event) => beginLayerDrag(event, layer, "resize-end")}
                               onPointerMove={handleTimelineDrag}
                               onPointerUp={() => void finishTimelineDrag()}
+                              onPointerCancel={() => void finishTimelineDrag()}
                             />
                           </TimelineClip>
                         ))}
@@ -1512,7 +2198,15 @@ export const VideoEditorWorkspace = ({
                 {panelItems.find((item) => item.id === activePanel)?.label}
               </div>
               {selectedLayer && (
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-white" onClick={() => void removeLayer(selectedLayer.id)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-zinc-400 hover:text-white"
+                  onClick={() => {
+                    recordProjectSnapshot();
+                    void removeLayer(selectedLayer.id);
+                  }}
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               )}
@@ -1634,7 +2328,7 @@ export const VideoEditorWorkspace = ({
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-2">
                       <Label className="text-xs text-zinc-400">Preset</Label>
-                      <Select value={captionStyle.preset} onValueChange={(value) => void updateCaptionStyle({ preset: value })}>
+                      <Select value={captionStyle.preset} onValueChange={(value) => void applyCaptionPreset(value)}>
                         <SelectTrigger className="h-9 border-white/10 bg-[#201f26]"><SelectValue /></SelectTrigger>
                         <SelectContent>{CAPTION_PRESETS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
                       </Select>
@@ -1648,7 +2342,7 @@ export const VideoEditorWorkspace = ({
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs text-zinc-400">Position</Label>
-                      <Select value={captionStyle.position} onValueChange={(value) => void updateCaptionStyle({ position: value })}>
+                      <Select value={captionStyle.position} onValueChange={(value) => void updateCaptionPositionPreset(value)}>
                         <SelectTrigger className="h-9 border-white/10 bg-[#201f26]"><SelectValue /></SelectTrigger>
                         <SelectContent>{CAPTION_POSITIONS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
                       </Select>
@@ -1661,6 +2355,56 @@ export const VideoEditorWorkspace = ({
                       </Select>
                     </div>
                   </div>
+                  <div className="space-y-3 rounded border border-white/10 bg-[#201f26] p-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-zinc-400">Text X</Label>
+                      <span className="font-mono text-xs text-zinc-500">{Math.round(captionCoordinates(captionStyle).x)}%</span>
+                    </div>
+                    <Slider
+                      value={[captionCoordinates(captionStyle).x]}
+                      min={5}
+                      max={95}
+                      step={1}
+                      onValueChange={([value]) => updateCaptionStyleLocal({ position: "custom", position_x: value })}
+                      onValueCommit={([value]) => void updateCaptionStyle({ position: "custom", position_x: value })}
+                    />
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-zinc-400">Text Y</Label>
+                      <span className="font-mono text-xs text-zinc-500">{Math.round(captionCoordinates(captionStyle).y)}%</span>
+                    </div>
+                    <Slider
+                      value={[captionCoordinates(captionStyle).y]}
+                      min={5}
+                      max={95}
+                      step={1}
+                      onValueChange={([value]) => updateCaptionStyleLocal({ position: "custom", position_y: value })}
+                      onValueCommit={([value]) => void updateCaptionStyle({ position: "custom", position_y: value })}
+                    />
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-zinc-400">Box W</Label>
+                      <span className="font-mono text-xs text-zinc-500">{Math.round(captionBoxSize(captionStyle).width)}%</span>
+                    </div>
+                    <Slider
+                      value={[captionBoxSize(captionStyle).width]}
+                      min={12}
+                      max={95}
+                      step={1}
+                      onValueChange={([value]) => updateCaptionStyleLocal({ box_width: value })}
+                      onValueCommit={([value]) => void updateCaptionStyle({ box_width: value })}
+                    />
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-zinc-400">Box H</Label>
+                      <span className="font-mono text-xs text-zinc-500">{Math.round(captionBoxSize(captionStyle).height)}%</span>
+                    </div>
+                    <Slider
+                      value={[captionBoxSize(captionStyle).height]}
+                      min={6}
+                      max={60}
+                      step={1}
+                      onValueChange={([value]) => updateCaptionStyleLocal({ box_height: value })}
+                      onValueCommit={([value]) => void updateCaptionStyle({ box_height: value })}
+                    />
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-2">
                       <Label className="text-xs text-zinc-400">Color</Label>
@@ -1668,8 +2412,8 @@ export const VideoEditorWorkspace = ({
                         className="h-9 border-white/10 bg-[#201f26] p-1"
                         type="color"
                         value={captionStyle.phrase_color}
-                        onChange={(event) => updateProjectLocal({ caption_style: { ...captionStyle, phrase_color: event.target.value } })}
-                        onBlur={() => void saveProjectPatch({ caption_style: captionStyle }, "Caption color saved")}
+                        onChange={(event) => updateCaptionStyleLocal({ phrase_color: event.target.value })}
+                        onBlur={(event) => void updateCaptionStyle({ phrase_color: event.currentTarget.value })}
                       />
                     </div>
                     <div className="space-y-2">
@@ -1678,20 +2422,30 @@ export const VideoEditorWorkspace = ({
                         className="h-9 border-white/10 bg-[#201f26] p-1"
                         type="color"
                         value={captionStyle.active_color}
-                        onChange={(event) => updateProjectLocal({ caption_style: { ...captionStyle, active_color: event.target.value } })}
-                        onBlur={() => void saveProjectPatch({ caption_style: captionStyle }, "Caption color saved")}
+                        onChange={(event) => updateCaptionStyleLocal({ active_color: event.target.value })}
+                        onBlur={(event) => void updateCaptionStyle({ active_color: event.currentTarget.value })}
                       />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-2">
-                      <Label className="text-xs text-zinc-400">Text Size</Label>
+                      <Label className="text-xs text-zinc-400">Phrase Size</Label>
                       <Input
                         className="h-9 border-white/10 bg-[#201f26]"
                         type="number"
                         value={captionStyle.size_phrase}
-                        onChange={(event) => updateProjectLocal({ caption_style: { ...captionStyle, size_phrase: Number(event.target.value) || 0 } })}
-                        onBlur={() => void saveProjectPatch({ caption_style: captionStyle }, "Caption size saved")}
+                        onChange={(event) => updateCaptionStyleLocal({ size_phrase: Number(event.target.value) || 0 })}
+                        onBlur={(event) => void updateCaptionStyle({ size_phrase: Number(event.currentTarget.value) || 0 })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-400">Active Size</Label>
+                      <Input
+                        className="h-9 border-white/10 bg-[#201f26]"
+                        type="number"
+                        value={captionStyle.size_active}
+                        onChange={(event) => updateCaptionStyleLocal({ size_active: Number(event.target.value) || 0 })}
+                        onBlur={(event) => void updateCaptionStyle({ size_active: Number(event.currentTarget.value) || 0 })}
                       />
                     </div>
                     <div className="space-y-2">
@@ -1700,8 +2454,8 @@ export const VideoEditorWorkspace = ({
                         className="h-9 border-white/10 bg-[#201f26]"
                         type="number"
                         value={captionStyle.stroke_width}
-                        onChange={(event) => updateProjectLocal({ caption_style: { ...captionStyle, stroke_width: Number(event.target.value) || 0 } })}
-                        onBlur={() => void saveProjectPatch({ caption_style: captionStyle }, "Caption stroke saved")}
+                        onChange={(event) => updateCaptionStyleLocal({ stroke_width: Number(event.target.value) || 0 })}
+                        onBlur={(event) => void updateCaptionStyle({ stroke_width: Number(event.currentTarget.value) || 0 })}
                       />
                     </div>
                   </div>
@@ -1788,12 +2542,22 @@ export const VideoEditorWorkspace = ({
               {activePanel === "media" && selectedScene && (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label className="text-xs text-zinc-400">Image URL</Label>
-                    <Input className="h-9 border-white/10 bg-[#201f26]" value={selectedScene.image_url ?? ""} onChange={(event) => updateSceneLocal(selectedScene.id, { image_url: event.target.value })} onBlur={() => void saveScenes("Scene media saved")} />
+                    <Label className="text-xs text-zinc-400">Video URL</Label>
+                    <Input
+                      className="h-9 border-white/10 bg-[#201f26]"
+                      value={selectedScene.video_url ?? ""}
+                      onChange={(event) => updateSceneLocal(selectedScene.id, { video_url: event.target.value, image_url: event.target.value ? null : selectedScene.image_url })}
+                      onBlur={() => void saveScenes("Scene media saved")}
+                    />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs text-zinc-400">Video URL</Label>
-                    <Input className="h-9 border-white/10 bg-[#201f26]" value={selectedScene.video_url ?? ""} onChange={(event) => updateSceneLocal(selectedScene.id, { video_url: event.target.value })} onBlur={() => void saveScenes("Scene media saved")} />
+                    <Label className="text-xs text-zinc-400">Fallback Image URL</Label>
+                    <Input
+                      className="h-9 border-white/10 bg-[#201f26]"
+                      value={selectedScene.image_url ?? ""}
+                      onChange={(event) => updateSceneLocal(selectedScene.id, { image_url: event.target.value })}
+                      onBlur={() => void saveScenes("Scene media saved")}
+                    />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {(["image", "video"] as const).map((type) => (

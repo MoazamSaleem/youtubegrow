@@ -18,7 +18,7 @@ from models import (
 from ai_service import (
     split_into_scenes, synthesize_voice, transcribe_words, build_caption_groups,
 )
-from pixabay_service import search_pixabay, fetch_first_image_for_keywords
+from pixabay_service import search_pixabay, fetch_first_video_for_keywords
 from render_service import render_project, render_dependencies, STORAGE_DIR
 
 load_dotenv()
@@ -106,13 +106,14 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
         align = await transcribe_words(voice_path)
         caps_groups = build_caption_groups(align["words"], group_size=3)
         captions = [Caption(**c).model_dump() for c in caps_groups]
-        image_url = await fetch_first_image_for_keywords(sc.get("keywords", []))
+        video_url = await fetch_first_video_for_keywords(sc.get("keywords", []), req.aspect)
         scene = Scene(
             index=idx,
             script=text,
             duration=align["duration"] or max(2.0, len(text.split()) * 0.4),
             voiceover_url=_storage_url_from_path(voice_path),
-            image_url=image_url,
+            image_url=None,
+            video_url=video_url,
             keywords=sc.get("keywords", []),
             transition_in=sc.get("transition_in", "fade"),
             animation=sc.get("animation", "ken_burns_in"),
@@ -124,7 +125,7 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
     scenes = [r for r in results if r]
 
     total_duration = sum(s["duration"] for s in scenes)
-    thumb = next((s["image_url"] for s in scenes if s.get("image_url")), None)
+    thumb = next((s["video_url"] for s in scenes if s.get("video_url")), None)
 
     await report(88, "Saving project")
     await projects.update_one(
@@ -443,6 +444,7 @@ async def meta():
             {"id": "top",    "label": "Top"},
             {"id": "middle", "label": "Middle"},
             {"id": "bottom", "label": "Bottom"},
+            {"id": "custom", "label": "Custom"},
         ],
         "caption_backgrounds": [
             {"id": "none",       "label": "None"},

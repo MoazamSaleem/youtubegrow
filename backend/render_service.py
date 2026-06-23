@@ -47,27 +47,37 @@ CAPTION_PRESETS = {
     "viral_pop": {
         "font": "display", "active_color": "#FFD60A", "phrase_color": "#FFFFFF",
         "size_active": 96, "size_phrase": 42, "stroke_width": 6,
-        "position": "bottom", "background": "none", "show_phrase": True,
+        "position": "bottom", "position_x": 50, "position_y": 72,
+        "box_width": 76, "box_height": 16,
+        "background": "none", "show_phrase": True,
     },
     "hormozi": {
         "font": "display", "active_color": "#FFFFFF", "phrase_color": "#FFD60A",
         "size_active": 110, "size_phrase": 56, "stroke_width": 10,
-        "position": "middle", "background": "dark_box", "show_phrase": False,
+        "position": "middle", "position_x": 50, "position_y": 52,
+        "box_width": 82, "box_height": 20,
+        "background": "dark_box", "show_phrase": False,
     },
     "mrbeast": {
         "font": "display", "active_color": "#FF3B30", "phrase_color": "#FFFFFF",
         "size_active": 120, "size_phrase": 48, "stroke_width": 12,
-        "position": "middle", "background": "accent_box", "show_phrase": False,
+        "position": "middle", "position_x": 50, "position_y": 52,
+        "box_width": 84, "box_height": 22,
+        "background": "accent_box", "show_phrase": False,
     },
     "minimal": {
         "font": "bold_sans", "active_color": "#FFFFFF", "phrase_color": "#FFFFFF",
         "size_active": 72, "size_phrase": 36, "stroke_width": 4,
-        "position": "bottom", "background": "none", "show_phrase": False,
+        "position": "bottom", "position_x": 50, "position_y": 76,
+        "box_width": 70, "box_height": 14,
+        "background": "none", "show_phrase": False,
     },
     "subtitle": {
         "font": "bold_sans", "active_color": "#FFFFFF", "phrase_color": "#FFFFFF",
         "size_active": 54, "size_phrase": 0, "stroke_width": 3,
-        "position": "bottom", "background": "dark_box", "show_phrase": False,
+        "position": "bottom", "position_x": 50, "position_y": 84,
+        "box_width": 92, "box_height": 10,
+        "background": "dark_box", "show_phrase": False,
     },
 }
 
@@ -577,6 +587,24 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
 
 
+def _wrap_caption_text(text: str, max_chars: int) -> str:
+    words = text.split()
+    if not words:
+        return text
+    lines: List[str] = []
+    current: List[str] = []
+    for word in words:
+        candidate = " ".join([*current, word])
+        if current and len(candidate) > max_chars:
+            lines.append(" ".join(current))
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+    return "\n".join(lines)
+
+
 def _write_ass(
     path: Path,
     captions: List[Dict[str, Any]],
@@ -610,7 +638,7 @@ def _write_ass(
     uppercase = bool(merged.get("uppercase", True))
     show_phrase = bool(merged.get("show_phrase", True))
     animation = merged.get("animation", "pop")
-    position = merged.get("position", "bottom")  # bottom, middle, top
+    position = merged.get("position", "bottom")  # bottom, middle, top, custom
 
     # ASS BorderStyle: 1 = outline+drop-shadow, 3 = opaque box behind text
     if background == "dark_box":
@@ -626,17 +654,41 @@ def _write_ass(
         back_color_active = "&H88000000&"
         back_color_phrase = "&H66000000&"
 
-    # Vertical margin from bottom (ASS Alignment 2 = bottom-center)
-    # We position via MarginV measured from the alignment edge
-    if position == "middle":
-        margin_active = int(h * 0.48)
-        margin_phrase = int(h * 0.40)
-    elif position == "top":
-        margin_active = int(h * 0.78)
-        margin_phrase = int(h * 0.70)
-    else:  # bottom
-        margin_active = int(h * 0.30)
-        margin_phrase = int(h * 0.22)
+    def _clamp_pct(value: Any, fallback: float) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            numeric = fallback
+        return max(5.0, min(95.0, numeric))
+
+    preset_positions = {
+        "top": (50.0, 22.0),
+        "middle": (50.0, 52.0),
+        "bottom": (50.0, 72.0),
+    }
+    fallback_x, fallback_y = preset_positions.get(position, preset_positions["bottom"])
+    if position == "custom":
+        active_x_pct = _clamp_pct(merged.get("position_x"), fallback_x)
+        active_y_pct = _clamp_pct(merged.get("position_y"), fallback_y)
+    else:
+        active_x_pct, active_y_pct = fallback_x, fallback_y
+
+    box_width_pct = _clamp_pct(merged.get("box_width"), float(preset.get("box_width", 76)))
+    box_height_pct = _clamp_pct(merged.get("box_height"), float(preset.get("box_height", 16)))
+    box_w = max(80, int(w * box_width_pct / 100))
+    box_h = max(48, int(h * box_height_pct / 100))
+    active_x = int(w * active_x_pct / 100)
+    box_center_y = int(h * active_y_pct / 100)
+    box_left = max(0, min(w - box_w, int(active_x - box_w / 2)))
+    box_top = max(0, min(h - box_h, int(box_center_y - box_h / 2)))
+    if show_phrase and size_phrase > 0:
+        active_y = box_top + int(box_h * 0.38)
+        phrase_y = box_top + int(box_h * 0.68)
+    else:
+        active_y = box_top + int(box_h * 0.5)
+        phrase_y = active_y
+    max_phrase_chars = max(6, int(box_w / max(8, size_phrase * 0.48 if size_phrase else size_active * 0.42)))
+    max_active_chars = max(6, int(box_w / max(8, size_active * 0.45)))
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -647,22 +699,23 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Active,{font_name},{size_active},{active_color},{active_color},&H00000000&,{back_color_active},1,0,0,0,100,100,0,0,{border_style},{stroke},2,2,40,40,{margin_active},1
-Style: Phrase,{font_name},{size_phrase},{phrase_color},{phrase_color},&H00000000&,{back_color_phrase},1,0,0,0,100,100,0,0,{border_style if size_phrase else 1},{max(2, stroke // 2)},1,2,40,40,{margin_phrase},1
+Style: Active,{font_name},{size_active},{active_color},{active_color},&H00000000&,{back_color_active},1,0,0,0,100,100,0,0,{border_style},{stroke},2,5,40,40,0,1
+Style: Phrase,{font_name},{size_phrase},{phrase_color},{phrase_color},&H00000000&,{back_color_phrase},1,0,0,0,100,100,0,0,{border_style if size_phrase else 1},{max(2, stroke // 2)},1,5,40,40,0,1
+Style: Box,{font_name},1,{back_color_active},{back_color_active},&H00000000&,{back_color_active},0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     # Animation override tags
-    def fx_tag():
+    def fx_tag(x: int, y: int):
         if animation == "fade":
-            return r"{\fad(120,80)}"
+            return f"{{\\pos({x},{y})\\fad(120,80)}}"
         if animation == "slide":
-            return r"{\move(540,1100,540,1056,0,140)}"
+            return f"{{\\move({x},{y + 48},{x},{y},0,140)}}"
         if animation == "pop":
-            return r"{\fscx80\fscy80\t(0,80,\fscx105\fscy105)\t(80,160,\fscx100\fscy100)}"
-        return ""
+            return f"{{\\pos({x},{y})\\fscx80\\fscy80\\t(0,80,\\fscx105\\fscy105)\\t(80,160,\\fscx100\\fscy100)}}"
+        return f"{{\\pos({x},{y})}}"
 
     lines = []
     for cap in captions:
@@ -671,17 +724,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         phrase_text = (cap.get("text") or "").strip()
         if uppercase:
             phrase_text = phrase_text.upper()
-        phrase_text = _ass_escape(phrase_text)[:140]
+        phrase_text_wrapped = _ass_escape(_wrap_caption_text(phrase_text, max_phrase_chars))[:240]
 
-        if phrase_text and show_phrase and size_phrase > 0:
+        if phrase_text and background != "none":
             lines.append(
-                f"Dialogue: 0,{_ass_time(cap_start)},{_ass_time(cap_end)},Phrase,,0,0,0,,{phrase_text}"
+                f"Dialogue: 0,{_ass_time(cap_start)},{_ass_time(cap_end)},Box,,0,0,0,,{{\\p1\\pos({box_left},{box_top})}}m 0 0 l {box_w} 0 l {box_w} {box_h} l 0 {box_h}"
+            )
+
+        if phrase_text_wrapped and show_phrase and size_phrase > 0:
+            lines.append(
+                f"Dialogue: 1,{_ass_time(cap_start)},{_ass_time(cap_end)},Phrase,,0,0,0,,{{\\pos({active_x},{phrase_y})}}{phrase_text_wrapped}"
             )
 
         words = cap.get("words") or []
-        if not words and phrase_text:
+        if not words and phrase_text_wrapped:
+            active_phrase_text = _ass_escape(_wrap_caption_text(phrase_text, max_active_chars))[:240]
             lines.append(
-                f"Dialogue: 1,{_ass_time(cap_start)},{_ass_time(cap_end)},Active,,0,0,0,,{fx_tag()}{phrase_text}"
+                f"Dialogue: 2,{_ass_time(cap_start)},{_ass_time(cap_end)},Active,,0,0,0,,{fx_tag(active_x, active_y)}{active_phrase_text}"
             )
             continue
         for w_obj in words:
@@ -694,7 +753,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             s = float(w_obj.get("start", 0))
             e = float(w_obj.get("end", s + 0.2))
             lines.append(
-                f"Dialogue: 1,{_ass_time(s)},{_ass_time(e)},Active,,0,0,0,,{fx_tag()}{wtext}"
+                f"Dialogue: 2,{_ass_time(s)},{_ass_time(e)},Active,,0,0,0,,{fx_tag(active_x, active_y)}{wtext}"
             )
 
     if not lines:

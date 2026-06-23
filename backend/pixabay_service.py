@@ -24,6 +24,45 @@ _MOCK_IMAGES: List[Dict[str, Any]] = [
     {"id": "m12", "type": "image", "title": "Abstract neon waves", "thumb": "https://images.unsplash.com/photo-1554189097-ffe88e998a2b?w=400", "url": "https://images.unsplash.com/photo-1554189097-ffe88e998a2b?w=1920", "tags": "abstract neon waves"},
 ]
 
+_MOCK_VIDEOS: List[Dict[str, Any]] = [
+    {
+        "id": "v1",
+        "type": "video",
+        "title": "Flower macro",
+        "thumb": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.jpg",
+        "url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        "video_url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        "tags": "nature flower close up cinematic",
+    },
+    {
+        "id": "v2",
+        "type": "video",
+        "title": "Sintel trailer",
+        "thumb": "https://media.w3.org/2010/05/sintel/poster.png",
+        "url": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+        "video_url": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+        "tags": "cinematic story people action",
+    },
+    {
+        "id": "v3",
+        "type": "video",
+        "title": "Small motion sample",
+        "thumb": "https://media.w3.org/2010/05/video/poster.png",
+        "url": "https://media.w3.org/2010/05/video/movie_300.mp4",
+        "video_url": "https://media.w3.org/2010/05/video/movie_300.mp4",
+        "tags": "city travel movement lifestyle",
+    },
+    {
+        "id": "v4",
+        "type": "video",
+        "title": "Bunny trailer",
+        "thumb": "https://media.w3.org/2010/05/bunny/poster.png",
+        "url": "https://media.w3.org/2010/05/bunny/trailer.mp4",
+        "video_url": "https://media.w3.org/2010/05/bunny/trailer.mp4",
+        "tags": "nature character story bright",
+    },
+]
+
 _MOCK_MUSIC: List[Dict[str, Any]] = [
     {"id": "mu1", "type": "audio", "title": "Cinematic Tension", "duration": 30, "preview": "https://cdn.pixabay.com/audio/2022/03/15/audio_8398a9bf3a.mp3", "tags": "cinematic dark"},
     {"id": "mu2", "type": "audio", "title": "Upbeat Pop Energy", "duration": 30, "preview": "https://cdn.pixabay.com/audio/2022/10/30/audio_946bc6c190.mp3", "tags": "pop upbeat"},
@@ -32,25 +71,85 @@ _MOCK_MUSIC: List[Dict[str, Any]] = [
 ]
 
 
-async def search_pixabay(query: str, media_type: str = "image", per_page: int = 12) -> List[Dict[str, Any]]:
+def _mock_filter(items: List[Dict[str, Any]], query: str, per_page: int) -> List[Dict[str, Any]]:
+    q = query.lower().strip()
+    if not q:
+        return items[:per_page]
+    results = [item for item in items if any(token in item["tags"].lower() for token in q.split())]
+    return (results or items)[:per_page]
+
+
+def _pixabay_video_url(item: Dict[str, Any]) -> str | None:
+    videos = item.get("videos") or {}
+    for key in ("medium", "small", "tiny", "large"):
+        video = videos.get(key) or {}
+        url = video.get("url")
+        if url:
+            return url
+    return None
+
+
+def _pixabay_video_thumb(item: Dict[str, Any]) -> str:
+    picture_id = item.get("picture_id")
+    if picture_id:
+        return f"https://i.vimeocdn.com/video/{picture_id}_640x360.jpg"
+    return item.get("userImageURL") or ""
+
+
+async def search_pixabay(
+    query: str,
+    media_type: str = "image",
+    per_page: int = 12,
+    orientation: str = "vertical",
+) -> List[Dict[str, Any]]:
     """Search Pixabay images or music. Falls back to curated mock if no API key."""
     if not _KEY:
+        if media_type == "video":
+            return _mock_filter(_MOCK_VIDEOS, query, per_page)
         if media_type == "music":
             return [m for m in _MOCK_MUSIC if not query or query.lower() in m["tags"].lower()]
-        q = query.lower()
-        results = [m for m in _MOCK_IMAGES if not q or any(t in m["tags"] for t in q.split())]
-        return results or _MOCK_IMAGES[:per_page]
+        return _mock_filter(_MOCK_IMAGES, query, per_page)
 
     async with httpx.AsyncClient(timeout=15) as client:
         if media_type == "music":
             # Pixabay music endpoint isn't open; return mock when music requested
             return _MOCK_MUSIC
+        if media_type == "video":
+            url = "https://pixabay.com/api/videos/"
+            params = {
+                "key": _KEY,
+                "q": query or "cinematic",
+                "video_type": "film",
+                "orientation": orientation if orientation in {"horizontal", "vertical"} else "all",
+                "per_page": per_page,
+                "safesearch": "true",
+            }
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            items = r.json().get("hits", [])
+            results = []
+            for it in items:
+                video_url = _pixabay_video_url(it)
+                if not video_url:
+                    continue
+                results.append(
+                    {
+                        "id": str(it.get("id")),
+                        "type": "video",
+                        "title": it.get("tags", "")[:40],
+                        "thumb": _pixabay_video_thumb(it),
+                        "url": video_url,
+                        "video_url": video_url,
+                        "tags": it.get("tags", ""),
+                    }
+                )
+            return results
         url = "https://pixabay.com/api/"
         params = {
             "key": _KEY,
             "q": query or "cinematic",
             "image_type": "photo",
-            "orientation": "vertical",
+            "orientation": orientation if orientation in {"horizontal", "vertical"} else "all",
             "per_page": per_page,
             "safesearch": "true",
         }
@@ -77,3 +176,16 @@ async def fetch_first_image_for_keywords(keywords: list) -> str | None:
     if items:
         return items[0]["url"]
     return None
+
+
+async def fetch_first_video_for_keywords(keywords: list, aspect: str = "9:16") -> str:
+    """Helper used by AI generator to pick a stock video for a scene."""
+    q = " ".join(keywords[:2]) if keywords else "cinematic"
+    orientation = "horizontal" if aspect == "16:9" else "vertical"
+    items = await search_pixabay(q, "video", per_page=6, orientation=orientation)
+    if not items:
+        items = await search_pixabay("cinematic motion", "video", per_page=6, orientation=orientation)
+    if items:
+        first = items[0]
+        return first.get("video_url") or first.get("url") or _MOCK_VIDEOS[0]["video_url"]
+    return _MOCK_VIDEOS[0]["video_url"]

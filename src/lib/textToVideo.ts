@@ -90,6 +90,10 @@ export interface TextToVideoCaptionStyle {
   phrase_color: string;
   phrase_opacity: number;
   position: string;
+  position_x: number;
+  position_y: number;
+  box_width: number;
+  box_height: number;
   size_active: number;
   size_phrase: number;
   stroke_width: number;
@@ -165,6 +169,10 @@ export const DEFAULT_CAPTION_STYLE: TextToVideoCaptionStyle = {
   phrase_color: "#FFFFFF",
   phrase_opacity: 0.55,
   position: "bottom",
+  position_x: 50,
+  position_y: 72,
+  box_width: 76,
+  box_height: 16,
   size_active: 96,
   size_phrase: 42,
   stroke_width: 6,
