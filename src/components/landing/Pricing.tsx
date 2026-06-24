@@ -74,7 +74,7 @@ const Pricing = () => {
       included: true,
     });
     
-    features.push({ text: "Text to Video (80 credits/10 sec)", included: limits.hasTextToVideo });
+    features.push({ text: "Text to Video (30 credits/10 sec)", included: limits.hasTextToVideo });
 
     // Script writer / TTS / Voice Clone (show on all plans; crossed when unavailable)
     features.push({ text: "Script writer", included: limits.hasScriptWriter });

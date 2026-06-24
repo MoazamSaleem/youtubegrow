@@ -10,7 +10,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const COST_PER_10_SECONDS = 80;
+const COST_PER_10_SECONDS = 30;
 const MIN_DURATION_SECONDS = 10;
 const MAX_DURATION_SECONDS = 120;
 const STYLES = new Set(["cinematic", "documentary", "animated", "realistic", "product", "vertical-short"]);
@@ -364,7 +364,7 @@ serve(async (req) => {
 
     if (action === "librarySearch") {
       const q = typeof body.q === "string" ? body.q : "";
-      const type = body.type === "image" ? "image" : "video";
+      const type = "video";
       const result = await fetchProvider(
         providerEndpoint,
         providerApiKey,

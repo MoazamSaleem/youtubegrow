@@ -1,4 +1,4 @@
-export const TEXT_TO_VIDEO_COST_PER_10_SECONDS = 80;
+export const TEXT_TO_VIDEO_COST_PER_10_SECONDS = 30;
 export const TEXT_TO_VIDEO_MIN_DURATION_SECONDS = 10;
 export const TEXT_TO_VIDEO_MAX_DURATION_SECONDS = 120;
 
@@ -94,6 +94,9 @@ export interface TextToVideoCaptionStyle {
   position_y: number;
   box_width: number;
   box_height: number;
+  border_enabled: boolean;
+  border_color: string;
+  border_width: number;
   size_active: number;
   size_phrase: number;
   stroke_width: number;
@@ -173,6 +176,9 @@ export const DEFAULT_CAPTION_STYLE: TextToVideoCaptionStyle = {
   position_y: 72,
   box_width: 76,
   box_height: 16,
+  border_enabled: false,
+  border_color: "#FFFFFF",
+  border_width: 2,
   size_active: 96,
   size_phrase: 42,
   stroke_width: 6,
@@ -228,15 +234,17 @@ export function projectIdFromGeneration(generation: TextToVideoGeneration | null
 }
 
 export function normalizeTextToVideoProject(project: TextToVideoProject): TextToVideoProject {
+  const scenes = project.scenes ?? [];
+  const timelineLayers = project.timeline_layers ?? [];
   return {
     ...project,
-    scenes: project.scenes ?? [],
+    scenes,
     caption_style: { ...DEFAULT_CAPTION_STYLE, ...(project.caption_style ?? {}) },
     music_tracks: project.music_tracks ?? [],
-    timeline_layers: project.timeline_layers ?? [],
+    timeline_layers: timelineLayers,
     music_timeline: { ...DEFAULT_MUSIC_TIMELINE, ...(project.music_timeline ?? {}) },
     total_duration:
       Number(project.total_duration) ||
-      (project.scenes ?? []).reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0),
+      scenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0),
   };
 }

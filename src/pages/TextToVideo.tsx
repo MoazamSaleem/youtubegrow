@@ -687,7 +687,6 @@ const TextToVideo = () => {
       total_duration: currentProject.scenes.reduce((sum, scene) => sum + (Number(scene.duration) || 0), 0),
       thumbnail_url:
         currentProject.scenes.find((scene) => scene.video_url)?.video_url ??
-        currentProject.scenes.find((scene) => scene.image_url)?.image_url ??
         currentProject.thumbnail_url,
     }, successTitle);
   };
@@ -790,7 +789,15 @@ const TextToVideo = () => {
     const url = mediaUrlFromLibraryItem(item);
     if (!url) return;
     const isVideo = item.type === "video" || Boolean(item.video_url) || isVideoUrl(url);
-    updateSceneLocal(selectedScene.id, isVideo ? { video_url: item.video_url || item.url || url, image_url: null } : { image_url: item.image_url || item.url || url, video_url: null });
+    if (!isVideo) {
+      toast({
+        title: "Video required",
+        description: "Text-to-video scene visuals can only use video media.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateSceneLocal(selectedScene.id, { video_url: item.video_url || item.url || url, image_url: null });
     await saveScenes("Scene visual saved");
   };
 

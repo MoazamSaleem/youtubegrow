@@ -49,6 +49,7 @@ CAPTION_PRESETS = {
         "size_active": 96, "size_phrase": 42, "stroke_width": 6,
         "position": "bottom", "position_x": 50, "position_y": 72,
         "box_width": 76, "box_height": 16,
+        "border_enabled": False, "border_color": "#FFFFFF", "border_width": 2,
         "background": "none", "show_phrase": True,
     },
     "hormozi": {
@@ -56,6 +57,7 @@ CAPTION_PRESETS = {
         "size_active": 110, "size_phrase": 56, "stroke_width": 10,
         "position": "middle", "position_x": 50, "position_y": 52,
         "box_width": 82, "box_height": 20,
+        "border_enabled": False, "border_color": "#FFFFFF", "border_width": 2,
         "background": "dark_box", "show_phrase": False,
     },
     "mrbeast": {
@@ -63,6 +65,7 @@ CAPTION_PRESETS = {
         "size_active": 120, "size_phrase": 48, "stroke_width": 12,
         "position": "middle", "position_x": 50, "position_y": 52,
         "box_width": 84, "box_height": 22,
+        "border_enabled": False, "border_color": "#FFFFFF", "border_width": 2,
         "background": "accent_box", "show_phrase": False,
     },
     "minimal": {
@@ -70,6 +73,7 @@ CAPTION_PRESETS = {
         "size_active": 72, "size_phrase": 36, "stroke_width": 4,
         "position": "bottom", "position_x": 50, "position_y": 76,
         "box_width": 70, "box_height": 14,
+        "border_enabled": False, "border_color": "#FFFFFF", "border_width": 2,
         "background": "none", "show_phrase": False,
     },
     "subtitle": {
@@ -77,11 +81,13 @@ CAPTION_PRESETS = {
         "size_active": 54, "size_phrase": 0, "stroke_width": 3,
         "position": "bottom", "position_x": 50, "position_y": 84,
         "box_width": 92, "box_height": 10,
+        "border_enabled": False, "border_color": "#FFFFFF", "border_width": 2,
         "background": "dark_box", "show_phrase": False,
     },
 }
 
 ASPECT_DIMS = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
+FALLBACK_SCENE_VIDEO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
 
 # Format -> (extension, video codec, audio codec, extra flags)
 FORMATS = {
@@ -228,8 +234,7 @@ async def render_project(
     scene_clips: List[Path] = []
     total = len(scenes) or 1
     for i, sc in enumerate(scenes):
-        img_url = sc.get("image_url") or ""
-        upload_url = sc.get("video_url")  # uploaded user clip (mp4) — overrides image
+        upload_url = sc.get("video_url")  # generated or uploaded user clip (mp4)
         voice_path = _resolve_storage_path(sc.get("voiceover_url"))
         duration = float(sc.get("duration") or 3.0)
 
@@ -250,18 +255,15 @@ async def render_project(
             except Exception:
                 is_video = False
         if not is_video:
-            img_path = work / f"scene_{i}.jpg"
-            if img_url and img_url.startswith("http"):
-                try:
-                    await _download(img_url, img_path)
-                except Exception:
-                    await _make_placeholder(img_path, W, H, f"Scene {i + 1}")
-            elif img_url and (STORAGE_DIR / img_url.lstrip("/").replace("api/storage/", "")).exists():
-                src = STORAGE_DIR / img_url.lstrip("/").replace("api/storage/", "")
-                shutil.copy(src, img_path)
-            else:
-                await _make_placeholder(img_path, W, H, f"Scene {i + 1}")
-            media_path = img_path
+            try:
+                v = work / f"scene_{i}_fallback.mp4"
+                await _download(FALLBACK_SCENE_VIDEO_URL, v)
+                media_path = v
+                is_video = v.exists()
+            except Exception:
+                is_video = False
+        if not is_video:
+            raise RuntimeError(f"Scene {i + 1} has no playable video source")
 
         # Build filter chain: scale/crop -> animation -> effects -> captions (ASS subtitles)
         animation = sc.get("animation", "ken_burns_in")
@@ -571,6 +573,15 @@ def _ass_color(hex_color: str) -> str:
     return f"&H00{b}{g}{r}&".upper()
 
 
+def _ass_inline_color(hex_color: str) -> str:
+    """Convert #RRGGBB to ASS inline override &HBBGGRR& format."""
+    h = str(hex_color or "").lstrip("#")
+    if len(h) != 6:
+        h = "FFD60A"
+    r, g, b = h[0:2], h[2:4], h[4:6]
+    return f"&H{b}{g}{r}&".upper()
+
+
 def _ass_time(seconds: float) -> str:
     """Convert seconds to ASS time format H:MM:SS.cs"""
     seconds = max(0.0, seconds)
@@ -635,6 +646,9 @@ def _write_ass(
     size_phrase = int(merged.get("size_phrase", 42))
     stroke = int(merged.get("stroke_width", 6))
     background = merged.get("background", "none")  # none | accent_box | dark_box
+    border_enabled = bool(merged.get("border_enabled", False))
+    border_color = _ass_color(merged.get("border_color", "#FFFFFF"))
+    border_width = max(0, int(merged.get("border_width", 2)))
     uppercase = bool(merged.get("uppercase", True))
     show_phrase = bool(merged.get("show_phrase", True))
     animation = merged.get("animation", "pop")
@@ -681,12 +695,8 @@ def _write_ass(
     box_center_y = int(h * active_y_pct / 100)
     box_left = max(0, min(w - box_w, int(active_x - box_w / 2)))
     box_top = max(0, min(h - box_h, int(box_center_y - box_h / 2)))
-    if show_phrase and size_phrase > 0:
-        active_y = box_top + int(box_h * 0.38)
-        phrase_y = box_top + int(box_h * 0.68)
-    else:
-        active_y = box_top + int(box_h * 0.5)
-        phrase_y = active_y
+    active_y = box_top + int(box_h * 0.5)
+    phrase_y = active_y
     max_phrase_chars = max(6, int(box_w / max(8, size_phrase * 0.48 if size_phrase else size_active * 0.42)))
     max_active_chars = max(6, int(box_w / max(8, size_active * 0.45)))
 
@@ -702,6 +712,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Active,{font_name},{size_active},{active_color},{active_color},&H00000000&,{back_color_active},1,0,0,0,100,100,0,0,{border_style},{stroke},2,5,40,40,0,1
 Style: Phrase,{font_name},{size_phrase},{phrase_color},{phrase_color},&H00000000&,{back_color_phrase},1,0,0,0,100,100,0,0,{border_style if size_phrase else 1},{max(2, stroke // 2)},1,5,40,40,0,1
 Style: Box,{font_name},1,{back_color_active},{back_color_active},&H00000000&,{back_color_active},0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: Border,{font_name},1,{border_color},{border_color},&H00000000&,{border_color},0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -731,29 +742,56 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"Dialogue: 0,{_ass_time(cap_start)},{_ass_time(cap_end)},Box,,0,0,0,,{{\\p1\\pos({box_left},{box_top})}}m 0 0 l {box_w} 0 l {box_w} {box_h} l 0 {box_h}"
             )
 
-        if phrase_text_wrapped and show_phrase and size_phrase > 0:
-            lines.append(
-                f"Dialogue: 1,{_ass_time(cap_start)},{_ass_time(cap_end)},Phrase,,0,0,0,,{{\\pos({active_x},{phrase_y})}}{phrase_text_wrapped}"
+        if phrase_text and border_enabled and border_width > 0:
+            edge = max(1, min(border_width, max(1, box_w // 8), max(1, box_h // 8)))
+            border_shapes = (
+                (0, 0, box_w, edge),
+                (0, box_h - edge, box_w, edge),
+                (0, 0, edge, box_h),
+                (box_w - edge, 0, edge, box_h),
             )
+            for bx, by, bwid, bhei in border_shapes:
+                lines.append(
+                    f"Dialogue: 1,{_ass_time(cap_start)},{_ass_time(cap_end)},Border,,0,0,0,,{{\\p1\\pos({box_left + bx},{box_top + by})}}m 0 0 l {bwid} 0 l {bwid} {bhei} l 0 {bhei} l 0 0"
+                )
 
         words = cap.get("words") or []
         if not words and phrase_text_wrapped:
-            active_phrase_text = _ass_escape(_wrap_caption_text(phrase_text, max_active_chars))[:240]
             lines.append(
-                f"Dialogue: 2,{_ass_time(cap_start)},{_ass_time(cap_end)},Active,,0,0,0,,{fx_tag(active_x, active_y)}{active_phrase_text}"
+                f"Dialogue: 3,{_ass_time(cap_start)},{_ass_time(cap_end)},Active,,0,0,0,,{fx_tag(active_x, active_y)}{phrase_text_wrapped}"
             )
             continue
+
+        clean_words = []
         for w_obj in words:
-            wtext = (w_obj.get("word") or "").strip()
-            if uppercase:
-                wtext = wtext.upper()
-            wtext = _ass_escape(wtext)[:40]
-            if not wtext:
+            raw = (w_obj.get("word") or "").strip()
+            if not raw:
                 continue
-            s = float(w_obj.get("start", 0))
-            e = float(w_obj.get("end", s + 0.2))
+            clean_words.append({
+                "word": raw.upper() if uppercase else raw,
+                "start": float(w_obj.get("start", cap_start)),
+                "end": float(w_obj.get("end", float(w_obj.get("start", cap_start)) + 0.2)),
+            })
+
+        if not clean_words:
+            continue
+
+        inactive_size = size_phrase if size_phrase > 0 else max(1, int(size_active * 0.72))
+        active_inline = _ass_inline_color(merged.get("active_color") or speaker_color)
+        phrase_inline = _ass_inline_color(phrase_color_hex)
+        for active_index, word in enumerate(clean_words):
+            s = float(word["start"])
+            e = float(word["end"])
+            styled_words = []
+            for idx, item in enumerate(clean_words):
+                escaped_word = _ass_escape(str(item["word"]))[:40]
+                if idx == active_index:
+                    styled_words.append(f"{{\\c{active_inline}\\fs{size_active}}}{escaped_word}{{\\c{phrase_inline}\\fs{inactive_size}}}")
+                else:
+                    styled_words.append(f"{{\\c{phrase_inline}\\fs{inactive_size}}}{escaped_word}")
+            combined_text = " ".join(styled_words)
             lines.append(
-                f"Dialogue: 2,{_ass_time(s)},{_ass_time(e)},Active,,0,0,0,,{fx_tag(active_x, active_y)}{wtext}"
+                f"Dialogue: 3,{_ass_time(s)},{_ass_time(e)},Active,,0,0,0,,{fx_tag(active_x, active_y)}{combined_text}"
             )
 
     if not lines:

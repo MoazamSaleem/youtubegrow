@@ -105,7 +105,7 @@ const Billing = () => {
     { name: "Channel Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].channelAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].channelAnalysisFrequency },
     { name: "Competitor Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].competitorAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].competitorAnalysisFrequency },
     { name: "SEO Analyzer", getValue: (_p: SubscriptionPlan) => "Included (20 credits/query)" },
-    { name: "Text to Video", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasTextToVideo ? "80 credits/10 sec" : false },
+    { name: "Text to Video", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasTextToVideo ? "30 credits/10 sec" : false },
     { name: "Script Writer", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasScriptWriter },
     { name: "Text to Speech", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasTextToSpeech },
     { name: "Voice Clone", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].hasVoiceClone },
@@ -374,7 +374,7 @@ const Billing = () => {
               <h2 className="font-display text-xl font-bold">AI Strategist Credits</h2>
             </div>
             <p className="text-muted-foreground mb-4">
-              AI Strategist credits power personalized AI tools across the platform, including text to video, text to speech, and voice cloning. Text to video uses 80 credits per 10 seconds, text to speech uses 80-180 credits depending on character length, and strategist queries consume credits based on complexity:
+              AI Strategist credits power personalized AI tools across the platform, including text to video, text to speech, and voice cloning. Text to video uses 30 credits per 10 seconds, text to speech uses 80-180 credits depending on character length, and strategist queries consume credits based on complexity:
             </p>
             <div className="grid sm:grid-cols-3 gap-4">
               <div className="p-4 rounded-lg bg-muted/30">

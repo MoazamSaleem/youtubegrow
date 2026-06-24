@@ -179,6 +179,9 @@ const CAPTION_STYLE_PRESETS: Record<string, Partial<TextToVideoCaptionStyle>> = 
     position_y: 72,
     box_width: 76,
     box_height: 16,
+    border_enabled: false,
+    border_color: "#FFFFFF",
+    border_width: 2,
     size_active: 96,
     size_phrase: 42,
     stroke_width: 6,
@@ -198,6 +201,9 @@ const CAPTION_STYLE_PRESETS: Record<string, Partial<TextToVideoCaptionStyle>> = 
     position_y: 52,
     box_width: 82,
     box_height: 20,
+    border_enabled: false,
+    border_color: "#FFFFFF",
+    border_width: 2,
     size_active: 110,
     size_phrase: 56,
     stroke_width: 10,
@@ -217,6 +223,9 @@ const CAPTION_STYLE_PRESETS: Record<string, Partial<TextToVideoCaptionStyle>> = 
     position_y: 52,
     box_width: 84,
     box_height: 22,
+    border_enabled: false,
+    border_color: "#FFFFFF",
+    border_width: 2,
     size_active: 120,
     size_phrase: 48,
     stroke_width: 12,
@@ -236,6 +245,9 @@ const CAPTION_STYLE_PRESETS: Record<string, Partial<TextToVideoCaptionStyle>> = 
     position_y: 76,
     box_width: 70,
     box_height: 14,
+    border_enabled: false,
+    border_color: "#FFFFFF",
+    border_width: 2,
     size_active: 72,
     size_phrase: 36,
     stroke_width: 4,
@@ -255,6 +267,9 @@ const CAPTION_STYLE_PRESETS: Record<string, Partial<TextToVideoCaptionStyle>> = 
     position_y: 84,
     box_width: 92,
     box_height: 10,
+    border_enabled: false,
+    border_color: "#FFFFFF",
+    border_width: 2,
     size_active: 54,
     size_phrase: 0,
     stroke_width: 3,
@@ -273,8 +288,8 @@ const CAPTION_FONT_STYLES: Record<string, CSSProperties> = {
 };
 const LABEL_COLUMN_WIDTH = 124;
 const MIN_CLIP_SECONDS = 0.25;
-const MIN_TIMELINE_ZOOM = 24;
-const MAX_TIMELINE_ZOOM = 180;
+const MIN_TIMELINE_ZOOM = -200;
+const MAX_TIMELINE_ZOOM = 500;
 const LIBRARY_DRAG_MIME = "application/x-video-editor-library-item";
 
 const makeId = () =>
@@ -292,6 +307,11 @@ const formatClock = (value: number) => {
   const minutes = Math.floor(safe / 60);
   const seconds = safe % 60;
   return `${String(minutes).padStart(2, "0")}:${seconds.toFixed(1).padStart(4, "0")}`;
+};
+
+const effectiveTimelineZoom = (value: number) => {
+  if (value <= 0) return 24 * Math.pow(2, value / 200);
+  return value;
 };
 
 const mediaUrlFromLibraryItem = (item: LibraryItem) =>
@@ -382,6 +402,7 @@ type DragState =
       kind: "layer";
       action: "move" | "resize-start" | "resize-end";
       id: string;
+      selectedIds: string[];
       startX: number;
       initialLayers: TextToVideoTimelineLayer[];
       draftLayers: TextToVideoTimelineLayer[];
@@ -399,6 +420,16 @@ type DragState =
       action: "move" | "resize-start" | "resize-end";
       sceneId: string;
       captionId: string;
+      selectedIds: string[];
+      selectedCaptions: Array<{
+        sceneId: string;
+        captionId: string;
+        initialStart: number;
+        initialEnd: number;
+        sceneStart: number;
+        sceneDuration: number;
+        isLocal: boolean;
+      }>;
       startX: number;
       initialStart: number;
       initialEnd: number;
@@ -415,6 +446,17 @@ type DragState =
       initialTimeline: TextToVideoMusicTimeline;
       draftTimeline: TextToVideoMusicTimeline;
     };
+
+type MarqueeState = {
+  kind: "caption" | "layer";
+  layerType?: TextToVideoTimelineLayer["type"];
+  pointerId: number;
+  startX: number;
+  currentX: number;
+  additive: boolean;
+  initialCaptionIds: string[];
+  initialLayerIds: string[];
+};
 
 interface PreviewAudioSource {
   id: string;
@@ -515,6 +557,9 @@ export const VideoEditorWorkspace = ({
   const [playheadTime, setPlayheadTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedCaptionId, setSelectedCaptionId] = useState<string | null>(null);
+  const [selectedCaptionIds, setSelectedCaptionIds] = useState<string[]>([]);
+  const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [showAddLayer, setShowAddLayer] = useState(false);
   const [libraryMediaType, setLibraryMediaType] = useState<"image" | "video">("video");
   const [replaceMenu, setReplaceMenu] = useState<{ x: number; y: number; target: ReplaceTarget } | null>(null);
@@ -526,10 +571,12 @@ export const VideoEditorWorkspace = ({
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const dragStateRef = useRef<DragState | null>(null);
   const captionInteractionRef = useRef<CaptionInteraction | null>(null);
+  const marqueeRef = useRef<MarqueeState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewFrameRef = useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const playheadTimeRef = useRef(0);
+  const timelineZoomRef = useRef(timelineZoom);
 
   const timelineDuration = useMemo(() => {
     const layerEnd = Math.max(
@@ -561,7 +608,8 @@ export const VideoEditorWorkspace = ({
     return Array.from({ length: count + 1 }, (_, index) => Math.min(index * step, timelineDuration));
   }, [timelineDuration]);
 
-  const timelineWidth = Math.max(920, Math.ceil(timelineDuration * timelineZoom));
+  const timelineScale = effectiveTimelineZoom(timelineZoom);
+  const timelineWidth = Math.max(920, Math.ceil(timelineDuration * timelineScale));
   const pixelsPerSecond = timelineWidth / Math.max(timelineDuration, 0.1);
   const playheadLeft = playheadTime * pixelsPerSecond;
 
@@ -578,11 +626,11 @@ export const VideoEditorWorkspace = ({
 
   const activeSceneItem = sceneAtTime(sceneTimeline, playheadTime);
   const previewScene = activeSceneItem?.scene ?? selectedScene ?? project.scenes[0] ?? null;
-  const selectedCaption =
-    captionTimeline.find((item) => item.caption.id === selectedCaptionId)?.caption ??
-    captionTimeline.find((item) => playheadTime >= item.start && playheadTime <= item.end)?.caption ??
-    previewScene?.captions?.[0] ??
+  const selectedCaptionItem =
+    captionTimeline.find((item) => item.caption.id === selectedCaptionId && playheadTime >= item.start && playheadTime <= item.end) ??
+    captionTimeline.find((item) => playheadTime >= item.start && playheadTime <= item.end) ??
     null;
+  const selectedCaption = selectedCaptionItem?.caption ?? null;
   const activeLayers = (project.timeline_layers ?? []).filter(
     (layer) => playheadTime >= layer.start && playheadTime <= layer.start + layer.duration,
   );
@@ -646,6 +694,10 @@ export const VideoEditorWorkspace = ({
   useEffect(() => {
     playheadTimeRef.current = playheadTime;
   }, [playheadTime]);
+
+  useEffect(() => {
+    timelineZoomRef.current = timelineZoom;
+  }, [timelineZoom]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -750,20 +802,43 @@ export const VideoEditorWorkspace = ({
     setSelectedSceneId(sceneId);
     setSelectedLayerId(null);
     setSelectedCaptionId(null);
+    setSelectedLayerIds([]);
+    setSelectedCaptionIds([]);
     setActivePanel("scene");
     if (item) setPlayheadTime(item.start);
   };
 
-  const selectCaption = (captionId: string, start: number) => {
+  const selectionMode = (event: Pick<ReactPointerEvent, "ctrlKey" | "metaKey" | "shiftKey">) =>
+    event.ctrlKey || event.metaKey || event.shiftKey ? "toggle" : "single";
+
+  const selectCaption = (captionId: string, start: number, mode: "single" | "toggle" = "single") => {
     setSelectedCaptionId(captionId);
     setSelectedLayerId(null);
+    setSelectedLayerIds([]);
+    setSelectedCaptionIds((previous) => {
+      if (mode === "toggle") {
+        const exists = previous.includes(captionId);
+        const next = exists ? previous.filter((id) => id !== captionId) : [...previous, captionId];
+        return next.length ? next : [captionId];
+      }
+      return [captionId];
+    });
     setActivePanel("text");
     setPlayheadTime(clamp(start, 0, timelineDuration));
   };
 
-  const selectLayer = (layer: TextToVideoTimelineLayer) => {
+  const selectLayer = (layer: TextToVideoTimelineLayer, mode: "single" | "toggle" = "single") => {
     setSelectedLayerId(layer.id);
     setSelectedCaptionId(null);
+    setSelectedCaptionIds([]);
+    setSelectedLayerIds((previous) => {
+      if (mode === "toggle") {
+        const exists = previous.includes(layer.id);
+        const next = exists ? previous.filter((id) => id !== layer.id) : [...previous, layer.id];
+        return next.length ? next : [layer.id];
+      }
+      return [layer.id];
+    });
     setPlayheadTime(clamp(layer.start, 0, timelineDuration));
     setActivePanel(layer.type === "audio" ? "audio" : "media");
   };
@@ -789,7 +864,7 @@ export const VideoEditorWorkspace = ({
 
     setTimelineZoom(clampedZoom);
     window.requestAnimationFrame(() => {
-      const nextTimelineWidth = Math.max(920, Math.ceil(timelineDuration * clampedZoom));
+      const nextTimelineWidth = Math.max(920, Math.ceil(timelineDuration * effectiveTimelineZoom(clampedZoom)));
       const nextPixelsPerSecond = nextTimelineWidth / Math.max(timelineDuration, 0.1);
       const nextContentX = LABEL_COLUMN_WIDTH + anchorTime * nextPixelsPerSecond;
       if (scroll) scroll.scrollLeft = Math.max(0, nextContentX - anchorOffset);
@@ -800,17 +875,144 @@ export const VideoEditorWorkspace = ({
     setTimelineZoomAround(timelineZoom + delta, anchorClientX);
   };
 
+  const seekPreviewVideo = (video: HTMLVideoElement, force = false) => {
+    const targetTime = Math.max(0, playheadTimeRef.current - previewVideoStart + (Number(previewVideoTrimStart) || 0));
+    const applySeek = () => {
+      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : timelineDuration;
+      const nextTime = clamp(targetTime, 0, duration);
+      if (force || Math.abs(video.currentTime - nextTime) > (isPlaying ? 1.25 : 0.08)) {
+        try {
+          video.currentTime = nextTime;
+        } catch {
+          // Remote metadata can arrive after the source swap; the loadedmetadata retry handles it.
+        }
+      }
+    };
+
+    if (video.readyState >= 1) {
+      applySeek();
+    } else {
+      video.addEventListener("loadedmetadata", applySeek, { once: true });
+      video.load();
+    }
+  };
+
+  const togglePreviewPlayback = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      videoRef.current?.pause();
+      return;
+    }
+
+    const video = videoRef.current;
+    if (video) {
+      seekPreviewVideo(video, true);
+      void video.play().catch(() => undefined);
+    }
+    setIsPlaying(true);
+  };
+
   const handleTimelineWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     if (!event.ctrlKey && !event.metaKey && !event.altKey) return;
     event.preventDefault();
+    event.stopPropagation();
     zoomTimelineBy(event.deltaY < 0 ? 12 : -12, event.clientX);
   };
 
+  useEffect(() => {
+    const scroll = timelineScrollRef.current;
+    if (!scroll) return;
+
+    const handleNativeWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setTimelineZoomAround(timelineZoomRef.current + (event.deltaY < 0 ? 12 : -12), event.clientX);
+    };
+
+    scroll.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => scroll.removeEventListener("wheel", handleNativeWheel);
+  }, [setTimelineZoomAround]);
+
   const scrubFromTrack = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 && event.buttons !== 1) return;
+    clearTimelineSelection();
     const rect = event.currentTarget.getBoundingClientRect();
     const next = snapTime(((event.clientX - rect.left) / rect.width) * timelineDuration);
     setPlayheadTime(clamp(next, 0, timelineDuration));
+  };
+
+  const clearTimelineSelection = () => {
+    setSelectedCaptionId(null);
+    setSelectedLayerId(null);
+    setSelectedCaptionIds([]);
+    setSelectedLayerIds([]);
+  };
+
+  const beginMarqueeSelection = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    kind: MarqueeState["kind"],
+    layerType?: TextToVideoTimelineLayer["type"],
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const startX = clamp(event.clientX - rect.left, 0, rect.width);
+    const additive = event.ctrlKey || event.metaKey || event.shiftKey;
+    const next: MarqueeState = {
+      kind,
+      layerType,
+      pointerId: event.pointerId,
+      startX,
+      currentX: startX,
+      additive,
+      initialCaptionIds: selectedCaptionIds,
+      initialLayerIds: selectedLayerIds,
+    };
+    marqueeRef.current = next;
+    setMarquee(next);
+    if (!additive) clearTimelineSelection();
+  };
+
+  const selectedIdsFromMarquee = (state: MarqueeState) => {
+    const left = Math.min(state.startX, state.currentX);
+    const right = Math.max(state.startX, state.currentX);
+    const start = left / Math.max(pixelsPerSecond, 0.1);
+    const end = right / Math.max(pixelsPerSecond, 0.1);
+    if (state.kind === "caption") {
+      const ids = captionTimeline
+        .filter((item) => item.start <= end && item.end >= start)
+        .map((item) => item.caption.id);
+      return { captionIds: state.additive ? Array.from(new Set([...state.initialCaptionIds, ...ids])) : ids, layerIds: [] };
+    }
+    const ids = (project.timeline_layers ?? [])
+      .filter((layer) => (!state.layerType || layer.type === state.layerType) && layer.start <= end && layer.start + layer.duration >= start)
+      .map((layer) => layer.id);
+    return { captionIds: [], layerIds: state.additive ? Array.from(new Set([...state.initialLayerIds, ...ids])) : ids };
+  };
+
+  const updateMarqueeSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const state = marqueeRef.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const next = { ...state, currentX: clamp(event.clientX - rect.left, 0, rect.width) };
+    marqueeRef.current = next;
+    setMarquee(next);
+    const selected = selectedIdsFromMarquee(next);
+    setSelectedCaptionIds(selected.captionIds);
+    setSelectedLayerIds(selected.layerIds);
+    setSelectedCaptionId(selected.captionIds.at(-1) ?? null);
+    setSelectedLayerId(selected.layerIds.at(-1) ?? null);
+  };
+
+  const finishMarqueeSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const state = marqueeRef.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    updateMarqueeSelection(event);
+    marqueeRef.current = null;
+    setMarquee(null);
   };
 
   const beginLayerDrag = (
@@ -822,7 +1024,19 @@ export const VideoEditorWorkspace = ({
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     recordProjectSnapshot();
+    const mode = action === "move" ? selectionMode(event) : "single";
+    const selectedIds =
+      action === "move" && mode !== "toggle" && selectedLayerIds.includes(layer.id)
+        ? selectedLayerIds
+        : mode === "toggle"
+          ? selectedLayerIds.includes(layer.id)
+            ? selectedLayerIds.filter((id) => id !== layer.id)
+            : [...selectedLayerIds, layer.id]
+          : [layer.id];
+    const dragIds = selectedIds.length ? selectedIds : [layer.id];
     setSelectedLayerId(layer.id);
+    setSelectedLayerIds(dragIds);
+    setSelectedCaptionIds([]);
     setSelectedCaptionId(null);
     setActivePanel(layer.type === "audio" ? "audio" : "media");
     setPlayheadTime(clamp(Number(layer.start) || 0, 0, timelineDuration));
@@ -830,6 +1044,7 @@ export const VideoEditorWorkspace = ({
       kind: "layer",
       action: action as "move" | "resize-start" | "resize-end",
       id: layer.id,
+      selectedIds: action === "move" ? dragIds : [layer.id],
       startX: event.clientX,
       initialLayers: project.timeline_layers ?? [],
       draftLayers: project.timeline_layers ?? [],
@@ -846,6 +1061,8 @@ export const VideoEditorWorkspace = ({
     recordProjectSnapshot();
     setSelectedSceneId(scene.id);
     setSelectedLayerId(null);
+    setSelectedLayerIds([]);
+    setSelectedCaptionIds([]);
     dragStateRef.current = {
       kind: "scene",
       action: "resize-end",
@@ -865,7 +1082,19 @@ export const VideoEditorWorkspace = ({
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     recordProjectSnapshot();
+    const mode = action === "move" ? selectionMode(event) : "single";
+    const selectedIds =
+      action === "move" && mode !== "toggle" && selectedCaptionIds.includes(item.caption.id)
+        ? selectedCaptionIds
+        : mode === "toggle"
+          ? selectedCaptionIds.includes(item.caption.id)
+            ? selectedCaptionIds.filter((id) => id !== item.caption.id)
+            : [...selectedCaptionIds, item.caption.id]
+          : [item.caption.id];
+    const dragIds = selectedIds.length ? selectedIds : [item.caption.id];
     setSelectedCaptionId(item.caption.id);
+    setSelectedCaptionIds(dragIds);
+    setSelectedLayerIds([]);
     setSelectedLayerId(null);
     setSelectedSceneId(item.scene.id);
     setActivePanel("text");
@@ -875,6 +1104,29 @@ export const VideoEditorWorkspace = ({
       action,
       sceneId: item.scene.id,
       captionId: item.caption.id,
+      selectedIds: action === "move" ? dragIds : [item.caption.id],
+      selectedCaptions:
+        action === "move"
+          ? captionTimeline
+              .filter((captionItem) => dragIds.includes(captionItem.caption.id))
+              .map((captionItem) => ({
+                sceneId: captionItem.scene.id,
+                captionId: captionItem.caption.id,
+                initialStart: captionItem.start,
+                initialEnd: captionItem.end,
+                sceneStart: captionItem.sceneStart,
+                sceneDuration: captionItem.sceneDuration,
+                isLocal: captionItem.isLocal,
+              }))
+          : [{
+              sceneId: item.scene.id,
+              captionId: item.caption.id,
+              initialStart: item.start,
+              initialEnd: item.end,
+              sceneStart: item.sceneStart,
+              sceneDuration: item.sceneDuration,
+              isLocal: item.isLocal,
+            }],
       startX: event.clientX,
       initialStart: item.start,
       initialEnd: item.end,
@@ -896,6 +1148,8 @@ export const VideoEditorWorkspace = ({
     recordProjectSnapshot();
     setSelectedLayerId(null);
     setSelectedCaptionId(null);
+    setSelectedLayerIds([]);
+    setSelectedCaptionIds([]);
     setActivePanel("audio");
     const initialTimeline = {
       ...musicTimeline,
@@ -919,8 +1173,9 @@ export const VideoEditorWorkspace = ({
 
     const deltaSeconds = snapTime((event.clientX - drag.startX) / pixelsPerSecond);
     if (drag.kind === "layer") {
+      const movingLayerIds = new Set(drag.action === "move" ? drag.selectedIds : [drag.id]);
       const draftLayers = drag.initialLayers.map((layer) => {
-        if (layer.id !== drag.id) return layer;
+        if (!movingLayerIds.has(layer.id)) return layer;
         const initialStart = Number(layer.start) || 0;
         const initialDuration = Math.max(MIN_CLIP_SECONDS, Number(layer.duration) || MIN_CLIP_SECONDS);
         if (drag.action === "move") {
@@ -939,34 +1194,52 @@ export const VideoEditorWorkspace = ({
     }
 
     if (drag.kind === "caption") {
-      const duration = Math.max(MIN_CLIP_SECONDS, drag.initialEnd - drag.initialStart);
-      const sceneMin = drag.sceneStart;
-      const sceneMax = drag.sceneStart + Math.max(MIN_CLIP_SECONDS, drag.sceneDuration);
-      let nextStart = drag.initialStart;
-      let nextEnd = drag.initialEnd;
-
+      const captionUpdates = new Map<string, { sceneId: string; start: number; end: number; nextStart: number }>();
       if (drag.action === "move") {
-        nextStart = clamp(snapTime(drag.initialStart + deltaSeconds), sceneMin, Math.max(sceneMin, sceneMax - duration));
-        nextEnd = snapTime(nextStart + duration);
-      } else if (drag.action === "resize-start") {
-        nextStart = clamp(snapTime(drag.initialStart + deltaSeconds), sceneMin, Math.max(sceneMin, drag.initialEnd - MIN_CLIP_SECONDS));
+        for (const caption of drag.selectedCaptions) {
+          const duration = Math.max(MIN_CLIP_SECONDS, caption.initialEnd - caption.initialStart);
+          const sceneMin = caption.sceneStart;
+          const sceneMax = caption.sceneStart + Math.max(MIN_CLIP_SECONDS, caption.sceneDuration);
+          const nextStart = clamp(snapTime(caption.initialStart + deltaSeconds), sceneMin, Math.max(sceneMin, sceneMax - duration));
+          const nextEnd = snapTime(nextStart + duration);
+          captionUpdates.set(caption.captionId, {
+            sceneId: caption.sceneId,
+            start: snapTime(caption.isLocal ? nextStart - caption.sceneStart : nextStart),
+            end: snapTime(caption.isLocal ? nextEnd - caption.sceneStart : nextEnd),
+            nextStart,
+          });
+        }
       } else {
-        nextEnd = clamp(snapTime(drag.initialEnd + deltaSeconds), drag.initialStart + MIN_CLIP_SECONDS, sceneMax);
+        const duration = Math.max(MIN_CLIP_SECONDS, drag.initialEnd - drag.initialStart);
+        const sceneMin = drag.sceneStart;
+        const sceneMax = drag.sceneStart + Math.max(MIN_CLIP_SECONDS, drag.sceneDuration);
+        let nextStart = drag.initialStart;
+        let nextEnd = drag.initialEnd;
+
+        if (drag.action === "resize-start") {
+          nextStart = clamp(snapTime(drag.initialStart + deltaSeconds), sceneMin, Math.max(sceneMin, drag.initialEnd - MIN_CLIP_SECONDS));
+        } else {
+          nextEnd = clamp(snapTime(drag.initialEnd + deltaSeconds), drag.initialStart + MIN_CLIP_SECONDS, sceneMax);
+        }
+
+        captionUpdates.set(drag.captionId, {
+          sceneId: drag.sceneId,
+          start: snapTime(drag.isLocal ? nextStart - drag.sceneStart : nextStart),
+          end: snapTime(drag.isLocal ? nextEnd - drag.sceneStart : nextEnd),
+          nextStart,
+        });
       }
 
-      const storedStart = snapTime(drag.isLocal ? nextStart - drag.sceneStart : nextStart);
-      const storedEnd = snapTime(drag.isLocal ? nextEnd - drag.sceneStart : nextEnd);
       const draftScenes = drag.initialScenes.map((scene) =>
-        scene.id === drag.sceneId
+        (scene.captions ?? []).some((caption) => captionUpdates.has(caption.id))
           ? {
               ...scene,
               captions: (scene.captions ?? []).map((caption) =>
-                caption.id === drag.captionId
-                  ? {
-                      ...caption,
-                      start: storedStart,
-                      end: Math.max(storedStart + MIN_CLIP_SECONDS, storedEnd),
-                    }
+                captionUpdates.has(caption.id)
+                  ? (() => {
+                      const update = captionUpdates.get(caption.id)!;
+                      return { ...caption, start: update.start, end: Math.max(update.start + MIN_CLIP_SECONDS, update.end) };
+                    })()
                   : caption,
               ),
             }
@@ -974,7 +1247,7 @@ export const VideoEditorWorkspace = ({
       );
       dragStateRef.current = { ...drag, draftScenes };
       updateProjectLocal({ scenes: draftScenes });
-      setPlayheadTime(clamp(nextStart, 0, timelineDuration));
+      setPlayheadTime(clamp(captionUpdates.get(drag.captionId)?.nextStart ?? drag.initialStart, 0, timelineDuration));
       return;
     }
 
@@ -1059,12 +1332,11 @@ export const VideoEditorWorkspace = ({
     const mime = file.type.toLowerCase();
     if (mime.startsWith("video/")) return "video";
     if (mime.startsWith("audio/")) return "audio";
-    if (mime.startsWith("image/")) return "image";
 
     const name = file.name.toLowerCase();
     if (/\.(mp4|mov|webm|m4v)$/.test(name)) return "video";
     if (/\.(mp3|wav|m4a|ogg)$/.test(name)) return "audio";
-    return "image";
+    return "video";
   };
 
   const mediaKindFromUrl = (
@@ -1074,14 +1346,12 @@ export const VideoEditorWorkspace = ({
     const clean = url.split("?")[0].toLowerCase();
     if (/\.(mp4|mov|webm|m4v)$/.test(clean)) return "video";
     if (/\.(mp3|wav|m4a|ogg)$/.test(clean)) return "audio";
-    if (/\.(jpg|jpeg|png|webp|gif)$/.test(clean)) return "image";
     return fallback;
   };
 
   const mediaKindFromLibraryItem = (item: LibraryItem): TextToVideoTimelineLayer["type"] => {
     if (isTimelineMediaType(item.type)) return item.type;
     if (item.video_url) return "video";
-    if (item.image_url || item.webformatURL || item.preview_url || item.previewURL || item.thumb) return "image";
     return mediaKindFromUrl(mediaUrlFromLibraryItem(item), libraryMediaType);
   };
 
@@ -1109,11 +1379,7 @@ export const VideoEditorWorkspace = ({
     const thumbnail_url =
       typeof patch.video_url === "string" && patch.video_url
         ? patch.video_url
-        : typeof patch.image_url === "string" && patch.image_url
-        ? patch.image_url
-        : scenes.find((scene) => scene.video_url)?.video_url ??
-          scenes.find((scene) => scene.image_url)?.image_url ??
-          project.thumbnail_url;
+        : scenes.find((scene) => scene.video_url)?.video_url ?? project.thumbnail_url;
 
     updateProjectLocal({ scenes, total_duration, thumbnail_url });
     setSelectedSceneId(sceneId);
@@ -1164,13 +1430,12 @@ export const VideoEditorWorkspace = ({
         return;
       }
 
-      await saveSceneMedia(
-        scene.id,
-        mediaType === "video"
-          ? { video_url: url, image_url: null }
-          : { image_url: url, video_url: null },
-        mediaType === "video" ? "Scene video replaced" : "Scene image replaced",
-      );
+      if (mediaType !== "video") {
+        setReplacementError("Text-to-video scene visuals must be videos.");
+        return;
+      }
+
+      await saveSceneMedia(scene.id, { video_url: url, image_url: null }, "Scene video replaced");
       setPendingReplaceTarget(null);
       return;
     }
@@ -1503,6 +1768,16 @@ export const VideoEditorWorkspace = ({
   const renderCaption = () => {
     if (!selectedCaption) return null;
     const displayText = captionStyle.uppercase ? selectedCaption.text.toUpperCase() : selectedCaption.text;
+    const captionWords = selectedCaption.words?.length
+      ? selectedCaption.words
+      : displayText.split(/\s+/).filter(Boolean).map((word, index, words) => {
+          const start = Number(selectedCaption.start) || 0;
+          const end = Math.max(start + 0.2, Number(selectedCaption.end) || start + 1);
+          const step = (end - start) / Math.max(1, words.length);
+          return { word, start: start + index * step, end: start + (index + 1) * step };
+        });
+    const localPlayhead = selectedCaptionItem ? playheadTime - selectedCaptionItem.sceneStart : Number(selectedCaption.start) || 0;
+    const activeWordIndex = captionWords.findIndex((word) => localPlayhead >= word.start && localPlayhead <= word.end);
     const backgroundClass =
       captionStyle.background === "accent_box"
         ? "bg-yellow-400 text-black"
@@ -1512,6 +1787,7 @@ export const VideoEditorWorkspace = ({
     const coordinates = captionCoordinates(captionStyle);
     const boxSize = captionBoxSize(captionStyle);
     const fontStyle = CAPTION_FONT_STYLES[captionStyle.font] ?? CAPTION_FONT_STYLES.bold_sans;
+    const borderWidth = captionStyle.border_enabled ? clamp(Number(captionStyle.border_width) || 0, 0, 12) : 0;
 
     return (
       <button
@@ -1528,8 +1804,10 @@ export const VideoEditorWorkspace = ({
           top: `${coordinates.y}%`,
           width: `${boxSize.width}%`,
           height: `${boxSize.height}%`,
+          boxSizing: "border-box",
+          border: borderWidth > 0 ? `${borderWidth}px solid ${captionStyle.border_color || "#FFFFFF"}` : undefined,
           color: captionStyle.background === "accent_box" ? "#111111" : captionStyle.phrase_color,
-          fontSize: clamp((captionStyle.size_active || captionStyle.size_phrase || 96) / 2.8, 16, 58),
+          fontSize: clamp((captionStyle.size_phrase || captionStyle.size_active || 96) / 2.8, 16, 58),
           ...fontStyle,
           textShadow:
             captionStyle.background === "none"
@@ -1537,7 +1815,33 @@ export const VideoEditorWorkspace = ({
               : undefined,
         }}
       >
-        <span className="line-clamp-4 break-words">{displayText}</span>
+        <span className="line-clamp-4 break-words">
+          {captionWords.length
+            ? captionWords.map((word, index) => {
+                const isActive = index === activeWordIndex || (activeWordIndex < 0 && index === 0);
+                const text = captionStyle.uppercase ? word.word.toUpperCase() : word.word;
+                return (
+                  <span
+                    key={`${word.word}-${index}`}
+                    style={{
+                      color: isActive
+                        ? captionStyle.active_color
+                        : captionStyle.background === "accent_box"
+                          ? "#111111"
+                          : captionStyle.phrase_color,
+                      fontSize: isActive
+                        ? `${clamp((captionStyle.size_active || captionStyle.size_phrase || 96) / 2.8, 16, 58)}px`
+                        : undefined,
+                      opacity: isActive ? 1 : clamp(Number(captionStyle.phrase_opacity) || 0.55, 0.1, 1),
+                    }}
+                  >
+                    {text}
+                    {index < captionWords.length - 1 ? " " : ""}
+                  </span>
+                );
+              })
+            : displayText}
+        </span>
         <span
           role="presentation"
           className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-sm border border-white/80 bg-zinc-950 shadow"
@@ -1738,20 +2042,6 @@ export const VideoEditorWorkspace = ({
                         "--editor-image-scale": String(previewScene?.crop_zoom ?? 1),
                       } as CSSProperties}
                     />
-                  ) : activeVideoUrl ? (
-                    <video
-                      key={activeVideoUrl}
-                      ref={videoRef}
-                      src={activeVideoUrl}
-                      className="h-full w-full object-cover"
-                      style={{
-                        objectPosition: `${50 + (previewScene?.crop_x ?? 0) / 2}% ${50 + (previewScene?.crop_y ?? 0) / 2}%`,
-                        transform: `scale(${previewScene?.crop_zoom ?? 1})`,
-                      }}
-                      playsInline
-                      muted
-                      preload="auto"
-                    />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-sm text-zinc-500">Preview</div>
                   )}
@@ -1769,7 +2059,7 @@ export const VideoEditorWorkspace = ({
                   <Button variant="ghost" size="icon" className="h-8 w-8 text-white" onClick={() => jumpBy(-1)}>
                     <SkipBack className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-9 w-9 text-white" onClick={() => setIsPlaying((value) => !value)}>
+                  <Button variant="ghost" size="icon" className="h-9 w-9 text-white" onClick={togglePreviewPlayback}>
                     {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
                   </Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8 text-white" onClick={() => jumpBy(1)}>
@@ -1838,7 +2128,7 @@ export const VideoEditorWorkspace = ({
                     className="w-28"
                     onValueChange={([value]) => setTimelineZoomAround(value)}
                   />
-                  <span className="w-12 text-center text-[11px] text-zinc-500">{Math.round(timelineZoom)}px</span>
+                  <span className="w-12 text-center text-[11px] text-zinc-500">{Math.round(timelineZoom)}</span>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1960,13 +2250,7 @@ export const VideoEditorWorkspace = ({
                                 playsInline
                                 preload="metadata"
                               />
-                            ) : scene.image_url && (
-                              <img
-                                src={scene.image_url}
-                                alt=""
-                                className="video-editor-image-zoom absolute inset-0 h-full w-full object-cover opacity-45"
-                              />
-                            )}
+                            ) : null}
                             {scene.video_url && (
                               <div className="absolute right-1 top-1 z-20 flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                                 <Video className="h-3 w-3" />
@@ -1994,13 +2278,28 @@ export const VideoEditorWorkspace = ({
                         <Type className="h-4 w-4" />
                         Text
                       </div>
-                      <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
+                      <div
+                        className="relative h-10 rounded border border-white/10 bg-[#191820]"
+                        onPointerDown={(event) => beginMarqueeSelection(event, "caption")}
+                        onPointerMove={updateMarqueeSelection}
+                        onPointerUp={finishMarqueeSelection}
+                        onPointerCancel={finishMarqueeSelection}
+                      >
+                        {marquee?.kind === "caption" && (
+                          <div
+                            className="pointer-events-none absolute top-1 z-40 h-8 rounded border border-cyan-300 bg-cyan-300/15"
+                            style={{
+                              left: Math.min(marquee.startX, marquee.currentX),
+                              width: Math.abs(marquee.currentX - marquee.startX),
+                            }}
+                          />
+                        )}
                         {captionTimeline.map((item) => (
                           <TimelineClip
                             key={item.caption.id}
                             left={item.start * pixelsPerSecond}
                             width={Math.max(MIN_CLIP_SECONDS, item.end - item.start) * pixelsPerSecond}
-                            selected={selectedCaptionId === item.caption.id}
+                            selected={selectedCaptionIds.includes(item.caption.id)}
                             className="cursor-grab border-violet-300/50 bg-violet-500/70 text-white active:cursor-grabbing"
                             onPointerDown={(event) => beginCaptionTimelineDrag(event, item, "move")}
                             onPointerMove={handleTimelineDrag}
@@ -2033,13 +2332,28 @@ export const VideoEditorWorkspace = ({
                           {type === "video" ? <Video className="h-4 w-4" /> : <ImagePlus className="h-4 w-4" />}
                           {type === "video" ? "Clips" : "Images"}
                         </div>
-                        <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
+                        <div
+                          className="relative h-10 rounded border border-white/10 bg-[#191820]"
+                          onPointerDown={(event) => beginMarqueeSelection(event, "layer", type)}
+                          onPointerMove={updateMarqueeSelection}
+                          onPointerUp={finishMarqueeSelection}
+                          onPointerCancel={finishMarqueeSelection}
+                        >
+                          {marquee?.kind === "layer" && marquee.layerType === type && (
+                            <div
+                              className="pointer-events-none absolute top-1 z-40 h-8 rounded border border-cyan-300 bg-cyan-300/15"
+                              style={{
+                                left: Math.min(marquee.startX, marquee.currentX),
+                                width: Math.abs(marquee.currentX - marquee.startX),
+                              }}
+                            />
+                          )}
                           {(project.timeline_layers ?? []).filter((layer) => layer.type === type).map((layer) => (
                             <TimelineClip
                               key={layer.id}
                               left={layer.start * pixelsPerSecond}
                               width={layer.duration * pixelsPerSecond}
-                              selected={selectedLayerId === layer.id}
+                              selected={selectedLayerIds.includes(layer.id)}
                               className="cursor-grab border-emerald-300/40 bg-emerald-500/70 text-white active:cursor-grabbing"
                               onPointerDown={(event) => beginLayerDrag(event, layer, "move")}
                               onPointerMove={handleTimelineDrag}
@@ -2147,13 +2461,28 @@ export const VideoEditorWorkspace = ({
                         <Volume2 className="h-4 w-4" />
                         Audio Layers
                       </div>
-                      <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
+                      <div
+                        className="relative h-10 rounded border border-white/10 bg-[#191820]"
+                        onPointerDown={(event) => beginMarqueeSelection(event, "layer", "audio")}
+                        onPointerMove={updateMarqueeSelection}
+                        onPointerUp={finishMarqueeSelection}
+                        onPointerCancel={finishMarqueeSelection}
+                      >
+                        {marquee?.kind === "layer" && marquee.layerType === "audio" && (
+                          <div
+                            className="pointer-events-none absolute top-1 z-40 h-8 rounded border border-cyan-300 bg-cyan-300/15"
+                            style={{
+                              left: Math.min(marquee.startX, marquee.currentX),
+                              width: Math.abs(marquee.currentX - marquee.startX),
+                            }}
+                          />
+                        )}
                         {(project.timeline_layers ?? []).filter((layer) => layer.type === "audio").map((layer) => (
                           <TimelineClip
                             key={layer.id}
                             left={layer.start * pixelsPerSecond}
                             width={layer.duration * pixelsPerSecond}
-                            selected={selectedLayerId === layer.id}
+                            selected={selectedLayerIds.includes(layer.id)}
                             className="cursor-grab border-teal-200/40 bg-teal-500/80 text-white active:cursor-grabbing"
                             onPointerDown={(event) => beginLayerDrag(event, layer, "move")}
                             onPointerMove={handleTimelineDrag}
@@ -2458,6 +2787,28 @@ export const VideoEditorWorkspace = ({
                         onBlur={(event) => void updateCaptionStyle({ stroke_width: Number(event.currentTarget.value) || 0 })}
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-400">Border Width</Label>
+                      <Input
+                        className="h-9 border-white/10 bg-[#201f26]"
+                        type="number"
+                        min={0}
+                        max={12}
+                        value={captionStyle.border_width}
+                        onChange={(event) => updateCaptionStyleLocal({ border_width: clamp(Number(event.target.value) || 0, 0, 12) })}
+                        onBlur={(event) => void updateCaptionStyle({ border_width: clamp(Number(event.currentTarget.value) || 0, 0, 12) })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-400">Border Color</Label>
+                      <Input
+                        className="h-9 border-white/10 bg-[#201f26] p-1"
+                        type="color"
+                        value={captionStyle.border_color}
+                        onChange={(event) => updateCaptionStyleLocal({ border_color: event.target.value })}
+                        onBlur={(event) => void updateCaptionStyle({ border_color: event.currentTarget.value })}
+                      />
+                    </div>
                   </div>
                   <Select value={captionStyle.background} onValueChange={(value) => void updateCaptionStyle({ background: value })}>
                     <SelectTrigger className="h-9 border-white/10 bg-[#201f26]"><SelectValue /></SelectTrigger>
@@ -2466,6 +2817,7 @@ export const VideoEditorWorkspace = ({
                   <div className="flex flex-wrap gap-4 text-sm text-zinc-300">
                     <label className="flex items-center gap-2"><Switch checked={captionStyle.uppercase} onCheckedChange={(checked) => void updateCaptionStyle({ uppercase: checked })} />Uppercase</label>
                     <label className="flex items-center gap-2"><Switch checked={captionStyle.show_phrase} onCheckedChange={(checked) => void updateCaptionStyle({ show_phrase: checked })} />Phrase</label>
+                    <label className="flex items-center gap-2"><Switch checked={captionStyle.border_enabled} onCheckedChange={(checked) => void updateCaptionStyle({ border_enabled: checked })} />Border</label>
                   </div>
                 </div>
               )}
@@ -2546,36 +2898,13 @@ export const VideoEditorWorkspace = ({
                     <Input
                       className="h-9 border-white/10 bg-[#201f26]"
                       value={selectedScene.video_url ?? ""}
-                      onChange={(event) => updateSceneLocal(selectedScene.id, { video_url: event.target.value, image_url: event.target.value ? null : selectedScene.image_url })}
+                      onChange={(event) => updateSceneLocal(selectedScene.id, { video_url: event.target.value, image_url: null })}
                       onBlur={() => void saveScenes("Scene media saved")}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-zinc-400">Fallback Image URL</Label>
-                    <Input
-                      className="h-9 border-white/10 bg-[#201f26]"
-                      value={selectedScene.image_url ?? ""}
-                      onChange={(event) => updateSceneLocal(selectedScene.id, { image_url: event.target.value })}
-                      onBlur={() => void saveScenes("Scene media saved")}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["image", "video"] as const).map((type) => (
-                      <Button
-                        key={type}
-                        type="button"
-                        variant={libraryMediaType === type ? "default" : "outline"}
-                        className={`h-8 capitalize ${libraryMediaType === type ? "" : "border-white/10 bg-[#201f26]"}`}
-                        onClick={() => setLibraryMediaType(type)}
-                      >
-                        {type === "image" ? <ImagePlus className="mr-2 h-4 w-4" /> : <Video className="mr-2 h-4 w-4" />}
-                        {type}
-                      </Button>
-                    ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input className="h-9 border-white/10 bg-[#201f26]" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder={`Search Pixabay ${libraryMediaType}s`} onKeyDown={(event) => { if (event.key === "Enter") void searchLibrary(libraryMediaType); }} />
-                    <Button size="icon" className="h-9 w-9" onClick={() => void searchLibrary(libraryMediaType)} disabled={isSearchingLibrary}>
+                    <Input className="h-9 border-white/10 bg-[#201f26]" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search Pixabay videos" onKeyDown={(event) => { if (event.key === "Enter") void searchLibrary("video"); }} />
+                    <Button size="icon" className="h-9 w-9" onClick={() => void searchLibrary("video")} disabled={isSearchingLibrary}>
                       {isSearchingLibrary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                     </Button>
                   </div>

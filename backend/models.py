@@ -73,6 +73,9 @@ class CaptionStyle(BaseModel):
     position_y: float = 72.0      # percentage of video height
     box_width: float = 76.0       # percentage of video width
     box_height: float = 16.0      # percentage of video height
+    border_enabled: bool = False
+    border_color: str = "#FFFFFF"
+    border_width: int = 2
     size_active: int = 96
     size_phrase: int = 42
     stroke_width: int = 6

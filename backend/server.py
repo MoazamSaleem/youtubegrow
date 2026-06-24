@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from db import projects, renders
 from models import (
-    Project, Scene, Caption, GenerateRequest, RenderRequest, RenderJob, _now, _uid,
+    Project, Scene, Caption, TimelineLayer, GenerateRequest, RenderRequest, RenderJob, _now, _uid,
 )
 from ai_service import (
     split_into_scenes, synthesize_voice, transcribe_words, build_caption_groups,
@@ -126,6 +126,26 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
 
     total_duration = sum(s["duration"] for s in scenes)
     thumb = next((s["video_url"] for s in scenes if s.get("video_url")), None)
+    timeline_layers = []
+    cursor = 0.0
+    for track, scene in enumerate(scenes):
+        duration = float(scene.get("duration") or 0)
+        video_url = scene.get("video_url")
+        if video_url:
+            timeline_layers.append(
+                TimelineLayer(
+                    type="video",
+                    url=video_url,
+                    start=cursor,
+                    duration=max(0.25, duration),
+                    track=track,
+                    volume=0,
+                    opacity=1,
+                    trim_start=0,
+                    trim_end=0,
+                ).model_dump()
+            )
+        cursor += duration
 
     await report(88, "Saving project")
     await projects.update_one(
@@ -133,6 +153,7 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
         {
             "$set": {
                 "scenes": scenes,
+                "timeline_layers": timeline_layers,
                 "total_duration": total_duration,
                 "thumbnail_url": thumb,
                 "status": "ready",
@@ -178,7 +199,7 @@ async def update_project(pid: str, payload: dict):
 # ----- AI generation pipeline -----
 @api.post("/projects/generate")
 async def generate_project(req: GenerateRequest):
-    """Full pipeline: script -> scenes -> TTS -> Whisper -> stock images -> Project."""
+    """Full pipeline: script -> scenes -> TTS -> Whisper -> stock videos -> Project."""
     if not req.script.strip():
         raise HTTPException(400, "Empty script")
 
@@ -285,7 +306,7 @@ async def create_blank(payload: dict):
 
 # ----- Pixabay search -----
 @api.get("/library/search")
-async def library_search(q: str = "", type: str = "image"):
+async def library_search(q: str = "", type: str = "video"):
     items = await search_pixabay(q, type)
     return {"items": items}
 
@@ -462,7 +483,7 @@ async def meta():
 
 # ----- Upload -----
 @api.post("/uploads")
-async def upload_file(file: UploadFile = File(...), kind: str = Form("image")):
+async def upload_file(file: UploadFile = File(...), kind: str = Form("video")):
     """Save user uploads (image/video/audio) and return /api/storage URL."""
     ext = Path(file.filename or "").suffix.lower() or ".bin"
     if ext not in ALLOWED_UPLOAD_EXT:

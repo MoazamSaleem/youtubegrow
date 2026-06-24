@@ -138,7 +138,8 @@ def test_generate_project(session):
     assert s0.get("script")
     assert s0.get("duration", 0) > 0
     assert s0.get("voiceover_url"), "voiceover_url missing"
-    assert s0.get("image_url"), "image_url missing"
+    assert not s0.get("image_url"), "generated scenes should not use image_url"
+    assert s0.get("video_url"), "video_url missing"
     assert isinstance(s0.get("captions"), list)
     if s0["captions"]:
         cap = s0["captions"][0]

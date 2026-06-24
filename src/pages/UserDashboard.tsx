@@ -586,7 +586,7 @@ const UserDashboard = () => {
               action={{ label: "Open Video", href: "/dashboard/text-to-video" }}
             >
               <p className="text-sm">
-                <span className="text-primary font-semibold">80</span> AI credits per 10 seconds
+                <span className="text-primary font-semibold">30</span> AI credits per 10 seconds
               </p>
             </FeatureCard>
 
