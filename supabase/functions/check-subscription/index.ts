@@ -111,6 +111,7 @@ const resolvePlanFromStripeSubscription = (
   const productId = firstItem?.price?.product as string;
   const priceId = firstItem?.price?.id;
   const priceLookupKey = firstItem?.price?.lookup_key ?? "";
+  const pricePlanKey = firstItem?.price?.metadata?.plan_key ?? "";
   const productObj =
     typeof firstItem?.price?.product === "object" && firstItem?.price?.product
       ? (firstItem.price.product as Stripe.Product)
@@ -125,6 +126,8 @@ const resolvePlanFromStripeSubscription = (
   };
 
   const planFromLookupKey = (() => {
+    const planFromPriceMetadata = normalizePlan(pricePlanKey);
+    if (planFromPriceMetadata) return planFromPriceMetadata;
     if (!priceLookupKey) return null;
     if (priceLookupKey.startsWith("ytgp_basic_")) return "basic";
     if (priceLookupKey.startsWith("ytgp_pro_")) return "pro";

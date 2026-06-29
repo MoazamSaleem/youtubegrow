@@ -12,6 +12,15 @@ const logStep = (step: string, details?: any) => {
   console.log(`[CREATE-CHECKOUT] ${step}${detailsStr}`);
 };
 
+const PLAN_CATALOG: Record<string, { name: string; monthly: number; yearly: number }> = {
+  basic: { name: "Basic", monthly: 7, yearly: 70 },
+  pro: { name: "Pro", monthly: 15, yearly: 120 },
+  advanced: { name: "Advanced", monthly: 25, yearly: 230 },
+};
+
+const priceEnvName = (planKey: string, billingCycle: string) =>
+  `STRIPE_${planKey.toUpperCase()}_${billingCycle === "yearly" ? "YEARLY" : "MONTHLY"}_PRICE_ID`;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -48,7 +57,16 @@ serve(async (req) => {
       userId,
     } = payload ?? {};
     const billingCycle = requestedBillingCycle === "yearly" ? "yearly" : "monthly";
-    logStep("Checkout payload received", { priceId, productId, planKey, billingCycle, amountUsd });
+    const normalizedPlanKey = typeof planKey === "string" ? planKey.toLowerCase() : "";
+    const planConfig = PLAN_CATALOG[normalizedPlanKey];
+    if (!planConfig) {
+      return new Response(JSON.stringify({ error: "Invalid subscription plan" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      });
+    }
+    const expectedAmountUsd = billingCycle === "yearly" ? planConfig.yearly : planConfig.monthly;
+    logStep("Checkout payload received", { priceId, productId, planKey: normalizedPlanKey, billingCycle, amountUsd });
 
     const authHeader = req.headers.get("Authorization");
     let resolvedEmail = email as string | undefined;
@@ -84,53 +102,113 @@ serve(async (req) => {
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
 
-    let resolvedPriceId = priceId as string | undefined;
-    if (!resolvedPriceId) {
-      const lookupPlan = typeof planKey === "string" ? planKey.toLowerCase() : "";
-      const lookupInterval = billingCycle === "yearly" ? "year" : "month";
-      if (lookupPlan) {
-        const lookupKey = `ytgp_${lookupPlan}_${lookupInterval}_${amountUsd}usd`;
-        const lookupSearch = await stripe.prices.search({
-          query: `active:'true' AND lookup_key:'${lookupKey}'`,
-          limit: 1,
-        });
-        if (lookupSearch.data.length > 0) {
-          resolvedPriceId = lookupSearch.data[0].id;
-          logStep("Resolved Stripe price by lookup_key", { resolvedPriceId, lookupKey });
+    let resolvedPriceId = Deno.env.get(priceEnvName(normalizedPlanKey, billingCycle)) || undefined;
+    if (resolvedPriceId) {
+      try {
+        const envPrice = await stripe.prices.retrieve(resolvedPriceId);
+        const expectedInterval = billingCycle === "yearly" ? "year" : "month";
+        const expectedAmountCents = Math.round(expectedAmountUsd * 100);
+        if (
+          envPrice.active &&
+          envPrice.type === "recurring" &&
+          envPrice.recurring?.interval === expectedInterval &&
+          envPrice.unit_amount === expectedAmountCents
+        ) {
+          logStep("Resolved Stripe price by environment", { resolvedPriceId, planKey: normalizedPlanKey, billingCycle });
+        } else {
+          logStep("Environment Stripe price does not match selected plan; falling back", { resolvedPriceId });
+          resolvedPriceId = undefined;
         }
+      } catch (error) {
+        logStep("Environment Stripe price lookup failed; falling back", {
+          resolvedPriceId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        resolvedPriceId = undefined;
+      }
+    }
+
+    if (!resolvedPriceId) {
+      const lookupInterval = billingCycle === "yearly" ? "year" : "month";
+      const lookupKey = `ytgp_${normalizedPlanKey}_${lookupInterval}_${expectedAmountUsd}usd`;
+      const lookupSearch = await stripe.prices.search({
+        query: `active:'true' AND lookup_key:'${lookupKey}'`,
+        limit: 1,
+      });
+      if (lookupSearch.data.length > 0) {
+        resolvedPriceId = lookupSearch.data[0].id;
+        logStep("Resolved Stripe price by lookup_key", { resolvedPriceId, lookupKey });
       }
 
-      if (!resolvedPriceId && !productId) {
-        throw new Error("Product ID is required when price ID is not provided");
+      if (!resolvedPriceId) {
+        const lookupList = await stripe.prices.list({
+          lookup_keys: [lookupKey],
+          active: true,
+          limit: 1,
+        });
+        if (lookupList.data.length > 0) {
+          resolvedPriceId = lookupList.data[0].id;
+          logStep("Resolved Stripe price by lookup_keys list", { resolvedPriceId, lookupKey });
+        }
       }
 
       if (!resolvedPriceId && productId) {
         const expectedInterval = billingCycle === "yearly" ? "year" : "month";
-        const expectedAmountCents =
-          typeof amountUsd === "number" && Number.isFinite(amountUsd)
-            ? Math.round(amountUsd * 100)
-            : null;
+        try {
+          const prices = await stripe.prices.list({
+            product: productId,
+            active: true,
+            limit: 100,
+          });
 
-        const prices = await stripe.prices.list({
-          product: productId,
-          active: true,
-          limit: 100,
-        });
+          const recurringPrices = prices.data.filter(
+            (price) =>
+              price.type === "recurring" &&
+              price.recurring?.interval === expectedInterval &&
+              price.unit_amount === Math.round(expectedAmountUsd * 100)
+          );
 
-        const recurringPrices = prices.data.filter(
-          (price) =>
-            price.type === "recurring" &&
-            price.recurring?.interval === expectedInterval &&
-            (expectedAmountCents === null || price.unit_amount === expectedAmountCents)
-        );
-
-        if (recurringPrices.length === 0) {
-          throw new Error(`No active ${billingCycle} Stripe price found for product ${productId}`);
+          if (recurringPrices.length > 0) {
+            resolvedPriceId = recurringPrices[0].id;
+            logStep("Resolved Stripe price by product", { resolvedPriceId, billingCycle, productId });
+          }
+        } catch (error) {
+          logStep("Client product lookup failed; will use server-side live price fallback", {
+            productId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-
-        resolvedPriceId = recurringPrices[0].id;
-        logStep("Resolved Stripe price by product", { resolvedPriceId, billingCycle, productId });
       }
+
+      if (!resolvedPriceId) {
+        const product = await stripe.products.create({
+          name: `YT Growth Pro ${planConfig.name}`,
+          metadata: { plan_key: normalizedPlanKey },
+        });
+        const price = await stripe.prices.create({
+          product: product.id,
+          unit_amount: Math.round(expectedAmountUsd * 100),
+          currency: "usd",
+          recurring: { interval: lookupInterval },
+          lookup_key: lookupKey,
+          metadata: {
+            plan_key: normalizedPlanKey,
+            billing_cycle: billingCycle,
+          },
+        });
+        resolvedPriceId = price.id;
+        logStep("Created live Stripe product/price fallback", {
+          productId: product.id,
+          resolvedPriceId,
+          lookupKey,
+          planKey: normalizedPlanKey,
+          billingCycle,
+        });
+      }
+    }
+
+    if (!resolvedPriceId) {
+      throw new Error("Unable to resolve Stripe price for selected plan");
     }
     
     let customerId: string | undefined;
@@ -217,8 +295,8 @@ serve(async (req) => {
       client_reference_id: resolvedUserId,
       payment_method_types: ["card"],
       metadata: resolvedUserId
-        ? { supabase_user_id: resolvedUserId, billing_cycle: billingCycle }
-        : { billing_cycle: billingCycle },
+        ? { supabase_user_id: resolvedUserId, billing_cycle: billingCycle, plan_key: normalizedPlanKey }
+        : { billing_cycle: billingCycle, plan_key: normalizedPlanKey },
       line_items: [{ price: resolvedPriceId, quantity: 1 }],
       mode: "subscription",
       success_url: `${origin}${successPath}`,
