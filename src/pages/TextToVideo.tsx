@@ -151,6 +151,7 @@ const editableProjectPatch = (project: TextToVideoProject): Partial<TextToVideoP
   thumbnail_url: project.thumbnail_url,
   status: project.status,
   final_video_url: project.final_video_url,
+  uploaded_media: project.uploaded_media,
 });
 
 const projectPatchFingerprint = (project: TextToVideoProject) => JSON.stringify(editableProjectPatch(project));

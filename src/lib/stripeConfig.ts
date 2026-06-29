@@ -18,7 +18,7 @@ export const STRIPE_PLANS = {
       "Text to Video (30 credits/10 sec)",
       "Competitor analysis weekly",
       "Growth tasks & milestones",
-      "1,000 AI Credits",
+      "1,000 AI Credits/month",
     ],
   },
   pro: {
@@ -45,7 +45,7 @@ export const STRIPE_PLANS = {
       "5 thumbnails/day",
       "YouTube Strategist AI",
       "Growth tasks & milestones",
-      "10,000 AI Credits",
+      "10,000 AI Credits/month",
     ],
   },
   advanced: {
@@ -72,7 +72,7 @@ export const STRIPE_PLANS = {
       "Unlimited thumbnails",
       "YouTube Strategist AI",
       "Growth tasks & milestones",
-      "25,000 AI Credits",
+      "25,000 AI Credits/month",
     ],
   },
 } as const;

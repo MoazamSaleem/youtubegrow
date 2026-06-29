@@ -97,6 +97,7 @@ class Project(BaseModel):
     music_url: Optional[str] = None
     music_tracks: List[str] = []
     timeline_layers: List[TimelineLayer] = []
+    uploaded_media: List[dict] = []
     music_timeline: dict = Field(default_factory=lambda: {"start": 0, "duration": 0, "trim_start": 0, "trim_end": 0})
     total_duration: float = 0.0
     thumbnail_url: Optional[str] = None

@@ -100,7 +100,7 @@ const Pricing = () => {
     
     // AI credits (only show for paid plans)
     if (limits.aiStrategistCredits > 0) {
-      features.push({ text: `${limits.aiStrategistCredits.toLocaleString()} AI Credits`, included: true });
+      features.push({ text: `${limits.aiStrategistCredits.toLocaleString()} AI Credits/month`, included: true });
     }
     
     return features;

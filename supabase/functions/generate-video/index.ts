@@ -134,6 +134,14 @@ const normalizeProviderProjectAssets = (base: string, value: JsonRecord) => {
       return next;
     });
   }
+  if (Array.isArray(project.uploaded_media)) {
+    project.uploaded_media = project.uploaded_media.map((item) => {
+      if (!item || typeof item !== "object") return item;
+      const next = { ...(item as JsonRecord) };
+      if ("url" in next) next.url = providerAssetUrl(base, next.url);
+      return next;
+    });
+  }
   return project;
 };
 
@@ -171,6 +179,7 @@ const allowedProjectPatch = (patch: JsonRecord) => {
     "music_url",
     "music_tracks",
     "timeline_layers",
+    "uploaded_media",
     "music_timeline",
     "total_duration",
     "thumbnail_url",

@@ -71,6 +71,7 @@ import {
   type TextToVideoRenderJob,
   type TextToVideoScene,
   type TextToVideoTimelineLayer,
+  type TextToVideoUploadedMedia,
 } from "@/lib/textToVideo";
 
 interface LibraryItem {
@@ -104,6 +105,7 @@ type EditorPanel = "text" | "scene" | "media" | "audio" | "settings";
 type ReplaceTarget =
   | { kind: "scene"; id: string }
   | { kind: "layer"; id: string; mediaType: TextToVideoTimelineLayer["type"] };
+type TimelineDropTarget = { kind: "timeline"; mediaType: TextToVideoTimelineLayer["type"] };
 
 interface UploadMediaResult {
   url?: string;
@@ -167,6 +169,9 @@ const CAPTION_FONTS = ["bold_sans", "display", "narrow", "mono", "serif"];
 const CAPTION_POSITIONS = ["top", "middle", "bottom", "custom"];
 const CAPTION_BACKGROUNDS = ["none", "accent_box", "dark_box"];
 const CAPTION_ANIMATIONS = ["pop", "fade", "slide", "none"];
+const MAX_PROJECT_UPLOADS = 20;
+const UPLOAD_RETENTION_DAYS = 10;
+const UPLOAD_RETENTION_MS = UPLOAD_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const CAPTION_STYLE_PRESETS: Record<string, Partial<TextToVideoCaptionStyle>> = {
   viral_pop: {
     preset: "viral_pop",
@@ -302,6 +307,18 @@ const snapTime = (value: number) => Math.round(value * 20) / 20;
 
 const formatSeconds = (value: number) => `${Math.max(0, Number(value) || 0).toFixed(1)}s`;
 
+const formatBytes = (value: number | undefined) => {
+  const safe = Number(value) || 0;
+  if (safe < 1024) return `${safe} B`;
+  if (safe < 1024 * 1024) return `${(safe / 1024).toFixed(1)} KB`;
+  return `${(safe / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const editorSurfaceClass = "border-white/10 bg-[#19191f] shadow-[0_18px_50px_rgba(0,0,0,0.28)]";
+const editorFieldClass = "border-white/10 bg-[#121217] text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-cyan-400/40";
+const timelineTrackClass =
+  "relative rounded-md border border-white/10 bg-[#15151b] shadow-inner transition-colors hover:border-cyan-400/35 hover:bg-[#181923]";
+
 const formatClock = (value: number) => {
   const safe = Math.max(0, Number(value) || 0);
   const minutes = Math.floor(safe / 60);
@@ -324,6 +341,14 @@ const isLibraryVideoItem = (item: LibraryItem) => item.type === "video" || Boole
 
 const isTimelineMediaType = (value: unknown): value is TextToVideoTimelineLayer["type"] =>
   value === "image" || value === "video" || value === "audio";
+
+const activeProjectUploads = (items: TextToVideoUploadedMedia[] | undefined) => {
+  const now = Date.now();
+  return (items ?? []).filter((item) => {
+    const expiresAt = Date.parse(item.expires_at);
+    return Number.isFinite(expiresAt) && expiresAt > now;
+  });
+};
 
 const labelFromUrl = (url: string) => {
   if (!url) return "Untitled layer";
@@ -612,6 +637,7 @@ export const VideoEditorWorkspace = ({
   const timelineWidth = Math.max(920, Math.ceil(timelineDuration * timelineScale));
   const pixelsPerSecond = timelineWidth / Math.max(timelineDuration, 0.1);
   const playheadLeft = playheadTime * pixelsPerSecond;
+  const projectUploads = useMemo(() => activeProjectUploads(project.uploaded_media), [project.uploaded_media]);
 
   const captionTimeline = useMemo(
     () =>
@@ -698,6 +724,13 @@ export const VideoEditorWorkspace = ({
   useEffect(() => {
     timelineZoomRef.current = timelineZoom;
   }, [timelineZoom]);
+
+  useEffect(() => {
+    const originalCount = project.uploaded_media?.length ?? 0;
+    if (originalCount === projectUploads.length) return;
+    updateProjectLocal({ uploaded_media: projectUploads });
+    void saveProjectPatch({ uploaded_media: projectUploads }, "Expired uploads cleared");
+  }, [project.id, project.uploaded_media, projectUploads, saveProjectPatch, updateProjectLocal]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -1331,10 +1364,12 @@ export const VideoEditorWorkspace = ({
   const mediaKindFromFile = (file: File): TextToVideoTimelineLayer["type"] => {
     const mime = file.type.toLowerCase();
     if (mime.startsWith("video/")) return "video";
+    if (mime.startsWith("image/")) return "image";
     if (mime.startsWith("audio/")) return "audio";
 
     const name = file.name.toLowerCase();
     if (/\.(mp4|mov|webm|m4v)$/.test(name)) return "video";
+    if (/\.(jpg|jpeg|png|webp|gif)$/.test(name)) return "image";
     if (/\.(mp3|wav|m4a|ogg)$/.test(name)) return "audio";
     return "video";
   };
@@ -1345,6 +1380,7 @@ export const VideoEditorWorkspace = ({
   ): TextToVideoTimelineLayer["type"] => {
     const clean = url.split("?")[0].toLowerCase();
     if (/\.(mp4|mov|webm|m4v)$/.test(clean)) return "video";
+    if (/\.(jpg|jpeg|png|webp|gif)$/.test(clean)) return "image";
     if (/\.(mp3|wav|m4a|ogg)$/.test(clean)) return "audio";
     return fallback;
   };
@@ -1391,6 +1427,7 @@ export const VideoEditorWorkspace = ({
     mediaType: TextToVideoTimelineLayer["type"],
     url: string,
     targetSceneId?: string,
+    startOverride?: number,
   ) => {
     recordProjectSnapshot();
     const sceneItem = targetSceneId ? sceneTimeline.find(({ scene }) => scene.id === targetSceneId) : null;
@@ -1398,7 +1435,7 @@ export const VideoEditorWorkspace = ({
       id: makeId(),
       type: mediaType,
       url,
-      start: sceneItem?.start ?? playheadTime,
+      start: snapTime(clamp(startOverride ?? sceneItem?.start ?? playheadTime, 0, timelineDuration)),
       duration: Math.max(MIN_CLIP_SECONDS, sceneItem?.duration ?? 3),
       track: project.timeline_layers?.length ?? 0,
       volume: mediaType === "audio" ? 1 : 0,
@@ -1430,8 +1467,9 @@ export const VideoEditorWorkspace = ({
         return;
       }
 
-      if (mediaType !== "video") {
-        setReplacementError("Text-to-video scene visuals must be videos.");
+      if (mediaType === "image") {
+        await addTimelineLayerFromMedia("image", url, scene.id);
+        setPendingReplaceTarget(null);
         return;
       }
 
@@ -1456,8 +1494,73 @@ export const VideoEditorWorkspace = ({
     await applyMediaUrlToTarget(target, url, mediaKindFromLibraryItem(item));
   };
 
+  const timelineDropTimeFromEvent = (event: ReactDragEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const raw = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * timelineDuration;
+    return snapTime(clamp(raw, 0, timelineDuration));
+  };
+
+  const applyLibraryToTimeline = async (
+    item: LibraryItem,
+    target: TimelineDropTarget,
+    start: number,
+  ) => {
+    const url = mediaUrlFromLibraryItem(item);
+    if (!url) return;
+    const mediaType = mediaKindFromLibraryItem(item) || target.mediaType;
+    await addTimelineLayerFromMedia(mediaType, url, undefined, start);
+  };
+
+  const saveUploadedMediaItem = async (upload: UploadMediaResult, fallbackMediaType: TextToVideoTimelineLayer["type"]) => {
+    if (!upload.url) return;
+    const uploadedAt = new Date();
+    const mediaType = isTimelineMediaType(upload.media_type) ? upload.media_type : fallbackMediaType;
+    const nextItem: TextToVideoUploadedMedia = {
+      id: makeId(),
+      url: upload.url,
+      filename: upload.filename || labelFromUrl(upload.url),
+      size: upload.size,
+      media_type: mediaType,
+      kind: upload.kind,
+      uploaded_at: uploadedAt.toISOString(),
+      expires_at: new Date(uploadedAt.getTime() + UPLOAD_RETENTION_MS).toISOString(),
+    };
+    const uploaded_media = [nextItem, ...projectUploads].slice(0, MAX_PROJECT_UPLOADS);
+    updateProjectLocal({ uploaded_media });
+    await saveProjectPatch({ uploaded_media }, "Upload saved");
+  };
+
+  const uploadFileToTimeline = async (file: File, target: TimelineDropTarget, start: number) => {
+    const fallbackMediaType = mediaKindFromFile(file);
+    if (projectUploads.length >= MAX_PROJECT_UPLOADS) {
+      setReplacementError(`This project already has ${MAX_PROJECT_UPLOADS} active uploads. Uploads expire after ${UPLOAD_RETENTION_DAYS} days.`);
+      return;
+    }
+    setIsUploadingReplacement(true);
+    setReplacementError(null);
+    try {
+      const { data, error } = await uploadProjectMedia(file, fallbackMediaType);
+      if (error) throw new Error(error);
+      const upload = data?.upload;
+      const url = upload?.url;
+      if (!url) throw new Error("Upload completed without a media URL.");
+      const mediaType = isTimelineMediaType(upload.media_type) ? upload.media_type : fallbackMediaType || target.mediaType;
+      await saveUploadedMediaItem(upload, mediaType);
+      await addTimelineLayerFromMedia(mediaType, url, undefined, start);
+      setActivePanel(mediaType === "audio" ? "audio" : "media");
+    } catch (error) {
+      setReplacementError(error instanceof Error ? error.message : "Media upload failed.");
+    } finally {
+      setIsUploadingReplacement(false);
+    }
+  };
+
   const replaceFromFile = async (file: File, target: ReplaceTarget) => {
     const fallbackMediaType = mediaKindFromFile(file);
+    if (projectUploads.length >= MAX_PROJECT_UPLOADS) {
+      setReplacementError(`This project already has ${MAX_PROJECT_UPLOADS} active uploads. Uploads expire after ${UPLOAD_RETENTION_DAYS} days.`);
+      return;
+    }
     setIsUploadingReplacement(true);
     setReplacementError(null);
     try {
@@ -1467,6 +1570,7 @@ export const VideoEditorWorkspace = ({
       const url = upload?.url;
       if (!url) throw new Error("Upload completed without a media URL.");
       const mediaType = isTimelineMediaType(upload.media_type) ? upload.media_type : fallbackMediaType;
+      await saveUploadedMediaItem(upload, mediaType);
       await applyMediaUrlToTarget(target, url, mediaType);
       setReplaceMenu(null);
     } catch (error) {
@@ -1559,17 +1663,23 @@ export const VideoEditorWorkspace = ({
     setIsDragOverEditor(false);
   };
 
-  const handleEditorDrop = async (event: ReactDragEvent<HTMLElement>, explicitTarget?: ReplaceTarget) => {
+  const handleEditorDrop = async (event: ReactDragEvent<HTMLElement>, explicitTarget?: ReplaceTarget | TimelineDropTarget) => {
     event.preventDefault();
     event.stopPropagation();
     setIsDragOverEditor(false);
     const target = explicitTarget ?? defaultReplaceTarget();
     if (!target) return;
+    const timelineStart = target.kind === "timeline" ? timelineDropTimeFromEvent(event) : null;
 
     const rawLibraryItem = event.dataTransfer.getData(LIBRARY_DRAG_MIME);
     if (rawLibraryItem) {
       try {
-        await applyLibraryToTarget(JSON.parse(rawLibraryItem) as LibraryItem, target);
+        const item = JSON.parse(rawLibraryItem) as LibraryItem;
+        if (target.kind === "timeline" && timelineStart !== null) {
+          await applyLibraryToTimeline(item, target, timelineStart);
+        } else {
+          await applyLibraryToTarget(item, target);
+        }
         setReplaceMenu(null);
       } catch {
         setReplacementError("Dropped media could not be applied.");
@@ -1579,6 +1689,10 @@ export const VideoEditorWorkspace = ({
 
     const file = Array.from(event.dataTransfer.files).find((item) => item.type || item.name);
     if (file) {
+      if (target.kind === "timeline" && timelineStart !== null) {
+        await uploadFileToTimeline(file, target, timelineStart);
+        return;
+      }
       await replaceFromFile(file, target);
     }
   };
@@ -1864,7 +1978,7 @@ export const VideoEditorWorkspace = ({
 
   return (
     <div
-      className="relative flex h-screen min-h-[760px] overflow-hidden bg-[#111014] text-zinc-100"
+      className="relative flex h-screen min-h-[760px] overflow-hidden bg-[#0f0f13] text-zinc-100"
       onDragOver={handleEditorDragOver}
       onDragLeave={handleEditorDragLeave}
       onDrop={(event) => void handleEditorDrop(event)}
@@ -1880,7 +1994,7 @@ export const VideoEditorWorkspace = ({
       {isDragOverEditor && (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/35">
           <div className="rounded border border-white/20 bg-[#17161c]/95 px-5 py-3 text-sm font-medium text-white shadow-2xl">
-            Drop media to replace the selected clip
+            Drop media to add it to the timeline or replace a clip
           </div>
         </div>
       )}
@@ -1923,20 +2037,31 @@ export const VideoEditorWorkspace = ({
         </div>
       )}
 
-      <aside className="flex w-12 shrink-0 flex-col items-center border-r border-white/10 bg-[#0c0b10] py-3">
-        <Button variant="ghost" size="icon" className="mb-4 h-8 w-8 rounded-full bg-zinc-200 text-zinc-950 hover:bg-white">
+      <aside className="flex w-14 shrink-0 flex-col items-center border-r border-white/10 bg-[#09090d] py-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="mb-4 h-10 w-10 rounded-full border border-cyan-300/60 bg-cyan-300 text-zinc-950 shadow-[0_0_24px_rgba(103,232,249,0.28)] hover:bg-cyan-200"
+          onClick={() => {
+            const target = defaultReplaceTarget();
+            if (!target) return;
+            openDeviceChooser(target);
+          }}
+          disabled={isUploadingReplacement}
+          title="Upload media"
+        >
           <Plus className="h-4 w-4" />
         </Button>
-        <div className="flex flex-1 flex-col items-center gap-2">
+        <div className="flex flex-1 flex-col items-center gap-1">
           {panelItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               onClick={() => setActivePanel(id)}
-              className={`flex w-full flex-col items-center gap-1 border-l-2 px-1 py-2 text-[10px] transition ${
+              className={`flex w-full flex-col items-center gap-1 border-l-2 px-1 py-2.5 text-[10px] transition ${
                 activePanel === id
-                  ? "border-white text-white"
-                  : "border-transparent text-zinc-500 hover:text-zinc-200"
+                  ? "border-cyan-300 bg-white/[0.04] text-white"
+                  : "border-transparent text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-200"
               }`}
               title={label}
             >
@@ -1948,7 +2073,7 @@ export const VideoEditorWorkspace = ({
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 bg-[#15141a] px-4">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-[#141419]/95 px-4 backdrop-blur">
           <div className="flex min-w-0 items-center gap-3">
             <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-white" onClick={() => history.back()}>
               <ChevronLeft className="h-4 w-4" />
@@ -1957,12 +2082,17 @@ export const VideoEditorWorkspace = ({
               value={project.title}
               onChange={(event) => updateProjectLocal({ title: event.target.value })}
               onBlur={() => void saveProjectPatch({ title: project.title, aspect: project.aspect }, "Project settings saved")}
-              className="h-8 w-[min(420px,45vw)] border-white/10 bg-transparent text-sm font-semibold text-white"
+              className="h-9 w-[min(520px,45vw)] rounded-lg border-white/10 bg-[#0f0f14] text-sm font-semibold text-white"
             />
-            <Badge className="border-white/10 bg-white/5 text-zinc-300" variant="outline">
+            <Badge className="border-cyan-300/25 bg-cyan-300/10 text-cyan-100" variant="outline">
               {project.aspect}
             </Badge>
-            <span className="hidden text-xs text-zinc-500 md:inline">{project.scenes.length} scenes</span>
+            <span className="hidden rounded-full bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-400 md:inline">
+              {project.scenes.length} scenes
+            </span>
+            <span className="hidden rounded-full bg-white/[0.04] px-2.5 py-1 font-mono text-xs text-zinc-400 lg:inline">
+              {formatClock(timelineDuration)}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -1997,7 +2127,7 @@ export const VideoEditorWorkspace = ({
               {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Save
             </Button>
-            <Button size="sm" onClick={() => void renderProject()} disabled={isRendering || isSaving} className="bg-white text-zinc-950 hover:bg-zinc-200">
+            <Button size="sm" onClick={() => void renderProject()} disabled={isRendering || isSaving} className="bg-cyan-300 text-zinc-950 hover:bg-cyan-200">
               {isRendering ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
               Render
             </Button>
@@ -2006,8 +2136,12 @@ export const VideoEditorWorkspace = ({
 
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col">
-            <section className="flex min-h-0 flex-1 items-center justify-center bg-[#1a191f] p-6">
-              <div className="relative flex h-full max-h-[55vh] w-full max-w-5xl items-center justify-center overflow-hidden rounded border border-white/10 bg-[#242329] shadow-2xl">
+            <section className="flex min-h-0 flex-1 items-center justify-center bg-[radial-gradient(circle_at_center,#22222a_0,#15151a_54%,#101014_100%)] p-6">
+              <div className={`relative flex h-full max-h-[55vh] w-full max-w-5xl items-center justify-center overflow-hidden rounded-lg ${editorSurfaceClass}`}>
+                <div className="pointer-events-none absolute left-4 top-4 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/35 px-3 py-1 text-xs text-zinc-300 backdrop-blur">
+                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                  Preview
+                </div>
                 <div
                   ref={previewFrameRef}
                   className={`relative overflow-hidden bg-black ${
@@ -2066,24 +2200,24 @@ export const VideoEditorWorkspace = ({
                     <SkipForward className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button variant="ghost" size="icon" className="absolute bottom-4 right-4 h-8 w-8 text-zinc-300 hover:text-white">
+                <Button variant="ghost" size="icon" className="absolute bottom-4 right-4 h-9 w-9 rounded-full border border-white/10 bg-black/35 text-zinc-300 backdrop-blur hover:text-white">
                   <Maximize2 className="h-4 w-4" />
                 </Button>
               </div>
             </section>
 
-            <section className="h-[348px] shrink-0 border-t border-white/10 bg-[#111014]">
-              <div className="flex h-10 items-center justify-between border-b border-white/10 px-3">
+            <section className="h-[368px] shrink-0 border-t border-white/10 bg-[#101014]">
+              <div className="flex h-12 items-center justify-between border-b border-white/10 bg-[#131318] px-3">
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="sm" className="h-8 text-zinc-300 hover:text-white">
+                  <Button variant="ghost" size="sm" className="h-8 rounded-md bg-white/[0.04] text-zinc-200 hover:bg-white/[0.08] hover:text-white">
                     <MousePointer2 className="mr-2 h-4 w-4" />
                     Select
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-8 text-zinc-300 hover:text-white" onClick={() => void splitAtPlayhead()}>
+                  <Button variant="ghost" size="sm" className="h-8 text-zinc-300 hover:bg-white/[0.06] hover:text-white" onClick={() => void splitAtPlayhead()}>
                     <Scissors className="mr-2 h-4 w-4" />
                     Split
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-8 text-zinc-300 hover:text-white" onClick={() => setShowAddLayer((value) => !value)}>
+                  <Button variant="ghost" size="sm" className="h-8 text-zinc-300 hover:bg-white/[0.06] hover:text-white" onClick={() => setShowAddLayer((value) => !value)}>
                     <Plus className="mr-2 h-4 w-4" />
                     Layer
                   </Button>
@@ -2107,7 +2241,7 @@ export const VideoEditorWorkspace = ({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-zinc-400">
+                  <span className="rounded-md border border-white/10 bg-black/25 px-2 py-1 font-mono text-xs text-zinc-300">
                     {formatClock(playheadTime)} / {formatClock(timelineDuration)}
                   </span>
                   <Button
@@ -2183,15 +2317,15 @@ export const VideoEditorWorkspace = ({
 
               <div
                 ref={timelineScrollRef}
-                className="h-[calc(100%-40px)] overflow-auto sidebar-scroll"
+                className="h-[calc(100%-48px)] overflow-auto sidebar-scroll"
                 onWheel={handleTimelineWheel}
               >
                 <div className="relative" style={{ width: LABEL_COLUMN_WIDTH + timelineWidth }}>
                   <div
-                    className="sticky top-0 z-30 grid h-8 border-b border-white/10 bg-[#111014]"
+                    className="sticky top-0 z-30 grid h-8 border-b border-white/10 bg-[#101014]"
                     style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}
                   >
-                    <div className="sticky left-0 z-40 border-r border-white/10 bg-[#111014]" />
+                    <div className="sticky left-0 z-40 border-r border-white/10 bg-[#101014]" />
                     <div
                       className="relative cursor-crosshair"
                       onPointerDown={scrubFromTrack}
@@ -2216,12 +2350,12 @@ export const VideoEditorWorkspace = ({
 
                   <div className="space-y-1 p-2">
                     <div className="grid h-14" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-                      <div className="sticky left-0 z-20 flex h-14 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                      <div className="sticky left-0 z-20 flex h-14 items-center gap-2 border-r border-white/10 bg-[#101014] pr-3 text-xs font-medium text-zinc-400">
                         <Film className="h-4 w-4" />
                         Video
                       </div>
                       <div
-                        className="relative h-14 rounded border border-white/10 bg-[#1b1a20]"
+                        className={`${timelineTrackClass} h-14`}
                         onPointerDown={scrubFromTrack}
                         onPointerMove={(event) => {
                           if (event.buttons === 1) scrubFromTrack(event);
@@ -2274,12 +2408,12 @@ export const VideoEditorWorkspace = ({
                     </div>
 
                     <div className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#101014] pr-3 text-xs font-medium text-zinc-400">
                         <Type className="h-4 w-4" />
                         Text
                       </div>
                       <div
-                        className="relative h-10 rounded border border-white/10 bg-[#191820]"
+                        className={`${timelineTrackClass} h-10`}
                         onPointerDown={(event) => beginMarqueeSelection(event, "caption")}
                         onPointerMove={updateMarqueeSelection}
                         onPointerUp={finishMarqueeSelection}
@@ -2328,16 +2462,18 @@ export const VideoEditorWorkspace = ({
 
                     {(["video", "image"] as const).map((type) => (
                       <div key={type} className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-                        <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                        <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#101014] pr-3 text-xs font-medium text-zinc-400">
                           {type === "video" ? <Video className="h-4 w-4" /> : <ImagePlus className="h-4 w-4" />}
                           {type === "video" ? "Clips" : "Images"}
                         </div>
                         <div
-                          className="relative h-10 rounded border border-white/10 bg-[#191820]"
+                          className={`${timelineTrackClass} h-10`}
                           onPointerDown={(event) => beginMarqueeSelection(event, "layer", type)}
                           onPointerMove={updateMarqueeSelection}
                           onPointerUp={finishMarqueeSelection}
                           onPointerCancel={finishMarqueeSelection}
+                          onDragOver={allowDrop}
+                          onDrop={(event) => void handleEditorDrop(event, { kind: "timeline", mediaType: type })}
                         >
                           {marquee?.kind === "layer" && marquee.layerType === type && (
                             <div
@@ -2385,11 +2521,11 @@ export const VideoEditorWorkspace = ({
                     ))}
 
                     <div className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#101014] pr-3 text-xs font-medium text-zinc-400">
                         <Mic2 className="h-4 w-4" />
                         Voice
                       </div>
-                      <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
+                      <div className={`${timelineTrackClass} h-10`} onPointerDown={scrubFromTrack}>
                         {sceneTimeline.filter(({ scene }) => Boolean(scene.voiceover_url)).map(({ scene, start, duration }) => (
                           <TimelineClip
                             key={`voice-${scene.id}`}
@@ -2417,11 +2553,11 @@ export const VideoEditorWorkspace = ({
                     </div>
 
                     <div className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#101014] pr-3 text-xs font-medium text-zinc-400">
                         <Music2 className="h-4 w-4" />
                         Music
                       </div>
-                      <div className="relative h-10 rounded border border-white/10 bg-[#191820]" onPointerDown={scrubFromTrack}>
+                      <div className={`${timelineTrackClass} h-10`} onPointerDown={scrubFromTrack}>
                         {project.music_url && (
                           <TimelineClip
                             left={musicStart * pixelsPerSecond}
@@ -2457,16 +2593,18 @@ export const VideoEditorWorkspace = ({
                     </div>
 
                     <div className="grid" style={{ gridTemplateColumns: `${LABEL_COLUMN_WIDTH}px ${timelineWidth}px` }}>
-                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#111014] pr-2 text-xs text-zinc-500">
+                      <div className="sticky left-0 z-20 flex h-10 items-center gap-2 border-r border-white/10 bg-[#101014] pr-3 text-xs font-medium text-zinc-400">
                         <Volume2 className="h-4 w-4" />
                         Audio Layers
                       </div>
                       <div
-                        className="relative h-10 rounded border border-white/10 bg-[#191820]"
+                        className={`${timelineTrackClass} h-10`}
                         onPointerDown={(event) => beginMarqueeSelection(event, "layer", "audio")}
                         onPointerMove={updateMarqueeSelection}
                         onPointerUp={finishMarqueeSelection}
                         onPointerCancel={finishMarqueeSelection}
+                        onDragOver={allowDrop}
+                        onDrop={(event) => void handleEditorDrop(event, { kind: "timeline", mediaType: "audio" })}
                       >
                         {marquee?.kind === "layer" && marquee.layerType === "audio" && (
                           <div
@@ -2520,13 +2658,17 @@ export const VideoEditorWorkspace = ({
             </section>
           </main>
 
-          <aside className="w-[320px] shrink-0 overflow-y-auto border-l border-white/10 bg-[#17161c] sidebar-scroll">
-            <div className="sticky top-0 z-20 flex h-12 items-center justify-between border-b border-white/10 bg-[#17161c] px-4">
+          <aside className="w-[360px] shrink-0 overflow-y-auto border-l border-white/10 bg-[#141419] sidebar-scroll">
+            <div className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-white/10 bg-[#141419]/95 px-4 backdrop-blur">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <PanelRight className="h-4 w-4 text-zinc-400" />
                 {panelItems.find((item) => item.id === activePanel)?.label}
               </div>
-              {selectedLayer && (
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="border-white/10 bg-white/[0.03] text-[10px] uppercase tracking-wide text-zinc-400">
+                  Inspector
+                </Badge>
+                {selectedLayer && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -2538,12 +2680,13 @@ export const VideoEditorWorkspace = ({
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
-              )}
+                )}
+              </div>
             </div>
 
-            <div className="space-y-5 p-4">
+            <div className="space-y-5 p-5">
               {selectedLayer && (
-                <div className="space-y-3 rounded border border-white/10 bg-[#201f26] p-3">
+                <div className={`space-y-3 rounded-lg p-3 ${editorSurfaceClass}`}>
                   <div>
                     <p className="text-sm font-semibold capitalize">{selectedLayer.type} layer</p>
                     <p className="truncate text-xs text-zinc-500">{labelFromUrl(selectedLayer.url)}</p>
@@ -2918,6 +3061,61 @@ export const VideoEditorWorkspace = ({
                       {replacementError}
                     </div>
                   )}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-zinc-400">Uploaded Content</Label>
+                      <span className="text-[11px] text-zinc-500">{projectUploads.length}/{MAX_PROJECT_UPLOADS}</span>
+                    </div>
+                    {projectUploads.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-cyan-300/20 bg-cyan-300/[0.04] px-3 py-5 text-center text-xs text-zinc-400">
+                        Upload with the + button or drop files on the timeline. Files stay on this project for {UPLOAD_RETENTION_DAYS} days.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        {projectUploads.map((item) => {
+                          const libraryItem: LibraryItem = {
+                            id: item.id,
+                            type: item.media_type,
+                            title: item.filename,
+                            url: item.url,
+                            video_url: item.media_type === "video" ? item.url : undefined,
+                            image_url: item.media_type === "image" ? item.url : undefined,
+                          };
+                          const expiresAt = Date.parse(item.expires_at);
+                          const daysLeft = Number.isFinite(expiresAt)
+                            ? Math.max(1, Math.ceil((expiresAt - Date.now()) / (24 * 60 * 60 * 1000)))
+                            : UPLOAD_RETENTION_DAYS;
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              draggable
+                              onDragStart={(event) => handleCloudDragStart(event, libraryItem)}
+                              onClick={() => void handleLibraryItemClick(libraryItem)}
+                              className="group overflow-hidden rounded-lg border border-white/10 bg-[#19191f] text-left shadow-sm transition hover:border-cyan-300/45 hover:bg-[#20212a]"
+                            >
+                              {item.media_type === "video" ? (
+                                <video src={item.url} className="aspect-video w-full object-cover transition group-hover:scale-[1.02]" muted playsInline />
+                              ) : item.media_type === "image" ? (
+                                <img src={item.url} alt="" className="aspect-video w-full object-cover transition group-hover:scale-[1.02]" />
+                              ) : (
+                                <div className="flex aspect-video items-center justify-center bg-[#101014] text-cyan-200">
+                                  <Volume2 className="h-5 w-5" />
+                                </div>
+                              )}
+                              <div className="space-y-1 px-2 py-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="truncate text-[11px] text-zinc-300">{item.filename || labelFromUrl(item.url)}</p>
+                                  <span className="shrink-0 rounded bg-cyan-300/10 px-1.5 py-0.5 text-[10px] uppercase text-cyan-100">{item.media_type}</span>
+                                </div>
+                                <p className="truncate text-[10px] text-zinc-500">{formatBytes(item.size)} | deletes in {daysLeft}d</p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     {libraryItems.map((item, index) => {
                       const url = mediaUrlFromLibraryItem(item);
@@ -2930,14 +3128,14 @@ export const VideoEditorWorkspace = ({
                           draggable
                           onDragStart={(event) => handleCloudDragStart(event, item)}
                           onClick={() => void handleLibraryItemClick(item)}
-                          className="overflow-hidden rounded border border-white/10 bg-[#201f26] text-left"
+                          className="group overflow-hidden rounded-lg border border-white/10 bg-[#19191f] text-left shadow-sm transition hover:border-cyan-300/45 hover:bg-[#20212a]"
                         >
                           {isVideoResult && url ? (
-                            <video src={url} poster={thumb || undefined} className="aspect-video w-full object-cover" muted playsInline />
+                            <video src={url} poster={thumb || undefined} className="aspect-video w-full object-cover transition group-hover:scale-[1.02]" muted playsInline />
                           ) : thumb ? (
-                            <img src={thumb} alt="" className="aspect-video w-full object-cover" />
+                            <img src={thumb} alt="" className="aspect-video w-full object-cover transition group-hover:scale-[1.02]" />
                           ) : url ? (
-                            <img src={url} alt="" className="aspect-video w-full object-cover" />
+                            <img src={url} alt="" className="aspect-video w-full object-cover transition group-hover:scale-[1.02]" />
                           ) : (
                             <div className="aspect-video bg-zinc-800" />
                           )}

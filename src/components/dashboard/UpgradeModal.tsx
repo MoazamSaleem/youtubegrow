@@ -75,6 +75,9 @@ export function UpgradeModal({
             : `Competitor analysis ${limits.competitorAnalysisFrequency}`
         );
       }
+      if (limits.hasTextToVideo) {
+        features.push("Text to Video");
+      }
       if (limits.hasScriptWriter) {
         features.push("AI Script Writer");
       }
@@ -95,7 +98,7 @@ export function UpgradeModal({
       if (limits.hasGrowthTasks) {
         features.push("Growth tasks & milestones");
       }
-      features.push(`${limits.aiStrategistCredits.toLocaleString()} AI Credits`);
+      features.push(`${limits.aiStrategistCredits.toLocaleString()} AI Credits/month`);
 
       return features;
     }
@@ -127,6 +130,9 @@ export function UpgradeModal({
     } else if (limits.competitorAnalysisFrequency === "daily" && currentLimits.competitorAnalysisFrequency !== "daily") {
       features.push("Daily competitor analysis");
     }
+    if (limits.hasTextToVideo && !currentLimits.hasTextToVideo) {
+      features.push("Text to Video");
+    }
     if (limits.hasScriptWriter && !currentLimits.hasScriptWriter) {
       features.push("AI Script Writer");
     }
@@ -148,7 +154,7 @@ export function UpgradeModal({
       features.push("Growth tasks & milestones");
     }
     if (limits.aiStrategistCredits > currentLimits.aiStrategistCredits) {
-      features.push(`${limits.aiStrategistCredits.toLocaleString()} AI Credits`);
+      features.push(`${limits.aiStrategistCredits.toLocaleString()} AI Credits/month`);
     }
 
     return features;

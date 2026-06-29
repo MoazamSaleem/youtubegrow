@@ -180,6 +180,39 @@ const CreditsHistory = () => {
             </p>
           </motion.div>
 
+          {/* Summary Stats */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="sticky top-0 z-30 -mx-1 mb-6 grid grid-cols-2 gap-4 bg-background/95 px-1 py-3 backdrop-blur sm:grid-cols-4"
+          >
+            <div className="glass rounded-xl p-4 text-center">
+              <ArrowUp className="h-5 w-5 text-green-500 mx-auto mb-2" />
+              <p className="text-2xl font-bold text-green-500">
+                {history.filter(h => h.amount > 0).reduce((sum, h) => sum + h.amount, 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">Total Added</p>
+            </div>
+            <div className="glass rounded-xl p-4 text-center">
+              <ArrowDown className="h-5 w-5 text-red-500 mx-auto mb-2" />
+              <p className="text-2xl font-bold text-red-500">
+                {Math.abs(history.filter(h => h.amount < 0).reduce((sum, h) => sum + h.amount, 0)).toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">Total Used</p>
+            </div>
+            <div className="glass rounded-xl p-4 text-center">
+              <Package className="h-5 w-5 text-primary mx-auto mb-2" />
+              <p className="text-2xl font-bold">{purchases.length}</p>
+              <p className="text-xs text-muted-foreground">Purchases</p>
+            </div>
+            <div className="glass rounded-xl p-4 text-center">
+              <Calendar className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
+              <p className="text-2xl font-bold">{usage.length}</p>
+              <p className="text-xs text-muted-foreground">Queries</p>
+            </div>
+          </motion.div>
+
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="mb-6">
@@ -380,38 +413,6 @@ const CreditsHistory = () => {
             </TabsContent>
           </Tabs>
 
-          {/* Summary Stats */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8"
-          >
-            <div className="glass rounded-xl p-4 text-center">
-              <ArrowUp className="h-5 w-5 text-green-500 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-green-500">
-                {history.filter(h => h.amount > 0).reduce((sum, h) => sum + h.amount, 0).toLocaleString()}
-              </p>
-              <p className="text-xs text-muted-foreground">Total Added</p>
-            </div>
-            <div className="glass rounded-xl p-4 text-center">
-              <ArrowDown className="h-5 w-5 text-red-500 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-red-500">
-                {Math.abs(history.filter(h => h.amount < 0).reduce((sum, h) => sum + h.amount, 0)).toLocaleString()}
-              </p>
-              <p className="text-xs text-muted-foreground">Total Used</p>
-            </div>
-            <div className="glass rounded-xl p-4 text-center">
-              <Package className="h-5 w-5 text-primary mx-auto mb-2" />
-              <p className="text-2xl font-bold">{purchases.length}</p>
-              <p className="text-xs text-muted-foreground">Purchases</p>
-            </div>
-            <div className="glass rounded-xl p-4 text-center">
-              <Calendar className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
-              <p className="text-2xl font-bold">{usage.length}</p>
-              <p className="text-xs text-muted-foreground">Queries</p>
-            </div>
-          </motion.div>
         </div>
       </main>
     </div>

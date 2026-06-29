@@ -88,7 +88,12 @@ const Billing = () => {
   ];
 
   const getPlanFeatures = (plan: SubscriptionPlan) => {
-    const base = STRIPE_PLANS[plan].features.map((text) => ({ text, included: true }));
+    const base = STRIPE_PLANS[plan].features.map((text) => ({
+      text: text.includes("AI Credits")
+        ? `${PLAN_LIMITS[plan].aiStrategistCredits.toLocaleString()} AI Credits/month`
+        : text,
+      included: true,
+    }));
     if (plan === "basic") {
       base.push({ text: "AI Script Writer", included: false });
       base.push({ text: "Text to Speech", included: false });
@@ -101,7 +106,7 @@ const Billing = () => {
     { name: "Channels", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].maxChannels },
     { name: "Keywords/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].keywordsPerDay === -1 ? "Unlimited" : PLAN_LIMITS[p].keywordsPerDay },
     { name: "Topics/day", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].topicsPerDay },
-    { name: "AI Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "None" : PLAN_LIMITS[p].aiStrategistCredits.toLocaleString() },
+    { name: "AI Credits", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].aiStrategistCredits === 0 ? "None" : `${PLAN_LIMITS[p].aiStrategistCredits.toLocaleString()}/month` },
     { name: "Channel Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].channelAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].channelAnalysisFrequency },
     { name: "Competitor Analysis", getValue: (p: SubscriptionPlan) => PLAN_LIMITS[p].competitorAnalysisFrequency === "never" ? false : PLAN_LIMITS[p].competitorAnalysisFrequency },
     { name: "SEO Analyzer", getValue: (_p: SubscriptionPlan) => "Included (20 credits/query)" },

@@ -83,6 +83,17 @@ export interface TextToVideoTimelineLayer {
   trim_end: number;
 }
 
+export interface TextToVideoUploadedMedia {
+  id: string;
+  url: string;
+  filename?: string;
+  size?: number;
+  media_type: "audio" | "image" | "video";
+  kind?: string;
+  uploaded_at: string;
+  expires_at: string;
+}
+
 export interface TextToVideoCaptionStyle {
   preset: string;
   font: string;
@@ -125,6 +136,7 @@ export interface TextToVideoProject {
   music_url?: string | null;
   music_tracks?: string[];
   timeline_layers?: TextToVideoTimelineLayer[];
+  uploaded_media?: TextToVideoUploadedMedia[];
   music_timeline?: TextToVideoMusicTimeline;
   total_duration: number;
   thumbnail_url?: string | null;
@@ -242,6 +254,7 @@ export function normalizeTextToVideoProject(project: TextToVideoProject): TextTo
     caption_style: { ...DEFAULT_CAPTION_STYLE, ...(project.caption_style ?? {}) },
     music_tracks: project.music_tracks ?? [],
     timeline_layers: timelineLayers,
+    uploaded_media: project.uploaded_media ?? [],
     music_timeline: { ...DEFAULT_MUSIC_TIMELINE, ...(project.music_timeline ?? {}) },
     total_duration:
       Number(project.total_duration) ||
