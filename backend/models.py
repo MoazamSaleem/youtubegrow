@@ -111,6 +111,8 @@ class GenerateRequest(BaseModel):
     title: Optional[str] = None
     script: str
     aspect: Literal["9:16", "1:1", "16:9"] = "9:16"
+    style: str = "vertical-short"
+    audio_style: str = "none"
     voice: str = "nova"
     caption_theme: str = "viral_pop"
 

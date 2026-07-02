@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import asyncio
 import logging
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -13,7 +14,7 @@ from dotenv import load_dotenv
 
 from db import projects, renders
 from models import (
-    Project, Scene, Caption, TimelineLayer, GenerateRequest, RenderRequest, RenderJob, _now, _uid,
+    Project, Scene, Caption, TimelineLayer, CaptionStyle, GenerateRequest, RenderRequest, RenderJob, _now, _uid,
 )
 from ai_service import (
     split_into_scenes, synthesize_voice, transcribe_words, build_caption_groups,
@@ -51,6 +52,172 @@ ALLOWED_UPLOAD_EXT = {
     ".mp4", ".mov", ".webm", ".m4v",
     ".mp3", ".wav", ".m4a", ".ogg",
 }
+
+IMAGE_MEDIA_RE = re.compile(r"\.(?:jpe?g|png|webp|gif)(?:[?#].*)?$", re.IGNORECASE)
+VIDEO_MEDIA_RE = re.compile(r"\.(?:mp4|mov|webm|m4v)(?:[?#].*)?$", re.IGNORECASE)
+
+VIDEO_STYLE_PRESETS = {
+    "cinematic": {"animation": "slow_pan", "transition": "fade", "effects": ["vignette"]},
+    "documentary": {"animation": "ken_burns_out", "transition": "fade", "effects": []},
+    "animated": {"animation": "punch_in", "transition": "zoom", "effects": ["rgb_split"]},
+    "realistic": {"animation": "slow_pan", "transition": "fade", "effects": []},
+    "product": {"animation": "ken_burns_in", "transition": "fade", "effects": ["vignette"]},
+    "vertical-short": {"animation": "punch_in", "transition": "flash", "effects": ["flash"]},
+}
+
+AUDIO_STYLE_QUERY = {
+    "none": "",
+    "cinematic": "cinematic dark",
+    "upbeat": "pop upbeat",
+    "lofi": "lofi chill",
+    "documentary": "cinematic calm",
+}
+
+CAPTION_STYLE_PRESETS = {
+    "viral_pop": {"preset": "viral_pop"},
+    "minimal": {"preset": "minimal"},
+    "hormozi": {"preset": "hormozi"},
+    "mrbeast": {"preset": "mrbeast"},
+}
+
+
+def _looks_like_image_media_url(value) -> bool:
+    if not isinstance(value, str):
+        return False
+    raw = value.strip().lower()
+    return bool(IMAGE_MEDIA_RE.search(raw) or "images.unsplash.com/" in raw)
+
+
+def _looks_like_video_media_url(value) -> bool:
+    return isinstance(value, str) and bool(VIDEO_MEDIA_RE.search(value.strip()))
+
+
+def _normalize_video_style(value: str | None) -> str:
+    return value if value in VIDEO_STYLE_PRESETS else "vertical-short"
+
+
+def _normalize_audio_style(value: str | None) -> str:
+    return value if value in AUDIO_STYLE_QUERY else "none"
+
+
+def _caption_style_for_theme(theme: str | None) -> CaptionStyle:
+    preset = CAPTION_STYLE_PRESETS.get(theme or "", CAPTION_STYLE_PRESETS["viral_pop"])
+    return CaptionStyle(**preset)
+
+
+async def _music_url_for_audio_style(audio_style: str) -> str | None:
+    query = AUDIO_STYLE_QUERY.get(audio_style, "")
+    if not query:
+        return None
+    items = await search_pixabay(query, "music", per_page=6)
+    for item in items:
+        url = item.get("url") or item.get("preview_url") or item.get("preview")
+        if url:
+            return str(url)
+    return None
+
+
+def _scene_ranges(scenes: list[dict]) -> list[tuple[dict, float, float]]:
+    ranges = []
+    cursor = 0.0
+    for scene in scenes:
+        duration = max(0.0, float(scene.get("duration") or 0.0))
+        ranges.append((scene, cursor, duration))
+        cursor += duration
+    return ranges
+
+
+def _is_generated_scene_video_layer(layer: dict, ranges: list[tuple[dict, float, float]]) -> bool:
+    if layer.get("type") != "video":
+        return False
+    layer_start = float(layer.get("start") or 0.0)
+    layer_duration = float(layer.get("duration") or 0.0)
+    layer_url = str(layer.get("url") or "").strip()
+    layer_track = int(layer.get("track") or 0)
+    for scene, start, duration in ranges:
+        same_time = abs(layer_start - start) < 0.15 and abs(layer_duration - duration) < 0.25
+        same_track = layer_track == int(scene.get("index") or 0)
+        original_image_url = layer_url and layer_url == str(scene.get("image_url") or "").strip()
+        poster_video_layer = same_track and _looks_like_image_media_url(layer_url)
+        if same_time and (original_image_url or poster_video_layer):
+            return True
+    return False
+
+
+async def _repair_project_video_sources(doc: dict | None) -> dict | None:
+    """Repair older projects that saved thumbnails/posters in video_url fields."""
+    if not doc or not doc.get("scenes"):
+        return doc
+
+    aspect = doc.get("aspect", "9:16")
+    scenes = [dict(scene) for scene in (doc.get("scenes") or [])]
+    timeline_layers = [dict(layer) for layer in (doc.get("timeline_layers") or [])]
+    changed = False
+
+    for scene in scenes:
+        old_url = scene.get("video_url")
+        if not old_url or _looks_like_video_media_url(old_url):
+            continue
+        keywords = scene.get("keywords") or str(scene.get("script") or "").split()[:2]
+        new_url = await fetch_first_video_for_keywords(keywords, aspect)
+        if not new_url or new_url == old_url:
+            continue
+        if not scene.get("image_url"):
+            scene["image_url"] = old_url
+        scene["video_url"] = new_url
+        changed = True
+
+    ranges = _scene_ranges(scenes)
+    repaired_layers = []
+    for layer in timeline_layers:
+        if _is_generated_scene_video_layer(layer, ranges):
+            changed = True
+            continue
+        if layer.get("type") == "video" and not _looks_like_video_media_url(layer.get("url")):
+            layer["type"] = "image"
+            layer["opacity"] = float(layer.get("opacity") or 0.85)
+            changed = True
+        repaired_layers.append(layer)
+
+    has_real_video_layer = any(
+        layer.get("type") == "video"
+        and layer.get("url")
+        and _looks_like_video_media_url(layer.get("url"))
+        for layer in repaired_layers
+    )
+    if not has_real_video_layer:
+        for scene, start, duration in ranges:
+            video_url = scene.get("video_url")
+            if not video_url or not _looks_like_video_media_url(video_url):
+                continue
+            repaired_layers.append(
+                TimelineLayer(
+                    type="video",
+                    url=video_url,
+                    start=start,
+                    duration=max(0.25, duration),
+                    track=int(scene.get("index") or 0),
+                    volume=0,
+                    opacity=1,
+                    trim_start=0,
+                    trim_end=0,
+                ).model_dump()
+            )
+            changed = True
+    timeline_layers = repaired_layers
+
+    if not changed:
+        return doc
+
+    thumbnail_url = next((scene.get("video_url") for scene in scenes if scene.get("video_url")), doc.get("thumbnail_url"))
+    patch = {
+        "scenes": scenes,
+        "timeline_layers": timeline_layers,
+        "thumbnail_url": thumbnail_url,
+        "updated_at": _now(),
+    }
+    await projects.update_one({"id": doc["id"]}, {"$set": patch})
+    return {**doc, **patch}
 
 
 # ----- Storage / file serving -----
@@ -93,6 +260,11 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
         if progress_cb:
             await progress_cb(progress, message)
 
+    video_style = _normalize_video_style(req.style)
+    audio_style = _normalize_audio_style(req.audio_style)
+    style_preset = VIDEO_STYLE_PRESETS[video_style]
+    caption_style = _caption_style_for_theme(req.caption_theme)
+
     await report(5, "Splitting scenes")
     scene_dicts = await split_into_scenes(req.script)
     await report(18, "Generating voiceover and captions")
@@ -106,7 +278,7 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
         align = await transcribe_words(voice_path)
         caps_groups = build_caption_groups(align["words"], group_size=3)
         captions = [Caption(**c).model_dump() for c in caps_groups]
-        video_url = await fetch_first_video_for_keywords(sc.get("keywords", []), req.aspect)
+        video_url = await fetch_first_video_for_keywords(sc.get("keywords", []), req.aspect, video_style)
         scene = Scene(
             index=idx,
             script=text,
@@ -115,8 +287,9 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
             image_url=None,
             video_url=video_url,
             keywords=sc.get("keywords", []),
-            transition_in=sc.get("transition_in", "fade"),
-            animation=sc.get("animation", "ken_burns_in"),
+            transition_in=style_preset["transition"],
+            animation=style_preset["animation"],
+            effects=list(style_preset["effects"]),
             captions=captions,
         )
         return scene.model_dump()
@@ -131,7 +304,7 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
     for track, scene in enumerate(scenes):
         duration = float(scene.get("duration") or 0)
         video_url = scene.get("video_url")
-        if video_url:
+        if video_url and not _looks_like_image_media_url(video_url):
             timeline_layers.append(
                 TimelineLayer(
                     type="video",
@@ -147,6 +320,14 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
             )
         cursor += duration
 
+    music_url = await _music_url_for_audio_style(audio_style)
+    music_timeline = {
+        "start": 0,
+        "duration": total_duration if music_url else 0,
+        "trim_start": 0,
+        "trim_end": 0,
+    }
+
     await report(88, "Saving project")
     await projects.update_one(
         {"id": project.id},
@@ -154,6 +335,10 @@ async def _populate_generated_project(project: Project, req: GenerateRequest, pr
             "$set": {
                 "scenes": scenes,
                 "timeline_layers": timeline_layers,
+                "caption_style": caption_style.model_dump(),
+                "music_url": music_url,
+                "music_tracks": [],
+                "music_timeline": music_timeline,
                 "total_duration": total_duration,
                 "thumbnail_url": thumb,
                 "status": "ready",
@@ -176,6 +361,7 @@ async def get_project(pid: str):
     doc = await projects.find_one({"id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Project not found")
+    doc = await _repair_project_video_sources(doc)
     return doc
 
 
@@ -193,6 +379,7 @@ async def update_project(pid: str, payload: dict):
     if res.matched_count == 0:
         raise HTTPException(404, "Project not found")
     doc = await projects.find_one({"id": pid}, {"_id": 0})
+    doc = await _repair_project_video_sources(doc)
     return doc
 
 
@@ -209,6 +396,7 @@ async def generate_project(req: GenerateRequest):
         script=req.script,
         voice=req.voice,
         caption_theme=req.caption_theme,
+        caption_style=_caption_style_for_theme(req.caption_theme),
         status="generating",
     )
     await projects.insert_one(project.model_dump())
@@ -238,6 +426,7 @@ async def generate_project_async(req: GenerateRequest, bg: BackgroundTasks):
         script=req.script,
         voice=req.voice,
         caption_theme=req.caption_theme,
+        caption_style=_caption_style_for_theme(req.caption_theme),
         status="generating",
     )
     await projects.insert_one(project.model_dump())
@@ -321,6 +510,7 @@ async def start_render(req: RenderRequest, bg: BackgroundTasks):
     project = await projects.find_one({"id": req.project_id}, {"_id": 0})
     if not project:
         raise HTTPException(404, "Project not found")
+    project = await _repair_project_video_sources(project)
     if not project.get("scenes"):
         raise HTTPException(400, "Project has no scenes to render")
 

@@ -1,6 +1,7 @@
 """Pixabay stock media integration with graceful mock fallback."""
 from __future__ import annotations
 import os
+import re
 import httpx
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -70,6 +71,18 @@ _MOCK_MUSIC: List[Dict[str, Any]] = [
     {"id": "mu4", "type": "audio", "title": "Epic Trailer Drum", "duration": 30, "preview": "https://cdn.pixabay.com/audio/2022/05/27/audio_1808fbf07a.mp3", "tags": "epic trailer"},
 ]
 
+_VIDEO_STYLE_QUERY = {
+    "cinematic": "cinematic film dramatic",
+    "documentary": "documentary nature real",
+    "animated": "animation motion graphics",
+    "realistic": "real life natural",
+    "product": "product close up commercial",
+    "vertical-short": "viral vertical motion",
+}
+
+IMAGE_MEDIA_RE = re.compile(r"\.(?:jpe?g|png|webp|gif)(?:[?#].*)?$", re.IGNORECASE)
+VIDEO_MEDIA_RE = re.compile(r"\.(?:mp4|mov|webm|m4v)(?:[?#].*)?$", re.IGNORECASE)
+
 
 def _mock_filter(items: List[Dict[str, Any]], query: str, per_page: int) -> List[Dict[str, Any]]:
     q = query.lower().strip()
@@ -89,6 +102,22 @@ def _pixabay_video_url(item: Dict[str, Any]) -> str | None:
     return None
 
 
+def _looks_like_image_url(value: str | None) -> bool:
+    return bool(value and IMAGE_MEDIA_RE.search(value.strip()))
+
+
+def _looks_like_video_url(value: str | None) -> bool:
+    return bool(value and VIDEO_MEDIA_RE.search(value.strip()))
+
+
+def _first_playable_video_url(item: Dict[str, Any]) -> str | None:
+    for key in ("video_url", "url"):
+        value = item.get(key)
+        if isinstance(value, str) and value and _looks_like_video_url(value) and not _looks_like_image_url(value):
+            return value
+    return None
+
+
 def _pixabay_video_thumb(item: Dict[str, Any]) -> str:
     picture_id = item.get("picture_id")
     if picture_id:
@@ -103,17 +132,20 @@ async def search_pixabay(
     orientation: str = "vertical",
 ) -> List[Dict[str, Any]]:
     """Search Pixabay images or music. Falls back to curated mock if no API key."""
+    if media_type == "audio":
+        media_type = "music"
     if not _KEY:
         if media_type == "video":
             return _mock_filter(_MOCK_VIDEOS, query, per_page)
         if media_type == "music":
-            return [m for m in _MOCK_MUSIC if not query or query.lower() in m["tags"].lower()]
+            matches = [m for m in _MOCK_MUSIC if not query or any(token in m["tags"].lower() for token in query.lower().split())]
+            return [{**m, "url": m.get("preview"), "preview_url": m.get("preview")} for m in (matches or _MOCK_MUSIC)[:per_page]]
         return _mock_filter(_MOCK_IMAGES, query, per_page)
 
     async with httpx.AsyncClient(timeout=15) as client:
         if media_type == "music":
             # Pixabay music endpoint isn't open; return mock when music requested
-            return _MOCK_MUSIC
+            return [{**m, "url": m.get("preview"), "preview_url": m.get("preview")} for m in _MOCK_MUSIC[:per_page]]
         if media_type == "video":
             url = "https://pixabay.com/api/videos/"
             params = {
@@ -178,14 +210,20 @@ async def fetch_first_image_for_keywords(keywords: list) -> str | None:
     return None
 
 
-async def fetch_first_video_for_keywords(keywords: list, aspect: str = "9:16") -> str:
+async def fetch_first_video_for_keywords(keywords: list, aspect: str = "9:16", style: str = "vertical-short") -> str:
     """Helper used by AI generator to pick a stock video for a scene."""
-    q = " ".join(keywords[:2]) if keywords else "cinematic"
+    style_query = _VIDEO_STYLE_QUERY.get(style, _VIDEO_STYLE_QUERY["vertical-short"])
+    keyword_query = " ".join(str(item).strip() for item in keywords[:2] if str(item).strip())
+    q = " ".join(part for part in [style_query, keyword_query] if part).strip() or "cinematic"
     orientation = "horizontal" if aspect == "16:9" else "vertical"
     items = await search_pixabay(q, "video", per_page=6, orientation=orientation)
+    if not items and keyword_query:
+        items = await search_pixabay(keyword_query, "video", per_page=6, orientation=orientation)
     if not items:
         items = await search_pixabay("cinematic motion", "video", per_page=6, orientation=orientation)
     if items:
-        first = items[0]
-        return first.get("video_url") or first.get("url") or _MOCK_VIDEOS[0]["video_url"]
+        for item in items:
+            video_url = _first_playable_video_url(item)
+            if video_url:
+                return video_url
     return _MOCK_VIDEOS[0]["video_url"]

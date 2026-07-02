@@ -22,9 +22,12 @@ import {
   normalizeTextToVideoProject,
   projectIdFromGeneration,
   TEXT_TO_VIDEO_ASPECTS,
+  TEXT_TO_VIDEO_AUDIO_STYLES,
   TEXT_TO_VIDEO_CAPTION_THEMES,
   TEXT_TO_VIDEO_COST_PER_10_SECONDS,
+  TEXT_TO_VIDEO_STYLES,
   TEXT_TO_VIDEO_VOICES,
+  type TextToVideoAudioStyle,
   type TextToVideoAspect,
   type TextToVideoCaption,
   type TextToVideoCaptionStyle,
@@ -33,6 +36,7 @@ import {
   type TextToVideoProject,
   type TextToVideoRenderJob,
   type TextToVideoScene,
+  type TextToVideoStyle,
   type TextToVideoTimelineLayer,
   type TextToVideoVoice,
 } from "@/lib/textToVideo";
@@ -103,8 +107,22 @@ const mediaUrlFromLibraryItem = (item: LibraryItem) =>
 
 const isVideoUrl = (url: string) => /\.(mp4|mov|webm|m4v)(?:\?|#|$)/i.test(url);
 
+const isImageUrl = (url: string) => /\.(jpe?g|png|webp|gif)(?:\?|#|$)/i.test(url);
+
+const videoUrlFromLibraryItem = (item: LibraryItem) => {
+  const candidates = [item.video_url, item.url, item.webformatURL, item.preview_url, item.previewURL]
+    .filter((url): url is string => Boolean(url));
+  return candidates.find((url) => !isImageUrl(url) && (isVideoUrl(url) || item.type === "video")) || "";
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object";
+
+const labelFromOption = (value: string) =>
+  value
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 
 const clampPercent = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
 
@@ -196,6 +214,8 @@ const TextToVideo = () => {
     title: "",
     prompt: "",
     aspectRatio: "9:16" as TextToVideoAspect,
+    style: "vertical-short" as TextToVideoStyle,
+    audioStyle: "none" as TextToVideoAudioStyle,
     voice: "nova" as TextToVideoVoice,
     captionTheme: "viral_pop" as TextToVideoCaptionTheme,
   });
@@ -277,6 +297,30 @@ const TextToVideo = () => {
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
     if (refreshError) return null;
     return refreshed.session ?? session ?? null;
+  }, []);
+
+  const downloadRenderedVideo = useCallback(async (url: string | null | undefined, filename = "rendered-video.mp4") => {
+    if (!url) return;
+
+    const clickDownload = (href: string, name: string, revoke = false) => {
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = name;
+      link.rel = "noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      if (revoke) window.setTimeout(() => URL.revokeObjectURL(href), 5000);
+    };
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
+      const blob = await response.blob();
+      clickDownload(URL.createObjectURL(blob), filename, true);
+    } catch {
+      clickDownload(url, filename);
+    }
   }, []);
 
   const invokeGenerateVideo = useCallback(async (body: Record<string, unknown>, forceSessionRefresh = false) => {
@@ -519,6 +563,8 @@ const TextToVideo = () => {
         prompt: formData.prompt,
         durationSeconds: estimatedDurationSeconds,
         aspectRatio: formData.aspectRatio,
+        style: formData.style,
+        audioStyle: formData.audioStyle,
         voice: formData.voice,
         captionTheme: formData.captionTheme,
       });
@@ -597,12 +643,8 @@ const TextToVideo = () => {
       if (error) throw new Error(error);
       if (!data?.project) throw new Error("Updated project was not returned");
       const normalized = normalizeTextToVideoProject(data.project);
-      const definedPatch = Object.fromEntries(
-        Object.entries(patch).filter(([, value]) => value !== undefined),
-      ) as Partial<TextToVideoProject>;
       const reconciled = normalizeTextToVideoProject({
         ...normalized,
-        ...definedPatch,
         caption_style: patch.caption_style
           ? { ...normalized.caption_style, ...patch.caption_style }
           : normalized.caption_style,
@@ -787,18 +829,16 @@ const TextToVideo = () => {
 
   const applyLibraryItemToScene = async (item: LibraryItem) => {
     if (!selectedScene) return;
-    const url = mediaUrlFromLibraryItem(item);
-    if (!url) return;
-    const isVideo = item.type === "video" || Boolean(item.video_url) || isVideoUrl(url);
-    if (!isVideo) {
+    const url = videoUrlFromLibraryItem(item);
+    if (!url) {
       toast({
         title: "Video required",
-        description: "Text-to-video scene visuals can only use video media.",
+        description: "This library item only has an image/poster URL. Choose a playable video source.",
         variant: "destructive",
       });
       return;
     }
-    updateSceneLocal(selectedScene.id, { video_url: item.video_url || item.url || url, image_url: null });
+    updateSceneLocal(selectedScene.id, { video_url: url, image_url: null });
     await saveScenes("Scene visual saved");
   };
 
@@ -815,7 +855,10 @@ const TextToVideo = () => {
       }
 
       if (data.render.status === "completed") {
-        toast({ title: "Render complete", description: "The edited video is ready." });
+        const finalUrl = data.generation?.video_url || data.render.final_video_url;
+        const extension = finalUrl?.split("?")[0].split(".").pop() || renderSettings.outFormat || "mp4";
+        await downloadRenderedVideo(finalUrl, `${projectId}-render.${extension}`);
+        toast({ title: "Render complete", description: "The edited video is ready and the download has started." });
         setIsRendering(false);
         return;
       }
@@ -831,7 +874,7 @@ const TextToVideo = () => {
       }
     }
     setIsRendering(false);
-  }, [invokeGenerateVideo, toast]);
+  }, [downloadRenderedVideo, invokeGenerateVideo, renderSettings.outFormat, toast]);
 
   const renderProject = async () => {
     if (!project) return;
@@ -956,6 +999,20 @@ const TextToVideo = () => {
                       })}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Video style</Label>
+                        <Select value={formData.style} onValueChange={(value: TextToVideoStyle) => setFormData((previous) => ({ ...previous, style: value }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>{TEXT_TO_VIDEO_STYLES.map((style) => <SelectItem key={style} value={style}>{labelFromOption(style)}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Background audio</Label>
+                        <Select value={formData.audioStyle} onValueChange={(value: TextToVideoAudioStyle) => setFormData((previous) => ({ ...previous, audioStyle: value }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>{TEXT_TO_VIDEO_AUDIO_STYLES.map((style) => <SelectItem key={style} value={style}>{labelFromOption(style)}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
                       <div className="space-y-2">
                         <Label>Voice</Label>
                         <Select value={formData.voice} onValueChange={(value: TextToVideoVoice) => setFormData((previous) => ({ ...previous, voice: value }))}>

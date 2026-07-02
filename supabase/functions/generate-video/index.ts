@@ -14,6 +14,7 @@ const COST_PER_10_SECONDS = 30;
 const MIN_DURATION_SECONDS = 10;
 const MAX_DURATION_SECONDS = 120;
 const STYLES = new Set(["cinematic", "documentary", "animated", "realistic", "product", "vertical-short"]);
+const AUDIO_STYLES = new Set(["none", "cinematic", "upbeat", "lofi", "documentary"]);
 const VOICES = new Set(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
 const CAPTION_THEMES = new Set(["viral_pop", "minimal", "hormozi", "mrbeast"]);
 
@@ -36,6 +37,9 @@ const calculateCredits = (durationSeconds: number) =>
 
 const normalizeStyle = (value: unknown) =>
   typeof value === "string" && STYLES.has(value) ? value : "vertical-short";
+
+const normalizeAudioStyle = (value: unknown) =>
+  typeof value === "string" && AUDIO_STYLES.has(value) ? value : "none";
 
 const joinUrl = (base: string, path: string) =>
   `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
@@ -373,11 +377,15 @@ serve(async (req) => {
 
     if (action === "librarySearch") {
       const q = typeof body.q === "string" ? body.q : "";
-      const type = "video";
+      const requestedType = typeof body.type === "string" ? body.type : "video";
+      const type = requestedType === "image" || requestedType === "music" || requestedType === "audio"
+        ? requestedType
+        : "video";
+      const providerType = type === "audio" ? "music" : type;
       const result = await fetchProvider(
         providerEndpoint,
         providerApiKey,
-        `/api/library/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}`,
+        `/api/library/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(providerType)}`,
       );
       return result.ok ? jsonResponse(result.payload) : jsonResponse({ error: result.error }, result.status);
     }
@@ -529,6 +537,10 @@ serve(async (req) => {
 
       const providerStatus = typeof result.payload.status === "string" ? result.payload.status : "running";
       const finalVideoUrl = absoluteProviderUrl(providerEndpoint, result.payload.final_video_url);
+      const renderPayload = {
+        ...result.payload,
+        final_video_url: finalVideoUrl,
+      };
       const nextStatus = providerStatus === "completed"
         ? "completed"
         : providerStatus === "failed"
@@ -548,7 +560,7 @@ serve(async (req) => {
               ...(generation.provider_response && typeof generation.provider_response === "object"
                 ? generation.provider_response as JsonRecord
                 : {}),
-              render: result.payload,
+              render: renderPayload,
             },
             completed_at: nextStatus === "completed" ? new Date().toISOString() : null,
             error_message: nextStatus === "failed"
@@ -561,7 +573,7 @@ serve(async (req) => {
         if (!update.error && update.data) updatedGeneration = update.data as JsonRecord;
       }
 
-      return jsonResponse({ render: result.payload, generation: updatedGeneration });
+      return jsonResponse({ render: renderPayload, generation: updatedGeneration });
     }
 
     if (action === "status") {
@@ -743,7 +755,11 @@ serve(async (req) => {
         : providerStatus === "failed"
           ? "failed"
           : "processing";
-      const renderStatusPayload = { ...statusResult.payload, phase: "render" };
+      const renderStatusPayload = {
+        ...statusResult.payload,
+        final_video_url: finalVideoUrl,
+        phase: "render",
+      };
 
       const { data: updatedGeneration, error: updateStatusError } = await supabaseAdmin
         .from("text_to_video_generations")
@@ -777,6 +793,7 @@ serve(async (req) => {
     const aspectRatio =
       body.aspectRatio === "16:9" || body.aspectRatio === "1:1" ? body.aspectRatio : "9:16";
     const style = normalizeStyle(body.style);
+    const audioStyle = normalizeAudioStyle(body.audioStyle);
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const voice = typeof body.voice === "string" && VOICES.has(body.voice) ? body.voice : "nova";
     const captionTheme =
@@ -828,6 +845,8 @@ serve(async (req) => {
       title: title || prompt.slice(0, 60) || "Text to Video",
       script: prompt,
       aspect: aspectRatio,
+      style,
+      audio_style: audioStyle,
       voice,
       caption_theme: captionTheme || (style === "documentary" ? "minimal" : "viral_pop"),
     };

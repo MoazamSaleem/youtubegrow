@@ -13,6 +13,16 @@ export const TEXT_TO_VIDEO_STYLES = [
 
 export type TextToVideoStyle = (typeof TEXT_TO_VIDEO_STYLES)[number];
 
+export const TEXT_TO_VIDEO_AUDIO_STYLES = [
+  "none",
+  "cinematic",
+  "upbeat",
+  "lofi",
+  "documentary",
+] as const;
+
+export type TextToVideoAudioStyle = (typeof TEXT_TO_VIDEO_AUDIO_STYLES)[number];
+
 export const TEXT_TO_VIDEO_ASPECTS = ["9:16", "1:1", "16:9"] as const;
 export type TextToVideoAspect = (typeof TEXT_TO_VIDEO_ASPECTS)[number];
 

@@ -361,8 +361,34 @@ const labelFromUrl = (url: string) => {
   }
 };
 
-const isPlayableBrowserUrl = (url: string | null | undefined) =>
-  Boolean(url) && !/^[A-Za-z]:[\\/]/.test(String(url)) && !String(url).startsWith("/app/storage/");
+const browserMediaUrl = (url: string | null | undefined) => {
+  if (!url) return null;
+  const raw = String(url).trim();
+  if (!raw || /^[A-Za-z]:[\\/]/.test(raw)) return null;
+  if (/^(https?:|blob:|data:)/i.test(raw)) return raw;
+
+  let normalized = raw.replace(/\\/g, "/");
+  if (normalized.startsWith("/")) normalized = normalized.slice(1);
+  if (normalized.startsWith("app/storage/")) normalized = normalized.slice("app/storage/".length);
+  if (normalized.startsWith("storage/")) normalized = normalized.slice("storage/".length);
+  if (normalized.startsWith("api/storage/")) return `/${normalized}`;
+  if (normalized.startsWith("voiceover/") || normalized.startsWith("renders/") || normalized.startsWith("uploads/")) {
+    return `/api/storage/${normalized}`;
+  }
+  return raw;
+};
+
+const hasImageExtension = (url: string | null | undefined) => /\.(jpe?g|png|webp|gif)(?:[?#].*)?$/i.test(String(url ?? ""));
+
+const hasVideoExtension = (url: string | null | undefined) => /\.(mp4|mov|webm|m4v)(?:[?#].*)?$/i.test(String(url ?? ""));
+
+const browserVideoUrl = (url: string | null | undefined) => {
+  const normalized = browserMediaUrl(url);
+  if (!normalized || hasImageExtension(normalized)) return null;
+  return normalized;
+};
+
+const isPlayableBrowserUrl = (url: string | null | undefined) => Boolean(browserMediaUrl(url));
 
 const sceneAtTime = (
   sceneTimeline: { scene: TextToVideoScene; start: number; duration: number }[],
@@ -592,6 +618,8 @@ export const VideoEditorWorkspace = ({
   const [isUploadingReplacement, setIsUploadingReplacement] = useState(false);
   const [replacementError, setReplacementError] = useState<string | null>(null);
   const [isDragOverEditor, setIsDragOverEditor] = useState(false);
+  const [previewVideoErrorUrl, setPreviewVideoErrorUrl] = useState<string | null>(null);
+  const [previewPlaybackError, setPreviewPlaybackError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const dragStateRef = useRef<DragState | null>(null);
@@ -660,12 +688,17 @@ export const VideoEditorWorkspace = ({
   const activeLayers = (project.timeline_layers ?? []).filter(
     (layer) => playheadTime >= layer.start && playheadTime <= layer.start + layer.duration,
   );
-  const activeVisualLayer =
-    activeLayers.find((layer) => layer.type === "video") ?? activeLayers.find((layer) => layer.type === "image") ?? null;
-  const previewVideoUrl = activeVisualLayer?.type === "video" ? activeVisualLayer.url : previewScene?.video_url ?? null;
-  const previewVideoStart = activeVisualLayer?.type === "video" ? activeVisualLayer.start : activeSceneItem?.start ?? 0;
-  const previewVideoTrimStart = activeVisualLayer?.type === "video" ? activeVisualLayer.trim_start : 0;
-  const previewImageUrl = activeVisualLayer?.type === "image" ? activeVisualLayer.url : previewScene?.image_url ?? null;
+  const activeVideoLayer = activeLayers.find((layer) => layer.type === "video" && Boolean(browserVideoUrl(layer.url))) ?? null;
+  const activeImageLayer = activeLayers.find((layer) => layer.type === "image" && Boolean(browserMediaUrl(layer.url))) ?? null;
+  const activeVisualLayer = activeVideoLayer ?? activeImageLayer;
+  const previewVideoUrl = activeVideoLayer?.url ?? previewScene?.video_url ?? null;
+  const previewVideoStart = activeVideoLayer ? activeVideoLayer.start : activeSceneItem?.start ?? 0;
+  const previewVideoTrimStart = activeVideoLayer ? activeVideoLayer.trim_start : 0;
+  const previewImageUrl = activeImageLayer?.url ?? previewScene?.image_url ?? null;
+  const previewVideoSrc = browserVideoUrl(previewVideoUrl);
+  const playablePreviewVideoSrc = previewVideoSrc && previewVideoErrorUrl !== previewVideoSrc ? previewVideoSrc : null;
+  const previewImageSrc = browserMediaUrl(previewImageUrl) ?? (hasImageExtension(previewVideoUrl) ? browserMediaUrl(previewVideoUrl) : null);
+  const previewVideoLooksLikeImage = Boolean(previewVideoUrl && hasImageExtension(previewVideoUrl));
   const captionStyle = project.caption_style;
   const musicTimeline = project.music_timeline ?? { start: 0, duration: 0, trim_start: 0, trim_end: 0 };
   const musicStart = clamp(Number(musicTimeline.start) || 0, 0, timelineDuration);
@@ -675,25 +708,26 @@ export const VideoEditorWorkspace = ({
   );
   const previewAudioSources = useMemo<PreviewAudioSource[]>(() => {
     const sources: PreviewAudioSource[] = [];
-    if (previewScene?.voiceover_url && activeSceneItem && isPlayableBrowserUrl(previewScene.voiceover_url)) {
+    const voiceoverUrl = browserMediaUrl(previewScene?.voiceover_url);
+    if (voiceoverUrl && activeSceneItem) {
       sources.push({
         id: `voiceover-${previewScene.id}`,
-        url: previewScene.voiceover_url,
+        url: voiceoverUrl,
         start: activeSceneItem.start,
         trimStart: 0,
         volume: 1,
         loop: false,
       });
     }
+    const musicUrl = browserMediaUrl(project.music_url);
     if (
-      project.music_url &&
-      isPlayableBrowserUrl(project.music_url) &&
+      musicUrl &&
       playheadTime >= musicStart &&
       playheadTime <= musicStart + musicDuration
     ) {
       sources.push({
         id: "project-music",
-        url: project.music_url,
+        url: musicUrl,
         start: musicStart,
         trimStart: Number(musicTimeline.trim_start) || 0,
         volume: 0.25,
@@ -701,9 +735,11 @@ export const VideoEditorWorkspace = ({
       });
     }
     for (const layer of activeLayers.filter((item) => item.type === "audio" && isPlayableBrowserUrl(item.url))) {
+      const layerUrl = browserMediaUrl(layer.url);
+      if (!layerUrl) continue;
       sources.push({
         id: `layer-${layer.id}`,
-        url: layer.url,
+        url: layerUrl,
         start: Number(layer.start) || 0,
         trimStart: Number(layer.trim_start) || 0,
         volume: clamp(Number(layer.volume) || 0, 0, 2),
@@ -720,6 +756,11 @@ export const VideoEditorWorkspace = ({
   useEffect(() => {
     playheadTimeRef.current = playheadTime;
   }, [playheadTime]);
+
+  useEffect(() => {
+    setPreviewVideoErrorUrl(null);
+    setPreviewPlaybackError(null);
+  }, [previewVideoSrc]);
 
   useEffect(() => {
     timelineZoomRef.current = timelineZoom;
@@ -781,11 +822,14 @@ export const VideoEditorWorkspace = ({
       }
     }
     if (isPlaying) {
-      void video.play().catch(() => undefined);
+      void video.play().catch((error) => {
+        setPreviewPlaybackError(error instanceof Error ? error.message : "The browser could not start video playback.");
+        setIsPlaying(false);
+      });
     } else {
       video.pause();
     }
-  }, [activeVideoUrl, isPlaying, playheadTime, previewVideoStart, previewVideoTrimStart, previewVideoUrl, timelineDuration]);
+  }, [activeVideoUrl, isPlaying, playheadTime, previewVideoStart, previewVideoTrimStart, playablePreviewVideoSrc, timelineDuration]);
 
   useEffect(() => {
     const activeIds = new Set(previewAudioSources.map((source) => source.id));
@@ -937,10 +981,17 @@ export const VideoEditorWorkspace = ({
       return;
     }
 
+    setPreviewPlaybackError(null);
     const video = videoRef.current;
     if (video) {
       seekPreviewVideo(video, true);
-      void video.play().catch(() => undefined);
+      void video.play()
+        .then(() => setIsPlaying(true))
+        .catch((error) => {
+          setPreviewPlaybackError(error instanceof Error ? error.message : "The browser could not start video playback.");
+          setIsPlaying(false);
+        });
+      return;
     }
     setIsPlaying(true);
   };
@@ -1386,9 +1437,12 @@ export const VideoEditorWorkspace = ({
   };
 
   const mediaKindFromLibraryItem = (item: LibraryItem): TextToVideoTimelineLayer["type"] => {
-    if (isTimelineMediaType(item.type)) return item.type;
-    if (item.video_url) return "video";
-    return mediaKindFromUrl(mediaUrlFromLibraryItem(item), libraryMediaType);
+    const url = mediaUrlFromLibraryItem(item);
+    if (item.video_url && browserVideoUrl(item.video_url)) return "video";
+    if (hasImageExtension(url)) return "image";
+    if (item.type === "video" && browserVideoUrl(url)) return "video";
+    if (isTimelineMediaType(item.type) && item.type !== "video") return item.type;
+    return mediaKindFromUrl(url, libraryMediaType);
   };
 
   const replacementTargetLabel = (target: ReplaceTarget | null) => {
@@ -2152,11 +2206,11 @@ export const VideoEditorWorkspace = ({
                         : "w-full max-w-4xl aspect-video"
                   }`}
                 >
-                  {previewVideoUrl ? (
+                  {playablePreviewVideoSrc ? (
                     <video
-                      key={previewVideoUrl}
+                      key={playablePreviewVideoSrc}
                       ref={videoRef}
-                      src={previewVideoUrl}
+                      src={playablePreviewVideoSrc}
                       className="h-full w-full object-cover"
                       style={{
                         objectPosition: `${50 + (previewScene?.crop_x ?? 0) / 2}% ${50 + (previewScene?.crop_y ?? 0) / 2}%`,
@@ -2165,22 +2219,43 @@ export const VideoEditorWorkspace = ({
                       playsInline
                       muted
                       preload="auto"
+                      onLoadedData={() => setPreviewVideoErrorUrl(null)}
+                      onError={() => setPreviewVideoErrorUrl(playablePreviewVideoSrc)}
                     />
-                  ) : previewImageUrl ? (
-                    <img
-                      src={previewImageUrl}
-                      alt=""
-                      className="video-editor-image-zoom h-full w-full object-cover"
-                      style={{
-                        objectPosition: `${50 + (previewScene?.crop_x ?? 0) / 2}% ${50 + (previewScene?.crop_y ?? 0) / 2}%`,
-                        "--editor-image-scale": String(previewScene?.crop_zoom ?? 1),
-                      } as CSSProperties}
-                    />
+                  ) : previewImageSrc ? (
+                    <>
+                      <img
+                        src={previewImageSrc}
+                        alt=""
+                        className="video-editor-image-zoom h-full w-full object-cover"
+                        style={{
+                          objectPosition: `${50 + (previewScene?.crop_x ?? 0) / 2}% ${50 + (previewScene?.crop_y ?? 0) / 2}%`,
+                          "--editor-image-scale": String(previewScene?.crop_zoom ?? 1),
+                        } as CSSProperties}
+                      />
+                      {previewVideoLooksLikeImage && (
+                        <div className="pointer-events-none absolute bottom-16 left-1/2 z-30 -translate-x-1/2 rounded bg-black/65 px-3 py-1 text-xs text-amber-100">
+                          This scene has an image URL, not a playable video.
+                        </div>
+                      )}
+                    </>
+                  ) : previewVideoUrl ? (
+                    <div className="flex h-full w-full flex-col items-center justify-center px-6 text-center text-sm text-zinc-500">
+                      <Video className="mb-2 h-6 w-6 text-zinc-600" />
+                      <span>Preview media could not be loaded.</span>
+                      <span className="mt-1 max-w-full truncate text-xs text-zinc-600">{labelFromUrl(previewVideoUrl)}</span>
+                    </div>
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-sm text-zinc-500">Preview</div>
                   )}
 
                   {renderCaption()}
+
+                  {previewPlaybackError && (
+                    <div className="pointer-events-none absolute left-1/2 top-16 z-40 max-w-[85%] -translate-x-1/2 rounded border border-red-400/40 bg-red-950/80 px-3 py-2 text-center text-xs text-red-100 shadow-lg">
+                      {previewPlaybackError}
+                    </div>
+                  )}
 
                   {selectedLayer && selectedLayer.type !== "audio" && (
                     <div className="pointer-events-none absolute right-4 top-4 rounded bg-rose-500 px-2 py-1 text-xs font-semibold text-white">
@@ -2189,7 +2264,7 @@ export const VideoEditorWorkspace = ({
                   )}
                 </div>
 
-                <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded bg-black/40 px-2 py-1 backdrop-blur">
+                <div className="absolute bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded bg-black/40 px-2 py-1 backdrop-blur">
                   <Button variant="ghost" size="icon" className="h-8 w-8 text-white" onClick={() => jumpBy(-1)}>
                     <SkipBack className="h-4 w-4" />
                   </Button>
@@ -2200,7 +2275,7 @@ export const VideoEditorWorkspace = ({
                     <SkipForward className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button variant="ghost" size="icon" className="absolute bottom-4 right-4 h-9 w-9 rounded-full border border-white/10 bg-black/35 text-zinc-300 backdrop-blur hover:text-white">
+                <Button variant="ghost" size="icon" className="absolute bottom-4 right-4 z-40 h-9 w-9 rounded-full border border-white/10 bg-black/35 text-zinc-300 backdrop-blur hover:text-white">
                   <Maximize2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -2361,49 +2436,61 @@ export const VideoEditorWorkspace = ({
                           if (event.buttons === 1) scrubFromTrack(event);
                         }}
                       >
-                        {sceneTimeline.map(({ scene, start, duration }) => (
-                          <TimelineClip
-                            key={scene.id}
-                            left={start * pixelsPerSecond}
-                            width={duration * pixelsPerSecond}
-                            selected={selectedSceneId === scene.id && !selectedLayer}
-                            className="border-sky-400/40 bg-sky-500/20 text-sky-50"
-                            onPointerDown={(event) => {
-                              event.stopPropagation();
-                              selectScene(scene.id);
-                            }}
-                            onDoubleClick={(event) => openReplaceMenu(event, { kind: "scene", id: scene.id })}
-                            onDragOver={allowDrop}
-                            onDrop={(event) => void handleEditorDrop(event, { kind: "scene", id: scene.id })}
-                          >
-                            {scene.video_url ? (
-                              <video
-                                src={scene.video_url}
-                                className="absolute inset-0 h-full w-full object-cover opacity-45"
-                                muted
-                                playsInline
-                                preload="metadata"
-                              />
-                            ) : null}
-                            {scene.video_url && (
-                              <div className="absolute right-1 top-1 z-20 flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                                <Video className="h-3 w-3" />
-                                Video
+                        {sceneTimeline.map(({ scene, start, duration }) => {
+                          const sceneStripVideoSrc = browserVideoUrl(scene.video_url);
+                          const sceneStripImageSrc = browserMediaUrl(scene.image_url)
+                            ?? (hasImageExtension(scene.video_url) ? browserMediaUrl(scene.video_url) : null);
+
+                          return (
+                            <TimelineClip
+                              key={scene.id}
+                              left={start * pixelsPerSecond}
+                              width={duration * pixelsPerSecond}
+                              selected={selectedSceneId === scene.id && !selectedLayer}
+                              className="border-sky-400/40 bg-sky-500/20 text-sky-50"
+                              onPointerDown={(event) => {
+                                event.stopPropagation();
+                                selectScene(scene.id);
+                              }}
+                              onDoubleClick={(event) => openReplaceMenu(event, { kind: "scene", id: scene.id })}
+                              onDragOver={allowDrop}
+                              onDrop={(event) => void handleEditorDrop(event, { kind: "scene", id: scene.id })}
+                            >
+                              {sceneStripVideoSrc ? (
+                                <video
+                                  src={sceneStripVideoSrc}
+                                  className="absolute inset-0 h-full w-full object-cover opacity-45"
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                />
+                              ) : sceneStripImageSrc ? (
+                                <img
+                                  src={sceneStripImageSrc}
+                                  alt=""
+                                  className="absolute inset-0 h-full w-full object-cover opacity-45"
+                                />
+                              ) : null}
+                              {sceneStripVideoSrc && (
+                                <div className="absolute right-1 top-1 z-20 flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                  <Video className="h-3 w-3" />
+                                  Video
+                                </div>
+                              )}
+                              <div className="relative z-10 h-full px-2 py-1">
+                                <p className="truncate font-semibold">Scene {scene.index + 1}</p>
+                                <p className="text-[10px] text-sky-100/70">{formatSeconds(duration)}</p>
                               </div>
-                            )}
-                            <div className="relative z-10 h-full px-2 py-1">
-                              <p className="truncate font-semibold">Scene {scene.index + 1}</p>
-                              <p className="text-[10px] text-sky-100/70">{formatSeconds(duration)}</p>
-                            </div>
-                            <div
-                              className="absolute right-0 top-0 z-20 h-full w-2 cursor-ew-resize bg-white/20"
-                              onPointerDown={(event) => beginSceneResize(event, scene)}
-                              onPointerMove={handleTimelineDrag}
-                              onPointerUp={() => void finishTimelineDrag()}
-                              onPointerCancel={() => void finishTimelineDrag()}
-                            />
-                          </TimelineClip>
-                        ))}
+                              <div
+                                className="absolute right-0 top-0 z-20 h-full w-2 cursor-ew-resize bg-white/20"
+                                onPointerDown={(event) => beginSceneResize(event, scene)}
+                                onPointerMove={handleTimelineDrag}
+                                onPointerUp={() => void finishTimelineDrag()}
+                                onPointerCancel={() => void finishTimelineDrag()}
+                              />
+                            </TimelineClip>
+                          );
+                        })}
                       </div>
                     </div>
 

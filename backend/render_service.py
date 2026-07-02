@@ -8,6 +8,7 @@ import re
 import httpx
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -98,6 +99,7 @@ FORMATS = {
 }
 
 REQUIRED_BINARIES = ("ffmpeg", "ffprobe")
+IMAGE_MEDIA_RE = re.compile(r"\.(?:jpe?g|png|webp|gif)(?:[?#].*)?$", re.IGNORECASE)
 
 # Speaker color palette (for multi-speaker support)
 SPEAKER_COLORS = {
@@ -111,6 +113,10 @@ SPEAKER_COLORS = {
 
 def _ffmpeg_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'").replace(",", r"\,")
+
+
+def _looks_like_image_media_url(value: Optional[str]) -> bool:
+    return bool(value and IMAGE_MEDIA_RE.search(str(value).strip()))
 
 
 def render_dependencies() -> Dict[str, Any]:
@@ -129,14 +135,42 @@ async def _download(url: str, dest: Path) -> Path:
     return dest
 
 
-def _music_source_paths(project: Dict[str, Any], work: Path) -> List[Path]:
+def _storage_path_from_http_url(url: str) -> Optional[Path]:
+    try:
+        path = urlparse(url).path
+    except Exception:
+        return None
+    if not path:
+        return None
+    return _resolve_storage_path(path)
+
+
+async def _source_path_from_url(url: str, work: Path, name: str, default_ext: str = ".bin") -> Optional[Path]:
+    if not url:
+        return None
+    raw = str(url).strip()
+    if raw.startswith(("http://", "https://")):
+        local = _storage_path_from_http_url(raw)
+        if local and local.exists():
+            return local
+        ext = Path(raw.split("?")[0]).suffix or default_ext
+        dest = work / f"{name}{ext}"
+        try:
+            return await _download(raw, dest)
+        except Exception:
+            return None
+    resolved = _resolve_storage_path(raw)
+    return resolved if resolved and resolved.exists() else None
+
+
+async def _music_source_paths(project: Dict[str, Any], work: Path) -> List[Path]:
     tracks = []
     primary = project.get("music_url")
     extra = project.get("music_tracks") or []
-    for url in [primary, *extra]:
+    for idx, url in enumerate([primary, *extra]):
         if not url:
             continue
-        resolved = _resolve_storage_path(url)
+        resolved = await _source_path_from_url(str(url), work, f"music_source_{idx}", ".mp3")
         if resolved and resolved.exists():
             tracks.append(resolved)
     return tracks
@@ -146,15 +180,7 @@ async def _layer_source_path(layer: Dict[str, Any], work: Path, idx: int) -> Opt
     url = layer.get("url")
     if not url:
         return None
-    if str(url).startswith(("http://", "https://")):
-        ext = Path(str(url).split("?")[0]).suffix or ".bin"
-        dest = work / f"layer_{idx}{ext}"
-        try:
-            return await _download(str(url), dest)
-        except Exception:
-            return None
-    resolved = _resolve_storage_path(str(url))
-    return resolved if resolved and resolved.exists() else None
+    return await _source_path_from_url(str(url), work, f"layer_{idx}")
 
 
 def _resolve_storage_path(url: Optional[str]) -> Optional[Path]:
@@ -206,6 +232,14 @@ async def _has_audio_stream(path: Path) -> bool:
     return code == 0 and "audio" in output
 
 
+async def _has_video_stream(path: Path) -> bool:
+    code, output = await _run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=codec_type", "-of", "default=nw=1:nk=1", str(path),
+    ])
+    return code == 0 and "video" in output
+
+
 async def render_project(
     project: Dict[str, Any],
     *,
@@ -235,23 +269,20 @@ async def render_project(
     total = len(scenes) or 1
     for i, sc in enumerate(scenes):
         upload_url = sc.get("video_url")  # generated or uploaded user clip (mp4)
-        voice_path = _resolve_storage_path(sc.get("voiceover_url"))
+        voice_url = sc.get("voiceover_url")
+        voice_path = None
+        if voice_url:
+            voice_path = await _source_path_from_url(str(voice_url), work, f"voice_{i}", ".mp3")
         duration = float(sc.get("duration") or 3.0)
 
         media_path = work / f"scene_{i}"
         is_video = False
-        if upload_url:
+        if upload_url and not _looks_like_image_media_url(upload_url):
             try:
-                v = work / f"scene_{i}.mp4"
-                if upload_url.startswith("http"):
-                    await _download(upload_url, v)
-                else:
-                    # Local stored upload
-                    src = STORAGE_DIR / upload_url.lstrip("/").replace("api/storage/", "")
-                    if src.exists():
-                        shutil.copy(src, v)
-                media_path = v
-                is_video = v.exists()
+                src = await _source_path_from_url(str(upload_url), work, f"scene_{i}", ".mp4")
+                if src and src.exists() and await _has_video_stream(src):
+                    media_path = src
+                    is_video = True
             except Exception:
                 is_video = False
         if not is_video:
@@ -265,14 +296,20 @@ async def render_project(
         if not is_video:
             raise RuntimeError(f"Scene {i + 1} has no playable video source")
 
-        # Build filter chain: scale/crop -> animation -> effects -> captions (ASS subtitles)
+        # Build filter chain: scale/crop -> animation -> effects -> captions (ASS subtitles).
+        # Scene generation uses real video sources. Keep video sources as moving video:
+        # image-style zoompan freezes/repeats frames and makes videos look like still images.
         animation = sc.get("animation", "ken_burns_in")
         effects = sc.get("effects") or []
         captions = sc.get("captions", [])
 
-        base_vf = f"scale={W*2}:{H*2}:force_original_aspect_ratio=increase,crop={W*2}:{H*2}"
+        if is_video:
+            base_vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
+            anim_vf = _video_motion_filter(animation, duration, W, H, fps)
+        else:
+            base_vf = f"scale={W*2}:{H*2}:force_original_aspect_ratio=increase,crop={W*2}:{H*2}"
+            anim_vf = _ken_burns_filter(animation, duration, W, H, fps)
         crop_vf = _scene_crop_filter(sc, W, H)
-        anim_vf = _ken_burns_filter(animation, duration, W, H, fps)
         fx_vf = _effects_filter(effects, duration, fps)
 
         # Write ASS subtitle file for this scene; use libass for karaoke captions
@@ -303,21 +340,26 @@ async def render_project(
         else:
             cmd += ["-loop", "1", "-t", f"{duration:.2f}", "-i", str(media_path)]
 
-        has_audio = bool(voice_path) and Path(voice_path).exists()
+        has_audio = bool(voice_path) and Path(voice_path).exists() and await _has_audio_stream(Path(voice_path))
         if has_audio:
             cmd += ["-i", str(voice_path)]
+        else:
+            cmd += [
+                "-f", "lavfi",
+                "-t", f"{duration:.2f}",
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+            ]
 
         cmd += [
+            "-map", "0:v:0",
+            "-map", "1:a:0",
             "-vf", vf,
             "-t", f"{duration:.2f}",
             "-r", str(fps),
             "-pix_fmt", "yuv420p",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-c:a", "aac", "-b:a", "192k",
         ]
-        if has_audio:
-            cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
-        else:
-            cmd += ["-an"]
         cmd += [str(out_seg)]
 
         code, log = await _run(cmd)
@@ -332,6 +374,7 @@ async def render_project(
     concat_mp4 = work / "concat.mp4"
     code, log = await _run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+        "-map", "0:v:0", "-map", "0:a:0",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
         "-c:a", "aac", "-b:a", "192k", "-r", str(fps),
         str(concat_mp4),
@@ -340,9 +383,31 @@ async def render_project(
         raise RuntimeError(f"Concat failed: {log[-1500:]}")
     await report(82, f"Concatenated {total} scenes")
 
+    scene_ranges = []
+    cursor = 0.0
+    for sc in scenes:
+        duration = max(0.0, float(sc.get("duration") or 0.0))
+        scene_ranges.append((sc, cursor, duration))
+        cursor += duration
+
+    def is_generated_scene_base_layer(layer: Dict[str, Any]) -> bool:
+        if layer.get("type") != "video":
+            return False
+        layer_start = float(layer.get("start") or 0.0)
+        layer_duration = float(layer.get("duration") or 0.0)
+        layer_url = str(layer.get("url") or "").strip()
+        for sc, start, duration in scene_ranges:
+            same_time = abs(layer_start - start) < 0.15 and abs(layer_duration - duration) < 0.25
+            same_track = int(layer.get("track") or 0) == int(sc.get("index") or 0)
+            same_url = layer_url and layer_url == str(sc.get("video_url") or "").strip()
+            poster_video_layer = same_track and _looks_like_image_media_url(layer_url)
+            if same_time and (same_url or poster_video_layer):
+                return True
+        return False
+
     visual_layers = [
         layer for layer in (project.get("timeline_layers") or [])
-        if layer.get("type") in {"image", "video"} and layer.get("url")
+        if layer.get("type") in {"image", "video"} and layer.get("url") and not is_generated_scene_base_layer(layer)
     ]
     if visual_layers:
         await report(84, "Compositing timeline layers")
@@ -365,6 +430,8 @@ async def render_project(
                     f"crop={W}:{H},format=rgba,colorchannelmixer=aa={opacity}[ov{idx}]"
                 )
             else:
+                if _looks_like_image_media_url(str(layer.get("url") or "")) or not await _has_video_stream(src):
+                    continue
                 ffmpeg_cmd += ["-stream_loop", "-1", "-t", f"{duration:.3f}", "-i", str(src)]
                 trim_start = max(0.0, float(layer.get("trim_start") or 0))
                 filter_parts.append(
@@ -395,7 +462,7 @@ async def render_project(
                 raise RuntimeError(f"Timeline layer compositing failed: {log[-1500:]}")
 
     # Add timeline audio and background music under scene voiceover when present
-    music_tracks = _music_source_paths(project, work)
+    music_tracks = await _music_source_paths(project, work)
     audio_layers = [
         layer for layer in (project.get("timeline_layers") or [])
         if layer.get("type") == "audio" and layer.get("url")
@@ -476,7 +543,7 @@ async def render_project(
             str(final_path),
         ])
     else:
-        cmd_final = ["ffmpeg", "-y", "-i", str(concat_mp4), "-c:v", vcodec, "-r", str(fps)] + extra
+        cmd_final = ["ffmpeg", "-y", "-i", str(concat_mp4), "-map", "0:v:0", "-map", "0:a?", "-c:v", vcodec, "-r", str(fps)] + extra
         if acodec:
             cmd_final += ["-c:a", acodec, "-b:a", "192k"]
         else:
@@ -515,6 +582,11 @@ def _ken_burns_filter(animation: str, duration: float, w: int, h: int, fps: int)
     return f"zoompan=z='min(zoom+0.0015\\,1.25)':d={frames}:s={w}x{h}:fps={fps}"
 
 
+def _video_motion_filter(animation: str, duration: float, w: int, h: int, fps: int) -> str:
+    """Preserve source video motion; avoid image-only zoompan on real videos."""
+    return "setsar=1"
+
+
 def _effects_filter(effects: List[str], duration: float, fps: int) -> Optional[str]:
     """Map effect names to ffmpeg filters. Multiple effects chained."""
     if not effects:
@@ -524,7 +596,8 @@ def _effects_filter(effects: List[str], duration: float, fps: int) -> Optional[s
         if fx == "shake":
             parts.append("crop=in_w-20:in_h-20:'10+5*sin(2*PI*t*3)':'10+5*cos(2*PI*t*3)'")
         elif fx == "rgb_split":
-            parts.append("split=3[a][b][c];[a]lutrgb=g=0:b=0[ar];[b]lutrgb=r=0:b=0[ag];[c]lutrgb=r=0:g=0[ab];[ar][ag]blend=all_mode=screen[ag1];[ag1][ab]blend=all_mode=screen")
+            # Keep this as a simple-chain filter. A split/blend graph here breaks when used via -vf.
+            parts.append("eq=saturation=1.35:contrast=1.08,hue=h='sin(t*6)*8'")
         elif fx == "glitch":
             parts.append("noise=alls=20:allf=t,hue=h='if(mod(t\\,0.3)\\,sin(t*20)*30\\,0)'")
         elif fx == "blur_reveal":
